@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>摹文拟笔工作台</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230f766e'/%3E%3Cpath d='M18 16h22l8 8v24H18z' fill='%23ffffff'/%3E%3Cpath d='M40 16v10h10' fill='none' stroke='%230f766e' stroke-width='4'/%3E%3C/svg%3E" />
+    <script>
+      (() => {
+        const savedTheme = localStorage.getItem("school-doc-manager:theme");
+        const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+        document.documentElement.dataset.theme = savedTheme || systemTheme;
+      })();
+    </script>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./build/bundle.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">文</span>
+          <div>
+            <strong>摹文拟笔工作台</strong>
+            <span id="storageLabel">本机文档库</span>
+          </div>
+        </div>
+        <div class="topbar-actions" role="toolbar" aria-label="全局操作">
+          <button class="theme-toggle" id="themeToggle" type="button" title="切换主题" aria-label="切换主题">
+            <i data-lucide="sun" class="theme-icon-light"></i>
+            <i data-lucide="moon" class="theme-icon-dark"></i>
+          </button>
+          <button class="icon-button primary" id="newDocBtn" type="button" title="新建文档">
+            <i data-lucide="file-plus-2"></i>
+            <span>新建</span>
+          </button>
+          <label class="icon-button" title="导入文档">
+            <i data-lucide="upload"></i>
+            <span>导入</span>
+            <input id="importInput" type="file" accept=".txt,.md,.text,.csv" multiple hidden />
+          </label>
+          <button class="icon-button" id="exportDocBtn" type="button" title="导出当前文档">
+            <i data-lucide="download"></i>
+            <span>导出</span>
+          </button>
+          <button class="icon-button" id="backupBtn" type="button" title="导出文档库备份">
+            <i data-lucide="archive"></i>
+            <span>备份</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar" aria-label="文档管理">
+          <section class="panel section-folders">
+            <div class="panel-heading">
+              <h2>文件夹 / 标签</h2>
+              <div class="panel-actions">
+                <button class="ghost-icon" id="linkFolderBtn" type="button" title="关联真实文件夹">
+                  <i data-lucide="folder-input"></i>
+                </button>
+                <button class="ghost-icon" id="addFolderBtn" type="button" title="新建标签">
+                  <i data-lucide="tag"></i>
+                </button>
+              </div>
+            </div>
+            <div class="inline-create" id="folderCreateBox" hidden>
+              <input id="folderNameInput" type="text" placeholder="标签名称" />
+              <button id="confirmFolderBtn" type="button">添加标签</button>
+            </div>
+            <div class="folder-list" id="folderList"></div>
+          </section>
+
+          <section class="panel section-docs">
+            <div class="panel-heading">
+              <h2>文档</h2>
+              <span id="docCount">0</span>
+            </div>
+            <label class="search-box">
+              <i data-lucide="search"></i>
+              <input id="searchInput" type="search" placeholder="搜索标题或正文" />
+            </label>
+            <div class="drop-zone compact" id="docDropZone">
+              <i data-lucide="file-up"></i>
+              <span>拖入文档到这里</span>
+            </div>
+            <div class="doc-list" id="docList"></div>
+          </section>
+        </aside>
+
+        <section class="editor-panel" aria-label="文档编辑">
+          <div class="editor-meta">
+            <div class="meta-grid">
+              <label>
+                <span>类型</span>
+                <select id="typeSelect"></select>
+              </label>
+              <label>
+                <span>文件夹/标签</span>
+                <select id="folderSelect"></select>
+              </label>
+              <label>
+                <span>默认执笔人</span>
+                <select id="styleSelect"></select>
+              </label>
+            </div>
+          </div>
+
+          <div class="save-strip" role="toolbar" aria-label="保存与查找">
+            <button id="saveDocBtn" class="save-button" type="button" title="保存当前文档">
+              <i data-lucide="save"></i>
+              <span>保存当前文档</span>
+            </button>
+            <span class="save-state" id="saveState">已保存</span>
+            <button id="replaceToggleBtn" class="icon-button compact" type="button" aria-expanded="false" aria-controls="replaceBar">
+              <i data-lucide="replace"></i>
+              <span>查找替换</span>
+            </button>
+          </div>
+
+          <div class="replace-bar collapsed" id="replaceBar" hidden>
+            <label>
+              <span>查找</span>
+              <input id="findInput" type="text" />
+            </label>
+            <label>
+              <span>替换为</span>
+              <input id="replaceInput" type="text" />
+            </label>
+            <button id="replaceNextBtn" type="button">替换一个</button>
+            <button id="replaceAllBtn" type="button">全部替换</button>
+          </div>
+
+          <input id="titleInput" class="title-input" type="text" placeholder="文档标题" />
+          <textarea id="contentEditor" spellcheck="false" placeholder="在这里撰写、导入或生成正式文档。"></textarea>
+          <div class="editor-menu" id="editorMenu" hidden>
+            <button type="button" data-editor-action="copy"><i data-lucide="copy"></i><span>复制选中内容</span></button>
+            <button type="button" data-editor-action="delete"><i data-lucide="scissors"></i><span>删除选中内容</span></button>
+            <button type="button" data-editor-action="rewrite"><i data-lucide="wand-sparkles"></i><span>段落 AI 重写</span></button>
+            <button type="button" data-editor-action="format"><i data-lucide="pilcrow"></i><span>整理全文格式</span></button>
+            <div class="menu-skill-row">
+              <select id="editorSkillSelect" aria-label="选择执笔人"></select>
+              <button type="button" data-editor-action="insert-skill"><i data-lucide="at-sign"></i><span>插入</span></button>
+            </div>
+          </div>
+        </section>
+
+        <aside class="inspector" aria-label="AI 与执笔人">
+          <div class="tabs" role="tablist" aria-label="右侧功能">
+            <button class="tab active" data-tab="generate" type="button" role="tab" aria-controls="generatePanel" aria-selected="true">生成</button>
+            <button class="tab" data-tab="style" type="button" role="tab" aria-controls="stylePanel" aria-selected="false">执笔人</button>
+            <button class="tab" data-tab="api" type="button" role="tab" aria-controls="apiPanel" aria-selected="false">接口</button>
+          </div>
+
+          <section class="tab-panel active" id="generatePanel">
+            <div class="panel-heading">
+              <h2>AI 起草</h2>
+              <span id="aiStatus" class="status-pill">未配置</span>
+            </div>
+            <label class="wide-field prompt-window">
+              <span>提示词</span>
+              <textarea id="generatePrompt" rows="18" placeholder="把要写的内容直接写在这里。输入 @ 调用执笔人，例如：&#10;&#10;@通知写作 请起草一份关于专项培训安排的通知。&#10;对象：相关部门负责人和参与人员。&#10;要点：时间、地点、安排、准备事项、反馈方式。&#10;语气：正式、清楚、便于执行。"></textarea>
+            </label>
+            <div class="mention-panel" id="skillMentionPanel" hidden></div>
+            <div class="two-actions">
+              <button id="generateDocBtn" class="primary-action" type="button">
+                <i data-lucide="sparkles"></i>
+                生成新文档
+              </button>
+              <button id="insertDraftBtn" type="button">插入到当前</button>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="stylePanel">
+            <div class="panel-heading">
+              <h2>执笔人工作台</h2>
+              <div class="panel-actions">
+                <button class="ghost-icon" id="newStyleBtn" type="button" title="新建执笔人">
+                  <i data-lucide="plus"></i>
+                </button>
+              </div>
+            </div>
+            <label>
+              <span>执笔人名称</span>
+              <input id="styleNameInput" type="text" placeholder="例如：通知写作、会议纪要、请示报告" />
+            </label>
+            <div class="skill-meta-grid">
+              <label>
+                <span>@ 调用名</span>
+                <input id="skillHandleInput" type="text" placeholder="@通知写作" />
+              </label>
+              <label>
+                <span>分类</span>
+                <select id="skillCategorySelect">
+                  <option value="公文写作">公文写作</option>
+                  <option value="文风格式">文风格式</option>
+                  <option value="材料整理">材料整理</option>
+                  <option value="段落改写">段落改写</option>
+                  <option value="自定义">自定义</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              <span>一句话能力</span>
+              <input id="skillDescriptionInput" type="text" placeholder="例如：生成正式、清楚、适合组织内部发布的通知" />
+            </label>
+            <label class="inline-check">
+              <input id="skillEnabledInput" type="checkbox" />
+              <span>启用执笔人（用于 @ 调用和文档生成）</span>
+            </label>
+            <label class="file-chip" id="styleDropZone">
+              <i data-lucide="paperclip"></i>
+              <span>添加或拖入示范文件</span>
+              <input id="styleFileInput" type="file" accept=".txt,.md,.text" multiple hidden />
+            </label>
+            <button id="summarizeStyleBtn" class="primary-action" type="button">
+              <i data-lucide="scan-text"></i>
+              AI 总结/更新执笔人
+            </button>
+            <div class="two-actions">
+              <button id="saveStyleBtn" type="button">保存执笔人</button>
+              <button id="deleteStyleBtn" class="danger-text" type="button">删除执笔人</button>
+            </div>
+            <div class="style-list" id="styleList"></div>
+            <div class="skill-detail-menu" id="skillDetailMenu" hidden>
+              <div class="detail-heading">
+                <div>
+                  <strong id="skillDetailTitle">执笔人详情</strong>
+                  <span id="skillDetailMeta">@执笔人</span>
+                </div>
+                <button class="ghost-icon" id="skillDetailCloseBtn" type="button" title="关闭详情">
+                  <i data-lucide="x"></i>
+                </button>
+              </div>
+              <div class="detail-tabs" role="tablist" aria-label="执笔人详情">
+                <button class="detail-tab active" data-detail-tab="training" type="button">训练文本</button>
+                <button class="detail-tab" data-detail-tab="workflow" type="button">生成流程</button>
+                <button class="detail-tab" data-detail-tab="markdown" type="button">说明</button>
+                <button class="detail-tab" data-detail-tab="json" type="button">JSON</button>
+                <button class="detail-tab" data-detail-tab="versions" type="button">版本</button>
+                <button class="detail-tab" data-detail-tab="test" type="button">测试</button>
+              </div>
+              <section class="detail-panel active" id="trainingDetailPanel">
+                <div class="example-list" id="styleExampleList"></div>
+              </section>
+              <section class="detail-panel" id="workflowDetailPanel">
+                <label class="wide-field">
+                  <span>单篇文档解析</span>
+                  <textarea id="skillAnalysisInput" rows="8" placeholder="每篇示范文档的结构、文风、句式、变量槽位与禁止复用内容会写入这里。"></textarea>
+                </label>
+                <label class="wide-field">
+                  <span>多篇文档聚合</span>
+                  <textarea id="skillAggregationInput" rows="7" placeholder="共同规则、差异点、冲突点、必须遵守规则与推荐规则会写入这里。"></textarea>
+                </label>
+                <label class="wide-field">
+                  <span>质量控制</span>
+                  <pre class="quality-report" id="skillQualityReport">尚未生成质量报告</pre>
+                </label>
+              </section>
+              <section class="detail-panel" id="markdownDetailPanel">
+                <label class="wide-field">
+                  <span>执笔人说明.md</span>
+                  <textarea id="styleSummaryInput" rows="9" placeholder="给使用者阅读和修改的执笔人说明，AI 总结后会写入这里。"></textarea>
+                </label>
+                <button id="exportSkillMdBtn" type="button">导出说明.md</button>
+              </section>
+              <section class="detail-panel" id="jsonDetailPanel">
+                <label class="wide-field">
+                  <span>执笔人规则 JSON</span>
+                  <textarea id="skillJsonInput" rows="10" spellcheck="false" placeholder="给程序调用的结构化执笔人规则。"></textarea>
+                </label>
+                <button id="exportSkillJsonBtn" type="button">导出规则 JSON</button>
+              </section>
+              <section class="detail-panel" id="versionsDetailPanel">
+                <div class="version-list" id="skillVersionList"></div>
+                <pre class="version-diff" id="skillVersionDiff"></pre>
+              </section>
+              <section class="detail-panel" id="testDetailPanel">
+                <label class="wide-field">
+                  <span>测试输入</span>
+                  <textarea id="skillTestPrompt" rows="4" placeholder="输入一个真实起草任务，用当前执笔人规则生成测试文档。"></textarea>
+                </label>
+                <button id="runSkillTestBtn" type="button">生成测试文档并自检</button>
+                <label class="wide-field">
+                  <span>测试文档</span>
+                  <textarea id="skillTestResult" rows="8" readonly></textarea>
+                </label>
+                <label class="wide-field">
+                  <span>自动检查</span>
+                  <textarea id="skillTestReport" rows="5" readonly></textarea>
+                </label>
+                <label class="wide-field">
+                  <span>反馈与持续优化</span>
+                  <textarea id="skillFeedbackInput" rows="4" placeholder="记录本次测试或日常使用中的问题，下一次更新执笔人时会纳入。"></textarea>
+                </label>
+                <button id="saveSkillFeedbackBtn" type="button">保存反馈</button>
+              </section>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="apiPanel">
+            <div class="panel-heading">
+              <h2>AI 接口</h2>
+              <span id="apiSavedLabel">本机保存</span>
+            </div>
+            <label>
+              <span>接口类型</span>
+              <select id="providerSelect">
+                <option value="openai-compatible">OpenAI Compatible</option>
+                <option value="custom">自定义 Chat 接口</option>
+              </select>
+            </label>
+            <label>
+              <span>Base URL</span>
+              <input id="baseUrlInput" type="url" placeholder="https://api.openai.com/v1" />
+            </label>
+            <label>
+              <span>Endpoint Path</span>
+              <input id="endpointPathInput" type="text" placeholder="/chat/completions" />
+            </label>
+            <label>
+              <span>模型</span>
+              <input id="modelInput" type="text" placeholder="gpt-4.1-mini" />
+            </label>
+            <label>
+              <span>API Key</span>
+              <input id="apiKeyInput" type="password" autocomplete="off" placeholder="仅保存在本机浏览器" />
+            </label>
+            <label class="wide-field">
+              <span>系统提示词</span>
+              <textarea id="systemPromptInput" rows="6"></textarea>
+            </label>
+            <div class="two-actions">
+              <button id="saveApiBtn" class="primary-action" type="button">
+                <i data-lucide="plug-zap"></i>
+                保存接口
+              </button>
+              <button id="testApiBtn" type="button">测试</button>
+            </div>
+            <button id="clearApiBtn" class="danger-text" type="button">清除接口配置</button>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>
