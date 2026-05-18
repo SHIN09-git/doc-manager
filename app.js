@@ -63,7 +63,12 @@ const ui = {
   mentionTarget: null,
   mentionRange: null,
   saveTimer: null,
+  saveStatusTimer: null,
   searchTimer: null,
+  editorUndoStack: [],
+  editorUndoInputActive: false,
+  editorUndoInputTimer: null,
+  editorUndoLocked: false,
   persistPromise: Promise.resolve(),
   progressElement: null,
   generatedDraft: "",
@@ -74,6 +79,7 @@ const ui = {
 const els = {};
 const WORKSPACE_LAYOUT_KEY = "mowen-nibi-workbench:workspace-layout";
 const DEFAULT_WORKSPACE_LAYOUT = { sidebar: 284, inspector: 360 };
+const EDITOR_UNDO_LIMIT = 80;
 const aiClient = createAiClient({
   getSettings: () => state.settings || {},
   notify: (message, tone) => toast(message, tone),
@@ -170,6 +176,7 @@ const documentEditor = createDocumentEditor({
   persist,
   eventBus,
   syncDocumentToRealFolder,
+  showSaveStatus,
   toast,
 });
 const documentManager = createDocumentManager({
@@ -246,14 +253,20 @@ function bindElements() {
     "docList",
     "titleInput",
     "typeSelect",
+    "customTypeActions",
+    "addTypeBtn",
+    "renameTypeBtn",
+    "deleteTypeBtn",
     "folderSelect",
     "styleSelect",
     "saveDocBtn",
+    "undoEditBtn",
     "saveState",
     "replaceToggleBtn",
     "replaceBar",
     "findInput",
     "replaceInput",
+    "findNextBtn",
     "replaceNextBtn",
     "replaceAllBtn",
     "contentEditor",
@@ -264,6 +277,7 @@ function bindElements() {
     "generatePrompt",
     "skillMentionPanel",
     "generateDocBtn",
+    "overwriteDraftBtn",
     "insertDraftBtn",
     "pptPanel",
     "pptTitleInput",
@@ -343,6 +357,9 @@ function initializeMissingData() {
     ];
   }
   state.folders = state.folders.map((folder) => normalizeFolder(folder));
+  state.customTypes = Array.isArray(state.customTypes)
+    ? state.customTypes.map((type) => normalizeCustomType(type)).filter(Boolean)
+    : [];
 
   if (!Array.isArray(state.styles) || state.styles.length === 0) {
     state.styles = [
@@ -488,13 +505,27 @@ function bindEvents() {
     els.titleInput.addEventListener(eventName, queueEditorSave);
     els.contentEditor.addEventListener(eventName, queueEditorSave);
   });
-  els.typeSelect.addEventListener("change", queueEditorSave);
+  els.contentEditor.addEventListener("beforeinput", queueEditorUndoSnapshot);
+  els.typeSelect.addEventListener("change", () => {
+    updateTypeControlState();
+    queueEditorSave();
+  });
+  els.addTypeBtn.addEventListener("click", addCustomType);
+  els.renameTypeBtn.addEventListener("click", renameCustomType);
+  els.deleteTypeBtn.addEventListener("click", deleteCustomType);
   els.folderSelect.addEventListener("change", queueEditorSave);
   els.styleSelect.addEventListener("change", queueEditorSave);
   els.saveDocBtn.addEventListener("click", () => saveEditor(true));
+  els.undoEditBtn.addEventListener("click", undoEditorChange);
   els.replaceToggleBtn.addEventListener("click", toggleReplaceBar);
+  els.findNextBtn.addEventListener("click", findNext);
   els.replaceNextBtn.addEventListener("click", replaceNext);
   els.replaceAllBtn.addEventListener("click", replaceAll);
+  els.findInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    findNext();
+  });
   els.contentEditor.addEventListener("contextmenu", showEditorMenu);
   els.editorMenu.addEventListener("click", handleEditorMenuAction);
   document.addEventListener("click", (event) => {
@@ -528,8 +559,9 @@ function bindEvents() {
     if (button) switchTab(button.dataset.tab);
   });
 
-  els.generateDocBtn.addEventListener("click", () => generateDocument(false));
-  els.insertDraftBtn.addEventListener("click", () => generateDocument(true));
+  els.generateDocBtn.addEventListener("click", () => generateDocument("new"));
+  els.overwriteDraftBtn.addEventListener("click", () => generateDocument("overwrite"));
+  els.insertDraftBtn.addEventListener("click", () => generateDocument("insert"));
   setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
   setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
   setupFileDrop(els.pptPanel, importPptPromptFiles);
@@ -808,9 +840,48 @@ async function importFilesFromGlobalDrop(files) {
 }
 
 function hydrateStaticSelects() {
-  const options = DOCUMENT_TYPES.map((type) => `<option value="${type.id}">${type.name}</option>`).join("");
-  els.typeSelect.innerHTML = options;
+  renderTypeSelect();
   hydratePptStyleSelect();
+}
+
+function getDocumentTypes() {
+  return [...DOCUMENT_TYPES, ...(Array.isArray(state.customTypes) ? state.customTypes : [])];
+}
+
+function renderTypeSelect(selectedValue = els.typeSelect?.value || getCurrentDoc()?.type || "notice") {
+  if (!els.typeSelect) return;
+  const builtInOptions = DOCUMENT_TYPES.map(
+    (type) => `<option value="${escapeHtml(type.id)}">${escapeHtml(type.name)}</option>`,
+  ).join("");
+  const customTypes = Array.isArray(state.customTypes) ? state.customTypes : [];
+  const customOptions = customTypes
+    .map((type) => `<option value="${escapeHtml(type.id)}">${escapeHtml(type.name)}</option>`)
+    .join("");
+
+  els.typeSelect.innerHTML = [
+    `<optgroup label="内置类型">${builtInOptions}</optgroup>`,
+    customOptions ? `<optgroup label="自定义类型">${customOptions}</optgroup>` : "",
+  ].join("");
+
+  const nextValue = getDocumentTypes().some((type) => type.id === selectedValue) ? selectedValue : "custom";
+  els.typeSelect.value = nextValue;
+  updateTypeControlState();
+}
+
+function updateTypeControlState() {
+  if (!els.typeSelect || !els.customTypeActions) return;
+  const typeId = els.typeSelect.value;
+  const isActualCustomType = isCustomDocumentType(typeId);
+  const showCustomActions = typeId === "custom" || isActualCustomType;
+  els.customTypeActions.hidden = !showCustomActions;
+  if (els.renameTypeBtn) {
+    els.renameTypeBtn.disabled = !isActualCustomType;
+    els.renameTypeBtn.title = isActualCustomType ? "重命名自定义类型" : "先添加或选择一个自定义类型";
+  }
+  if (els.deleteTypeBtn) {
+    els.deleteTypeBtn.disabled = !isActualCustomType;
+    els.deleteTypeBtn.title = isActualCustomType ? "删除自定义类型" : "先添加或选择一个自定义类型";
+  }
 }
 
 function hydratePptStyleSelect() {
@@ -837,6 +908,7 @@ function render() {
   renderFolderSelect();
   renderStyleSelect();
   renderDocList();
+  renderTypeSelect();
   renderEditor();
   renderApiSettings();
   renderStyleEditor();
@@ -867,6 +939,9 @@ function renderDocList() {
 
 function renderEditor() {
   documentRenderer.renderEditor();
+  resetEditorUndoHistory();
+  hideSaveStatus();
+  updateTypeControlState();
 }
 
 function renderApiSettings() {
@@ -940,6 +1015,96 @@ function saveEditor(showToast) {
   return documentEditor.saveEditor(showToast);
 }
 
+function showSaveStatus(message, options = {}) {
+  if (!els.saveState) return;
+  window.clearTimeout(ui.saveStatusTimer);
+  els.saveState.textContent = message || "";
+  if (options.title) els.saveState.title = options.title;
+  els.saveState.classList.toggle("visible", Boolean(message));
+  if (options.transient) {
+    ui.saveStatusTimer = window.setTimeout(hideSaveStatus, options.duration || 1800);
+  }
+}
+
+function hideSaveStatus() {
+  if (!els.saveState) return;
+  window.clearTimeout(ui.saveStatusTimer);
+  els.saveState.classList.remove("visible");
+}
+
+function resetEditorUndoHistory() {
+  window.clearTimeout(ui.editorUndoInputTimer);
+  ui.editorUndoStack = [];
+  ui.editorUndoInputActive = false;
+  updateUndoButtonState();
+}
+
+function queueEditorUndoSnapshot() {
+  if (ui.editorUndoLocked) return;
+  if (!ui.editorUndoInputActive) {
+    pushEditorUndoSnapshot(createEditorUndoSnapshot());
+    ui.editorUndoInputActive = true;
+  }
+  window.clearTimeout(ui.editorUndoInputTimer);
+  ui.editorUndoInputTimer = window.setTimeout(() => {
+    ui.editorUndoInputActive = false;
+  }, 900);
+}
+
+function createEditorUndoSnapshot() {
+  const editor = els.contentEditor;
+  return {
+    value: editor.value,
+    selectionStart: editor.selectionStart || 0,
+    selectionEnd: editor.selectionEnd || editor.selectionStart || 0,
+    scrollTop: editor.scrollTop || 0,
+  };
+}
+
+function pushEditorUndoSnapshot(snapshot = createEditorUndoSnapshot()) {
+  const previous = ui.editorUndoStack[ui.editorUndoStack.length - 1];
+  if (previous?.value === snapshot.value) return;
+  ui.editorUndoStack.push(snapshot);
+  if (ui.editorUndoStack.length > EDITOR_UNDO_LIMIT) {
+    ui.editorUndoStack.splice(0, ui.editorUndoStack.length - EDITOR_UNDO_LIMIT);
+  }
+  updateUndoButtonState();
+}
+
+function recordEditorUndoPoint() {
+  if (ui.editorUndoLocked) return;
+  window.clearTimeout(ui.editorUndoInputTimer);
+  ui.editorUndoInputActive = false;
+  pushEditorUndoSnapshot(createEditorUndoSnapshot());
+}
+
+function undoEditorChange() {
+  const snapshot = ui.editorUndoStack.pop();
+  if (!snapshot) {
+    toast("没有可撤销的正文编辑", "warn");
+    updateUndoButtonState();
+    return;
+  }
+  ui.editorUndoLocked = true;
+  els.contentEditor.value = snapshot.value;
+  els.contentEditor.focus();
+  const start = Math.min(snapshot.selectionStart, snapshot.value.length);
+  const end = Math.min(snapshot.selectionEnd, snapshot.value.length);
+  els.contentEditor.setSelectionRange(start, end);
+  els.contentEditor.scrollTop = snapshot.scrollTop;
+  window.clearTimeout(ui.saveTimer);
+  saveEditor(false);
+  showSaveStatus("已撤销", { transient: true });
+  ui.editorUndoLocked = false;
+  updateUndoButtonState();
+}
+
+function updateUndoButtonState() {
+  if (!els.undoEditBtn) return;
+  els.undoEditBtn.disabled = ui.editorUndoStack.length === 0;
+  els.undoEditBtn.title = ui.editorUndoStack.length === 0 ? "暂无可撤销的正文编辑" : "撤销正文编辑";
+}
+
 function formatCurrentDocument() {
   const editor = els.contentEditor;
   const formatted = editor.value
@@ -949,6 +1114,11 @@ function formatCurrentDocument() {
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+  if (formatted === editor.value) {
+    toast("当前格式已经比较规整");
+    return;
+  }
+  recordEditorUndoPoint();
   editor.value = formatted;
   saveEditor(true);
 }
@@ -1034,6 +1204,7 @@ function deleteEditorText() {
     return;
   }
   const content = els.contentEditor.value;
+  recordEditorUndoPoint();
   els.contentEditor.value = content.slice(0, selection.start) + content.slice(selection.end);
   els.contentEditor.focus();
   els.contentEditor.setSelectionRange(selection.start, selection.start);
@@ -1051,6 +1222,7 @@ function insertSkillIntoEditor(skillId) {
     toast(`@${skill.handle} 尚未启用`, "warn");
     return;
   }
+  recordEditorUndoPoint();
   insertTextAtCursor(els.contentEditor, `@${skill.handle} `);
   saveEditor(true);
   toast(`已插入 @${skill.handle}`);
@@ -1137,6 +1309,9 @@ function insertSkillMention(skillId) {
   if (!skill || !ui.mentionTarget || !ui.mentionRange) return;
   const textarea = ui.mentionTarget;
   const mentionText = `@${skill.handle} `;
+  if (textarea === els.contentEditor) {
+    recordEditorUndoPoint();
+  }
   textarea.value =
     textarea.value.slice(0, ui.mentionRange.start) + mentionText + textarea.value.slice(ui.mentionRange.end);
   textarea.focus();
@@ -1148,6 +1323,48 @@ function insertSkillMention(skillId) {
   hideSkillMentionPanel();
 }
 
+function getFindMatchIndex(findText) {
+  if (!findText) return -1;
+  const editor = els.contentEditor;
+  const content = editor.value;
+  const startAt = editor.selectionEnd || 0;
+  let index = content.indexOf(findText, startAt);
+  if (index === -1 && startAt > 0) index = content.indexOf(findText);
+  return index;
+}
+
+function selectFindMatch(index, findText) {
+  const editor = els.contentEditor;
+  editor.focus();
+  editor.setSelectionRange(index, index + findText.length);
+}
+
+function getSelectedFindMatch(findText) {
+  const editor = els.contentEditor;
+  const start = editor.selectionStart || 0;
+  const end = editor.selectionEnd || start;
+  if (start === end) return null;
+  if (editor.value.slice(start, end) !== findText) return null;
+  return { start, end };
+}
+
+function findNext() {
+  const findText = els.findInput.value;
+  if (!findText) {
+    toast("请输入查找内容", "warn");
+    els.findInput.focus();
+    return -1;
+  }
+  const index = getFindMatchIndex(findText);
+  if (index === -1) {
+    toast("没有找到匹配内容", "warn");
+    return -1;
+  }
+  selectFindMatch(index, findText);
+  toast(`已找到：第 ${index + 1} 个字符处`);
+  return index;
+}
+
 function replaceNext() {
   const findText = els.findInput.value;
   const replacement = els.replaceInput.value;
@@ -1157,13 +1374,15 @@ function replaceNext() {
   }
   const editor = els.contentEditor;
   const content = editor.value;
-  let index = content.indexOf(findText, editor.selectionEnd);
-  if (index === -1) index = content.indexOf(findText);
+  const currentMatch = getSelectedFindMatch(findText);
+  const index = currentMatch?.start ?? getFindMatchIndex(findText);
   if (index === -1) {
     toast("没有找到匹配内容", "warn");
     return;
   }
-  editor.value = content.slice(0, index) + replacement + content.slice(index + findText.length);
+  const end = currentMatch?.end ?? index + findText.length;
+  recordEditorUndoPoint();
+  editor.value = content.slice(0, index) + replacement + content.slice(end);
   editor.focus();
   editor.setSelectionRange(index, index + replacement.length);
   saveEditor(true);
@@ -1182,6 +1401,7 @@ function replaceAll() {
     toast("没有找到匹配内容", "warn");
     return;
   }
+  recordEditorUndoPoint();
   editor.value = editor.value.split(findText).join(replacement);
   saveEditor(true);
   toast(`已替换 ${count} 处`);
@@ -1269,15 +1489,108 @@ function deleteFolder(folderId) {
   return folderManager.deleteFolder(folderId);
 }
 
-async function generateDocument(insertIntoCurrent) {
+function normalizeCustomType(type) {
+  const name = String(type?.name || "").trim();
+  if (!name) return null;
+  const id = String(type?.id || "").trim();
+  const safeId = id && !DOCUMENT_TYPES.some((item) => item.id === id) ? id : `custom-type-${createId()}`;
+  return {
+    id: safeId,
+    name: name.slice(0, 24),
+    structure: String(type?.structure || "按该自定义类型的写作场景组织结构，保持表达清晰规范").trim(),
+    createdAt: type?.createdAt || now(),
+    updatedAt: type?.updatedAt || now(),
+  };
+}
+
+function isCustomDocumentType(typeId) {
+  return Array.isArray(state.customTypes) && state.customTypes.some((type) => type.id === typeId);
+}
+
+function addCustomType() {
+  state.customTypes = Array.isArray(state.customTypes) ? state.customTypes : [];
+  const name = window.prompt("新增文档类型名称，例如：调研报告、活动复盘、制度说明");
+  const normalizedName = String(name || "").trim();
+  if (!normalizedName) return;
+  if (getDocumentTypes().some((type) => type.name === normalizedName)) {
+    toast(`文档类型“${normalizedName}”已存在`, "warn");
+    return;
+  }
+  const structure =
+    window.prompt("该类型的常见结构，可留空", "按背景、目标、重点内容、安排要求、落款组织结构") ||
+    "按输入要点组织结构，保持表达清晰规范";
+  const type = normalizeCustomType({ name: normalizedName, structure });
+  if (!type) return;
+  state.customTypes.push(type);
+  renderTypeSelect(type.id);
+  saveEditor(false);
+  persist();
+  eventBus.emit(EVENTS.RENDER_DOC_LIST);
+  toast(`已新增文档类型：${type.name}`);
+}
+
+function renameCustomType() {
+  const type = state.customTypes.find((item) => item.id === els.typeSelect.value);
+  if (!type) {
+    toast("请先选择一个已添加的自定义类型", "warn");
+    return;
+  }
+  const name = window.prompt("重命名文档类型", type.name);
+  const normalizedName = String(name || "").trim();
+  if (!normalizedName) return;
+  if (getDocumentTypes().some((item) => item.id !== type.id && item.name === normalizedName)) {
+    toast(`文档类型“${normalizedName}”已存在`, "warn");
+    return;
+  }
+  const structure =
+    window.prompt("更新该类型的常见结构，可留空", type.structure) || "按输入要点组织结构，保持表达清晰规范";
+  type.name = normalizedName.slice(0, 24);
+  type.structure = structure.trim();
+  type.updatedAt = now();
+  persist();
+  renderTypeSelect(type.id);
+  eventBus.emit(EVENTS.RENDER_DOC_LIST);
+  toast(`已更新文档类型：${type.name}`);
+}
+
+function deleteCustomType() {
+  const type = state.customTypes.find((item) => item.id === els.typeSelect.value);
+  if (!type) {
+    toast("请先选择一个已添加的自定义类型", "warn");
+    return;
+  }
+  const affectedCount = state.docs.filter((doc) => doc.type === type.id).length;
+  const ok = window.confirm(
+    affectedCount
+      ? `删除自定义类型“${type.name}”？${affectedCount} 份文档会改为“自定义”。`
+      : `删除自定义类型“${type.name}”？`,
+  );
+  if (!ok) return;
+  state.customTypes = state.customTypes.filter((item) => item.id !== type.id);
+  state.docs.forEach((doc) => {
+    if (doc.type === type.id) doc.type = "custom";
+  });
+  renderTypeSelect("custom");
+  saveEditor(false);
+  persist();
+  eventBus.emit(EVENTS.RENDER_ALL);
+  toast(`已删除文档类型：${type.name}`, "warn");
+}
+
+async function generateDocument(mode = "new") {
   const userPrompt = els.generatePrompt.value.trim();
   const docType = els.typeSelect.value || getCurrentDoc()?.type || "notice";
+  const currentDoc = getCurrentDoc();
   if (!userPrompt) {
     toast("请输入起草提示词", "warn");
     return;
   }
+  if (mode === "overwrite" && !currentDoc) {
+    toast("请先选择要覆盖的当前文档", "warn");
+    return;
+  }
 
-  const button = insertIntoCurrent ? els.insertDraftBtn : els.generateDocBtn;
+  const button = mode === "insert" ? els.insertDraftBtn : mode === "overwrite" ? els.overwriteDraftBtn : els.generateDocBtn;
   await withLoading(button, "生成中", async () => withProgress("AI 正在生成文档", async (progress) => {
     progress.update("正在整理提示词", 18);
     const type = getType(docType);
@@ -1299,14 +1612,28 @@ async function generateDocument(insertIntoCurrent) {
     ]);
     progress.update("正在写入文档", 82);
 
-    if (insertIntoCurrent) {
+    if (mode === "insert") {
       const current = getCurrentDoc() || createDocument({ title: deriveGeneratedTitle(content, userPrompt), type: docType });
       const separator = els.contentEditor.value.trim() ? "\n\n" : "";
+      recordEditorUndoPoint();
       els.contentEditor.value = `${els.contentEditor.value}${separator}${content}`;
       saveEditor(true);
       ui.generatedDraft = content;
       toast("已插入到当前文档");
       return current;
+    }
+
+    if (mode === "overwrite") {
+      const title = deriveGeneratedTitle(content, userPrompt);
+      recordEditorUndoPoint();
+      els.titleInput.value = title;
+      els.typeSelect.value = docType;
+      if (invokedSkills[0]?.id) els.styleSelect.value = invokedSkills[0].id;
+      els.contentEditor.value = content;
+      saveEditor(true);
+      ui.generatedDraft = content;
+      toast(`已覆盖当前文档：${getDocumentLocation(getCurrentDoc())}`);
+      return getCurrentDoc();
     }
 
     const title = deriveGeneratedTitle(content, userPrompt);
@@ -1608,6 +1935,7 @@ async function rewriteSelection(triggerButton = null) {
     ]);
       progress.update("正在替换选中段落", 85);
       const content = els.contentEditor.value;
+      recordEditorUndoPoint();
       els.contentEditor.value = content.slice(0, selection.start) + rewritten + content.slice(selection.end);
       els.contentEditor.focus();
       els.contentEditor.setSelectionRange(selection.start, selection.start + rewritten.length);
@@ -1926,7 +2254,7 @@ function selectFirstDocumentIfNeeded() {
 }
 
 function getType(typeId) {
-  return DOCUMENT_TYPES.find((type) => type.id === typeId) || DOCUMENT_TYPES[DOCUMENT_TYPES.length - 1];
+  return getDocumentTypes().find((type) => type.id === typeId) || DOCUMENT_TYPES[DOCUMENT_TYPES.length - 1];
 }
 
 function normalizeFolder(folder) {

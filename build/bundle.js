@@ -24180,16 +24180,26 @@ ${formatListItems(items)}`;
       persist: persist2,
       eventBus: eventBus2,
       syncDocumentToRealFolder: syncDocumentToRealFolder2,
+      showSaveStatus: showSaveStatus2 = () => {
+      },
       toast: toast2
     } = deps;
     function queueEditorSave2() {
-      els2.saveState.textContent = "\u4FDD\u5B58\u4E2D";
+      if (!getCurrentDoc2()) {
+        window.clearTimeout(ui2.saveTimer);
+        showSaveStatus2("");
+        return;
+      }
+      showSaveStatus2("\u4FDD\u5B58\u4E2D");
       window.clearTimeout(ui2.saveTimer);
       ui2.saveTimer = window.setTimeout(() => saveEditor2(false), saveDelayMs);
     }
     function saveEditor2(showToast2) {
       const doc = getCurrentDoc2();
-      if (!doc) return;
+      if (!doc) {
+        showSaveStatus2("");
+        return;
+      }
       doc.title = els2.titleInput.value.trim() || "\u672A\u547D\u540D\u6587\u6863";
       doc.type = els2.typeSelect.value || "custom";
       doc.folderId = els2.folderSelect.value || state2.folders[0]?.id || createDefaultFolder2();
@@ -24198,8 +24208,7 @@ ${formatListItems(items)}`;
       doc.updatedAt = now();
       ui2.selectedDocId = doc.id;
       persist2();
-      els2.saveState.textContent = "\u5DF2\u4FDD\u5B58";
-      els2.saveState.title = `\u4FDD\u5B58\u4F4D\u7F6E\uFF1A${getDocumentLocation2(doc)}`;
+      showSaveStatus2("\u5DF2\u4FDD\u5B58", { transient: true, title: `\u4FDD\u5B58\u4F4D\u7F6E\uFF1A${getDocumentLocation2(doc)}` });
       eventBus2.emit(EVENTS.RENDER_DOC_LIST);
       if (showToast2) {
         showSaveLocation(doc);
@@ -32653,7 +32662,8 @@ ${JSON.stringify(payload, null, 2)}`
         <div class="progress-fill"></div>
       </div>
     `;
-      document.body.appendChild(progressBar);
+      const host = document.querySelector(".editor-feedback-region") || document.body;
+      host.appendChild(progressBar);
       setCurrent(progressBar);
       updateProgress(progressBar, message, progress);
       return progressBar;
@@ -32755,7 +32765,12 @@ ${JSON.stringify(payload, null, 2)}`
     mentionTarget: null,
     mentionRange: null,
     saveTimer: null,
+    saveStatusTimer: null,
     searchTimer: null,
+    editorUndoStack: [],
+    editorUndoInputActive: false,
+    editorUndoInputTimer: null,
+    editorUndoLocked: false,
     persistPromise: Promise.resolve(),
     progressElement: null,
     generatedDraft: "",
@@ -32765,6 +32780,7 @@ ${JSON.stringify(payload, null, 2)}`
   var els = {};
   var WORKSPACE_LAYOUT_KEY = "mowen-nibi-workbench:workspace-layout";
   var DEFAULT_WORKSPACE_LAYOUT = { sidebar: 284, inspector: 360 };
+  var EDITOR_UNDO_LIMIT = 80;
   var aiClient = createAiClient({
     getSettings: () => state.settings || {},
     notify: (message, tone) => toast(message, tone)
@@ -32861,6 +32877,7 @@ ${JSON.stringify(payload, null, 2)}`
     persist,
     eventBus,
     syncDocumentToRealFolder,
+    showSaveStatus,
     toast
   });
   var documentManager = createDocumentManager({
@@ -32934,14 +32951,20 @@ ${JSON.stringify(payload, null, 2)}`
       "docList",
       "titleInput",
       "typeSelect",
+      "customTypeActions",
+      "addTypeBtn",
+      "renameTypeBtn",
+      "deleteTypeBtn",
       "folderSelect",
       "styleSelect",
       "saveDocBtn",
+      "undoEditBtn",
       "saveState",
       "replaceToggleBtn",
       "replaceBar",
       "findInput",
       "replaceInput",
+      "findNextBtn",
       "replaceNextBtn",
       "replaceAllBtn",
       "contentEditor",
@@ -32952,6 +32975,7 @@ ${JSON.stringify(payload, null, 2)}`
       "generatePrompt",
       "skillMentionPanel",
       "generateDocBtn",
+      "overwriteDraftBtn",
       "insertDraftBtn",
       "pptPanel",
       "pptTitleInput",
@@ -33030,6 +33054,7 @@ ${JSON.stringify(payload, null, 2)}`
       ];
     }
     state.folders = state.folders.map((folder) => normalizeFolder(folder));
+    state.customTypes = Array.isArray(state.customTypes) ? state.customTypes.map((type) => normalizeCustomType(type)).filter(Boolean) : [];
     if (!Array.isArray(state.styles) || state.styles.length === 0) {
       state.styles = [
         {
@@ -33156,13 +33181,27 @@ ${JSON.stringify(payload, null, 2)}`
       els.titleInput.addEventListener(eventName, queueEditorSave);
       els.contentEditor.addEventListener(eventName, queueEditorSave);
     });
-    els.typeSelect.addEventListener("change", queueEditorSave);
+    els.contentEditor.addEventListener("beforeinput", queueEditorUndoSnapshot);
+    els.typeSelect.addEventListener("change", () => {
+      updateTypeControlState();
+      queueEditorSave();
+    });
+    els.addTypeBtn.addEventListener("click", addCustomType);
+    els.renameTypeBtn.addEventListener("click", renameCustomType);
+    els.deleteTypeBtn.addEventListener("click", deleteCustomType);
     els.folderSelect.addEventListener("change", queueEditorSave);
     els.styleSelect.addEventListener("change", queueEditorSave);
     els.saveDocBtn.addEventListener("click", () => saveEditor(true));
+    els.undoEditBtn.addEventListener("click", undoEditorChange);
     els.replaceToggleBtn.addEventListener("click", toggleReplaceBar);
+    els.findNextBtn.addEventListener("click", findNext);
     els.replaceNextBtn.addEventListener("click", replaceNext);
     els.replaceAllBtn.addEventListener("click", replaceAll);
+    els.findInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      findNext();
+    });
     els.contentEditor.addEventListener("contextmenu", showEditorMenu);
     els.editorMenu.addEventListener("click", handleEditorMenuAction);
     document.addEventListener("click", (event) => {
@@ -33194,8 +33233,9 @@ ${JSON.stringify(payload, null, 2)}`
       const button = event.target.closest(".tab");
       if (button) switchTab(button.dataset.tab);
     });
-    els.generateDocBtn.addEventListener("click", () => generateDocument(false));
-    els.insertDraftBtn.addEventListener("click", () => generateDocument(true));
+    els.generateDocBtn.addEventListener("click", () => generateDocument("new"));
+    els.overwriteDraftBtn.addEventListener("click", () => generateDocument("overwrite"));
+    els.insertDraftBtn.addEventListener("click", () => generateDocument("insert"));
     setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
     setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
     setupFileDrop(els.pptPanel, importPptPromptFiles);
@@ -33453,9 +33493,41 @@ ${JSON.stringify(payload, null, 2)}`
     await importDocumentFiles(files);
   }
   function hydrateStaticSelects() {
-    const options = DOCUMENT_TYPES.map((type) => `<option value="${type.id}">${type.name}</option>`).join("");
-    els.typeSelect.innerHTML = options;
+    renderTypeSelect();
     hydratePptStyleSelect();
+  }
+  function getDocumentTypes() {
+    return [...DOCUMENT_TYPES, ...Array.isArray(state.customTypes) ? state.customTypes : []];
+  }
+  function renderTypeSelect(selectedValue = els.typeSelect?.value || getCurrentDoc()?.type || "notice") {
+    if (!els.typeSelect) return;
+    const builtInOptions = DOCUMENT_TYPES.map(
+      (type) => `<option value="${escapeHtml(type.id)}">${escapeHtml(type.name)}</option>`
+    ).join("");
+    const customTypes = Array.isArray(state.customTypes) ? state.customTypes : [];
+    const customOptions = customTypes.map((type) => `<option value="${escapeHtml(type.id)}">${escapeHtml(type.name)}</option>`).join("");
+    els.typeSelect.innerHTML = [
+      `<optgroup label="\u5185\u7F6E\u7C7B\u578B">${builtInOptions}</optgroup>`,
+      customOptions ? `<optgroup label="\u81EA\u5B9A\u4E49\u7C7B\u578B">${customOptions}</optgroup>` : ""
+    ].join("");
+    const nextValue = getDocumentTypes().some((type) => type.id === selectedValue) ? selectedValue : "custom";
+    els.typeSelect.value = nextValue;
+    updateTypeControlState();
+  }
+  function updateTypeControlState() {
+    if (!els.typeSelect || !els.customTypeActions) return;
+    const typeId = els.typeSelect.value;
+    const isActualCustomType = isCustomDocumentType(typeId);
+    const showCustomActions = typeId === "custom" || isActualCustomType;
+    els.customTypeActions.hidden = !showCustomActions;
+    if (els.renameTypeBtn) {
+      els.renameTypeBtn.disabled = !isActualCustomType;
+      els.renameTypeBtn.title = isActualCustomType ? "\u91CD\u547D\u540D\u81EA\u5B9A\u4E49\u7C7B\u578B" : "\u5148\u6DFB\u52A0\u6216\u9009\u62E9\u4E00\u4E2A\u81EA\u5B9A\u4E49\u7C7B\u578B";
+    }
+    if (els.deleteTypeBtn) {
+      els.deleteTypeBtn.disabled = !isActualCustomType;
+      els.deleteTypeBtn.title = isActualCustomType ? "\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B" : "\u5148\u6DFB\u52A0\u6216\u9009\u62E9\u4E00\u4E2A\u81EA\u5B9A\u4E49\u7C7B\u578B";
+    }
   }
   function hydratePptStyleSelect() {
     if (!els.pptStyleSelect) return;
@@ -33475,6 +33547,7 @@ ${JSON.stringify(payload, null, 2)}`
     renderFolderSelect();
     renderStyleSelect();
     renderDocList();
+    renderTypeSelect();
     renderEditor();
     renderApiSettings();
     renderStyleEditor();
@@ -33500,6 +33573,9 @@ ${JSON.stringify(payload, null, 2)}`
   }
   function renderEditor() {
     documentRenderer.renderEditor();
+    resetEditorUndoHistory();
+    hideSaveStatus();
+    updateTypeControlState();
   }
   function renderApiSettings() {
     const settings = state.settings || {};
@@ -33544,9 +33620,95 @@ ${JSON.stringify(payload, null, 2)}`
   function saveEditor(showToast2) {
     return documentEditor.saveEditor(showToast2);
   }
+  function showSaveStatus(message, options = {}) {
+    if (!els.saveState) return;
+    window.clearTimeout(ui.saveStatusTimer);
+    els.saveState.textContent = message || "";
+    if (options.title) els.saveState.title = options.title;
+    els.saveState.classList.toggle("visible", Boolean(message));
+    if (options.transient) {
+      ui.saveStatusTimer = window.setTimeout(hideSaveStatus, options.duration || 1800);
+    }
+  }
+  function hideSaveStatus() {
+    if (!els.saveState) return;
+    window.clearTimeout(ui.saveStatusTimer);
+    els.saveState.classList.remove("visible");
+  }
+  function resetEditorUndoHistory() {
+    window.clearTimeout(ui.editorUndoInputTimer);
+    ui.editorUndoStack = [];
+    ui.editorUndoInputActive = false;
+    updateUndoButtonState();
+  }
+  function queueEditorUndoSnapshot() {
+    if (ui.editorUndoLocked) return;
+    if (!ui.editorUndoInputActive) {
+      pushEditorUndoSnapshot(createEditorUndoSnapshot());
+      ui.editorUndoInputActive = true;
+    }
+    window.clearTimeout(ui.editorUndoInputTimer);
+    ui.editorUndoInputTimer = window.setTimeout(() => {
+      ui.editorUndoInputActive = false;
+    }, 900);
+  }
+  function createEditorUndoSnapshot() {
+    const editor = els.contentEditor;
+    return {
+      value: editor.value,
+      selectionStart: editor.selectionStart || 0,
+      selectionEnd: editor.selectionEnd || editor.selectionStart || 0,
+      scrollTop: editor.scrollTop || 0
+    };
+  }
+  function pushEditorUndoSnapshot(snapshot = createEditorUndoSnapshot()) {
+    const previous = ui.editorUndoStack[ui.editorUndoStack.length - 1];
+    if (previous?.value === snapshot.value) return;
+    ui.editorUndoStack.push(snapshot);
+    if (ui.editorUndoStack.length > EDITOR_UNDO_LIMIT) {
+      ui.editorUndoStack.splice(0, ui.editorUndoStack.length - EDITOR_UNDO_LIMIT);
+    }
+    updateUndoButtonState();
+  }
+  function recordEditorUndoPoint() {
+    if (ui.editorUndoLocked) return;
+    window.clearTimeout(ui.editorUndoInputTimer);
+    ui.editorUndoInputActive = false;
+    pushEditorUndoSnapshot(createEditorUndoSnapshot());
+  }
+  function undoEditorChange() {
+    const snapshot = ui.editorUndoStack.pop();
+    if (!snapshot) {
+      toast("\u6CA1\u6709\u53EF\u64A4\u9500\u7684\u6B63\u6587\u7F16\u8F91", "warn");
+      updateUndoButtonState();
+      return;
+    }
+    ui.editorUndoLocked = true;
+    els.contentEditor.value = snapshot.value;
+    els.contentEditor.focus();
+    const start = Math.min(snapshot.selectionStart, snapshot.value.length);
+    const end = Math.min(snapshot.selectionEnd, snapshot.value.length);
+    els.contentEditor.setSelectionRange(start, end);
+    els.contentEditor.scrollTop = snapshot.scrollTop;
+    window.clearTimeout(ui.saveTimer);
+    saveEditor(false);
+    showSaveStatus("\u5DF2\u64A4\u9500", { transient: true });
+    ui.editorUndoLocked = false;
+    updateUndoButtonState();
+  }
+  function updateUndoButtonState() {
+    if (!els.undoEditBtn) return;
+    els.undoEditBtn.disabled = ui.editorUndoStack.length === 0;
+    els.undoEditBtn.title = ui.editorUndoStack.length === 0 ? "\u6682\u65E0\u53EF\u64A4\u9500\u7684\u6B63\u6587\u7F16\u8F91" : "\u64A4\u9500\u6B63\u6587\u7F16\u8F91";
+  }
   function formatCurrentDocument() {
     const editor = els.contentEditor;
     const formatted = editor.value.replace(/\r\n/g, "\n").split("\n").map((line) => line.replace(/[ \t]+$/g, "").replace(/^[ \t]+/g, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    if (formatted === editor.value) {
+      toast("\u5F53\u524D\u683C\u5F0F\u5DF2\u7ECF\u6BD4\u8F83\u89C4\u6574");
+      return;
+    }
+    recordEditorUndoPoint();
     editor.value = formatted;
     saveEditor(true);
   }
@@ -33625,6 +33787,7 @@ ${JSON.stringify(payload, null, 2)}`
       return;
     }
     const content = els.contentEditor.value;
+    recordEditorUndoPoint();
     els.contentEditor.value = content.slice(0, selection.start) + content.slice(selection.end);
     els.contentEditor.focus();
     els.contentEditor.setSelectionRange(selection.start, selection.start);
@@ -33640,6 +33803,7 @@ ${JSON.stringify(payload, null, 2)}`
       toast(`@${skill.handle} \u5C1A\u672A\u542F\u7528`, "warn");
       return;
     }
+    recordEditorUndoPoint();
     insertTextAtCursor(els.contentEditor, `@${skill.handle} `);
     saveEditor(true);
     toast(`\u5DF2\u63D2\u5165 @${skill.handle}`);
@@ -33714,6 +33878,9 @@ ${JSON.stringify(payload, null, 2)}`
     if (!skill || !ui.mentionTarget || !ui.mentionRange) return;
     const textarea = ui.mentionTarget;
     const mentionText = `@${skill.handle} `;
+    if (textarea === els.contentEditor) {
+      recordEditorUndoPoint();
+    }
     textarea.value = textarea.value.slice(0, ui.mentionRange.start) + mentionText + textarea.value.slice(ui.mentionRange.end);
     textarea.focus();
     const cursor = ui.mentionRange.start + mentionText.length;
@@ -33722,6 +33889,44 @@ ${JSON.stringify(payload, null, 2)}`
       saveEditor(false);
     }
     hideSkillMentionPanel();
+  }
+  function getFindMatchIndex(findText) {
+    if (!findText) return -1;
+    const editor = els.contentEditor;
+    const content = editor.value;
+    const startAt = editor.selectionEnd || 0;
+    let index = content.indexOf(findText, startAt);
+    if (index === -1 && startAt > 0) index = content.indexOf(findText);
+    return index;
+  }
+  function selectFindMatch(index, findText) {
+    const editor = els.contentEditor;
+    editor.focus();
+    editor.setSelectionRange(index, index + findText.length);
+  }
+  function getSelectedFindMatch(findText) {
+    const editor = els.contentEditor;
+    const start = editor.selectionStart || 0;
+    const end = editor.selectionEnd || start;
+    if (start === end) return null;
+    if (editor.value.slice(start, end) !== findText) return null;
+    return { start, end };
+  }
+  function findNext() {
+    const findText = els.findInput.value;
+    if (!findText) {
+      toast("\u8BF7\u8F93\u5165\u67E5\u627E\u5185\u5BB9", "warn");
+      els.findInput.focus();
+      return -1;
+    }
+    const index = getFindMatchIndex(findText);
+    if (index === -1) {
+      toast("\u6CA1\u6709\u627E\u5230\u5339\u914D\u5185\u5BB9", "warn");
+      return -1;
+    }
+    selectFindMatch(index, findText);
+    toast(`\u5DF2\u627E\u5230\uFF1A\u7B2C ${index + 1} \u4E2A\u5B57\u7B26\u5904`);
+    return index;
   }
   function replaceNext() {
     const findText = els.findInput.value;
@@ -33732,13 +33937,15 @@ ${JSON.stringify(payload, null, 2)}`
     }
     const editor = els.contentEditor;
     const content = editor.value;
-    let index = content.indexOf(findText, editor.selectionEnd);
-    if (index === -1) index = content.indexOf(findText);
+    const currentMatch = getSelectedFindMatch(findText);
+    const index = currentMatch?.start ?? getFindMatchIndex(findText);
     if (index === -1) {
       toast("\u6CA1\u6709\u627E\u5230\u5339\u914D\u5185\u5BB9", "warn");
       return;
     }
-    editor.value = content.slice(0, index) + replacement + content.slice(index + findText.length);
+    const end = currentMatch?.end ?? index + findText.length;
+    recordEditorUndoPoint();
+    editor.value = content.slice(0, index) + replacement + content.slice(end);
     editor.focus();
     editor.setSelectionRange(index, index + replacement.length);
     saveEditor(true);
@@ -33756,6 +33963,7 @@ ${JSON.stringify(payload, null, 2)}`
       toast("\u6CA1\u6709\u627E\u5230\u5339\u914D\u5185\u5BB9", "warn");
       return;
     }
+    recordEditorUndoPoint();
     editor.value = editor.value.split(findText).join(replacement);
     saveEditor(true);
     toast(`\u5DF2\u66FF\u6362 ${count} \u5904`);
@@ -33827,14 +34035,97 @@ ${JSON.stringify(payload, null, 2)}`
   function deleteFolder(folderId) {
     return folderManager.deleteFolder(folderId);
   }
-  async function generateDocument(insertIntoCurrent) {
+  function normalizeCustomType(type) {
+    const name = String(type?.name || "").trim();
+    if (!name) return null;
+    const id = String(type?.id || "").trim();
+    const safeId = id && !DOCUMENT_TYPES.some((item) => item.id === id) ? id : `custom-type-${createId()}`;
+    return {
+      id: safeId,
+      name: name.slice(0, 24),
+      structure: String(type?.structure || "\u6309\u8BE5\u81EA\u5B9A\u4E49\u7C7B\u578B\u7684\u5199\u4F5C\u573A\u666F\u7EC4\u7EC7\u7ED3\u6784\uFF0C\u4FDD\u6301\u8868\u8FBE\u6E05\u6670\u89C4\u8303").trim(),
+      createdAt: type?.createdAt || now(),
+      updatedAt: type?.updatedAt || now()
+    };
+  }
+  function isCustomDocumentType(typeId) {
+    return Array.isArray(state.customTypes) && state.customTypes.some((type) => type.id === typeId);
+  }
+  function addCustomType() {
+    state.customTypes = Array.isArray(state.customTypes) ? state.customTypes : [];
+    const name = window.prompt("\u65B0\u589E\u6587\u6863\u7C7B\u578B\u540D\u79F0\uFF0C\u4F8B\u5982\uFF1A\u8C03\u7814\u62A5\u544A\u3001\u6D3B\u52A8\u590D\u76D8\u3001\u5236\u5EA6\u8BF4\u660E");
+    const normalizedName = String(name || "").trim();
+    if (!normalizedName) return;
+    if (getDocumentTypes().some((type2) => type2.name === normalizedName)) {
+      toast(`\u6587\u6863\u7C7B\u578B\u201C${normalizedName}\u201D\u5DF2\u5B58\u5728`, "warn");
+      return;
+    }
+    const structure = window.prompt("\u8BE5\u7C7B\u578B\u7684\u5E38\u89C1\u7ED3\u6784\uFF0C\u53EF\u7559\u7A7A", "\u6309\u80CC\u666F\u3001\u76EE\u6807\u3001\u91CD\u70B9\u5185\u5BB9\u3001\u5B89\u6392\u8981\u6C42\u3001\u843D\u6B3E\u7EC4\u7EC7\u7ED3\u6784") || "\u6309\u8F93\u5165\u8981\u70B9\u7EC4\u7EC7\u7ED3\u6784\uFF0C\u4FDD\u6301\u8868\u8FBE\u6E05\u6670\u89C4\u8303";
+    const type = normalizeCustomType({ name: normalizedName, structure });
+    if (!type) return;
+    state.customTypes.push(type);
+    renderTypeSelect(type.id);
+    saveEditor(false);
+    persist();
+    eventBus.emit(EVENTS.RENDER_DOC_LIST);
+    toast(`\u5DF2\u65B0\u589E\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`);
+  }
+  function renameCustomType() {
+    const type = state.customTypes.find((item) => item.id === els.typeSelect.value);
+    if (!type) {
+      toast("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u5DF2\u6DFB\u52A0\u7684\u81EA\u5B9A\u4E49\u7C7B\u578B", "warn");
+      return;
+    }
+    const name = window.prompt("\u91CD\u547D\u540D\u6587\u6863\u7C7B\u578B", type.name);
+    const normalizedName = String(name || "").trim();
+    if (!normalizedName) return;
+    if (getDocumentTypes().some((item) => item.id !== type.id && item.name === normalizedName)) {
+      toast(`\u6587\u6863\u7C7B\u578B\u201C${normalizedName}\u201D\u5DF2\u5B58\u5728`, "warn");
+      return;
+    }
+    const structure = window.prompt("\u66F4\u65B0\u8BE5\u7C7B\u578B\u7684\u5E38\u89C1\u7ED3\u6784\uFF0C\u53EF\u7559\u7A7A", type.structure) || "\u6309\u8F93\u5165\u8981\u70B9\u7EC4\u7EC7\u7ED3\u6784\uFF0C\u4FDD\u6301\u8868\u8FBE\u6E05\u6670\u89C4\u8303";
+    type.name = normalizedName.slice(0, 24);
+    type.structure = structure.trim();
+    type.updatedAt = now();
+    persist();
+    renderTypeSelect(type.id);
+    eventBus.emit(EVENTS.RENDER_DOC_LIST);
+    toast(`\u5DF2\u66F4\u65B0\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`);
+  }
+  function deleteCustomType() {
+    const type = state.customTypes.find((item) => item.id === els.typeSelect.value);
+    if (!type) {
+      toast("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u5DF2\u6DFB\u52A0\u7684\u81EA\u5B9A\u4E49\u7C7B\u578B", "warn");
+      return;
+    }
+    const affectedCount = state.docs.filter((doc) => doc.type === type.id).length;
+    const ok = window.confirm(
+      affectedCount ? `\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B\u201C${type.name}\u201D\uFF1F${affectedCount} \u4EFD\u6587\u6863\u4F1A\u6539\u4E3A\u201C\u81EA\u5B9A\u4E49\u201D\u3002` : `\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B\u201C${type.name}\u201D\uFF1F`
+    );
+    if (!ok) return;
+    state.customTypes = state.customTypes.filter((item) => item.id !== type.id);
+    state.docs.forEach((doc) => {
+      if (doc.type === type.id) doc.type = "custom";
+    });
+    renderTypeSelect("custom");
+    saveEditor(false);
+    persist();
+    eventBus.emit(EVENTS.RENDER_ALL);
+    toast(`\u5DF2\u5220\u9664\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`, "warn");
+  }
+  async function generateDocument(mode = "new") {
     const userPrompt = els.generatePrompt.value.trim();
     const docType = els.typeSelect.value || getCurrentDoc()?.type || "notice";
+    const currentDoc = getCurrentDoc();
     if (!userPrompt) {
       toast("\u8BF7\u8F93\u5165\u8D77\u8349\u63D0\u793A\u8BCD", "warn");
       return;
     }
-    const button = insertIntoCurrent ? els.insertDraftBtn : els.generateDocBtn;
+    if (mode === "overwrite" && !currentDoc) {
+      toast("\u8BF7\u5148\u9009\u62E9\u8981\u8986\u76D6\u7684\u5F53\u524D\u6587\u6863", "warn");
+      return;
+    }
+    const button = mode === "insert" ? els.insertDraftBtn : mode === "overwrite" ? els.overwriteDraftBtn : els.generateDocBtn;
     await withLoading(button, "\u751F\u6210\u4E2D", async () => withProgress("AI \u6B63\u5728\u751F\u6210\u6587\u6863", async (progress) => {
       progress.update("\u6B63\u5728\u6574\u7406\u63D0\u793A\u8BCD", 18);
       const type = getType(docType);
@@ -33854,14 +34145,27 @@ ${userPrompt}`,
         { role: "user", content: prompt }
       ]);
       progress.update("\u6B63\u5728\u5199\u5165\u6587\u6863", 82);
-      if (insertIntoCurrent) {
+      if (mode === "insert") {
         const current = getCurrentDoc() || createDocument({ title: deriveGeneratedTitle(content, userPrompt), type: docType });
         const separator = els.contentEditor.value.trim() ? "\n\n" : "";
+        recordEditorUndoPoint();
         els.contentEditor.value = `${els.contentEditor.value}${separator}${content}`;
         saveEditor(true);
         ui.generatedDraft = content;
         toast("\u5DF2\u63D2\u5165\u5230\u5F53\u524D\u6587\u6863");
         return current;
+      }
+      if (mode === "overwrite") {
+        const title2 = deriveGeneratedTitle(content, userPrompt);
+        recordEditorUndoPoint();
+        els.titleInput.value = title2;
+        els.typeSelect.value = docType;
+        if (invokedSkills[0]?.id) els.styleSelect.value = invokedSkills[0].id;
+        els.contentEditor.value = content;
+        saveEditor(true);
+        ui.generatedDraft = content;
+        toast(`\u5DF2\u8986\u76D6\u5F53\u524D\u6587\u6863\uFF1A${getDocumentLocation(getCurrentDoc())}`);
+        return getCurrentDoc();
       }
       const title = deriveGeneratedTitle(content, userPrompt);
       const newDoc = createDocument({
@@ -34132,6 +34436,7 @@ ${selection.text}`
         ]);
         progress.update("\u6B63\u5728\u66FF\u6362\u9009\u4E2D\u6BB5\u843D", 85);
         const content = els.contentEditor.value;
+        recordEditorUndoPoint();
         els.contentEditor.value = content.slice(0, selection.start) + rewritten + content.slice(selection.end);
         els.contentEditor.focus();
         els.contentEditor.setSelectionRange(selection.start, selection.start + rewritten.length);
@@ -34420,7 +34725,7 @@ ${selection.text}`
     return documentManager.selectFirstDocumentIfNeeded();
   }
   function getType(typeId) {
-    return DOCUMENT_TYPES.find((type) => type.id === typeId) || DOCUMENT_TYPES[DOCUMENT_TYPES.length - 1];
+    return getDocumentTypes().find((type) => type.id === typeId) || DOCUMENT_TYPES[DOCUMENT_TYPES.length - 1];
   }
   function normalizeFolder(folder) {
     return folderManager.normalizeFolder(folder);

@@ -34,11 +34,6 @@
             <i data-lucide="file-plus-2"></i>
             <span>新建</span>
           </button>
-          <label class="icon-button" title="导入文档">
-            <i data-lucide="upload"></i>
-            <span>导入</span>
-            <input id="importInput" type="file" accept=".txt,.md,.text,.csv,.docx,.pptx" multiple hidden />
-          </label>
           <button class="icon-button" id="exportDocBtn" type="button" title="导出当前文档">
             <i data-lucide="download"></i>
             <span>导出</span>
@@ -84,10 +79,11 @@
               <i data-lucide="search"></i>
               <input id="searchInput" type="search" placeholder="搜索标题或正文" />
             </label>
-            <div class="drop-zone compact" id="docDropZone">
+            <label class="drop-zone compact import-drop-zone" id="docDropZone" title="点击或拖入文档">
               <i data-lucide="file-up"></i>
-              <span>拖入文档到这里</span>
-            </div>
+              <span>点击或拖入文档到这里</span>
+              <input id="importInput" type="file" accept=".txt,.md,.text,.csv,.docx,.pptx" multiple hidden />
+            </label>
             <div class="doc-list" id="docList"></div>
           </section>
         </aside>
@@ -97,9 +93,25 @@
         <section class="editor-panel" aria-label="文档编辑">
           <div class="editor-meta">
             <div class="meta-grid">
-              <label>
+              <label class="type-field">
                 <span>类型</span>
-                <select id="typeSelect"></select>
+                <span class="type-control">
+                  <select id="typeSelect"></select>
+                  <span class="custom-type-actions" id="customTypeActions" hidden>
+                    <button class="tiny-button" id="addTypeBtn" type="button" title="新增类型">
+                      <i data-lucide="plus"></i>
+                      <span>添加</span>
+                    </button>
+                    <button class="tiny-button" id="renameTypeBtn" type="button" title="重命名自定义类型">
+                      <i data-lucide="pencil"></i>
+                      <span>编辑</span>
+                    </button>
+                    <button class="tiny-button danger-text" id="deleteTypeBtn" type="button" title="删除自定义类型">
+                      <i data-lucide="trash-2"></i>
+                      <span>删除</span>
+                    </button>
+                  </span>
+                </span>
               </label>
               <label>
                 <span>文件夹/标签</span>
@@ -117,9 +129,13 @@
               <i data-lucide="save"></i>
               <span>保存当前文档</span>
             </button>
+            <button id="undoEditBtn" class="icon-button compact" type="button" title="撤销正文编辑">
+              <i data-lucide="undo-2"></i>
+              <span>撤销</span>
+            </button>
             <span class="save-state" id="saveState">已保存</span>
             <button id="replaceToggleBtn" class="icon-button compact" type="button" aria-expanded="false" aria-controls="replaceBar">
-              <i data-lucide="replace"></i>
+              <i data-lucide="search"></i>
               <span>查找替换</span>
             </button>
           </div>
@@ -133,12 +149,16 @@
               <span>替换为</span>
               <input id="replaceInput" type="text" />
             </label>
+            <button id="findNextBtn" type="button">查找下一个</button>
             <button id="replaceNextBtn" type="button">替换一个</button>
             <button id="replaceAllBtn" type="button">全部替换</button>
           </div>
 
           <input id="titleInput" class="title-input" type="text" placeholder="文档标题" />
           <textarea id="contentEditor" spellcheck="false" placeholder="在这里撰写、导入或生成正式文档。"></textarea>
+          <div class="editor-feedback-region">
+            <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+          </div>
           <div class="editor-menu" id="editorMenu" hidden>
             <button type="button" data-editor-action="copy"><i data-lucide="copy"></i><span>复制选中内容</span></button>
             <button type="button" data-editor-action="delete"><i data-lucide="scissors"></i><span>删除选中内容</span></button>
@@ -174,6 +194,10 @@
               <button id="generateDocBtn" class="primary-action" type="button">
                 <i data-lucide="sparkles"></i>
                 生成新文档
+              </button>
+              <button id="overwriteDraftBtn" type="button">
+                <i data-lucide="file-output"></i>
+                覆盖当前文档
               </button>
               <button id="insertDraftBtn" type="button">插入到当前</button>
             </div>
@@ -427,7 +451,5 @@
         </aside>
       </main>
     </div>
-
-    <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
   </body>
 </html>

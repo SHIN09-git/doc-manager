@@ -28,7 +28,8 @@ export function createProgressController({ getCurrent, setCurrent }) {
         <div class="progress-fill"></div>
       </div>
     `;
-    document.body.appendChild(progressBar);
+    const host = document.querySelector(".editor-feedback-region") || document.body;
+    host.appendChild(progressBar);
     setCurrent(progressBar);
     updateProgress(progressBar, message, progress);
     return progressBar;

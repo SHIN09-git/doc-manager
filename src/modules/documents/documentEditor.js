@@ -14,18 +14,27 @@ export function createDocumentEditor(deps) {
     persist,
     eventBus,
     syncDocumentToRealFolder,
+    showSaveStatus = () => {},
     toast,
   } = deps;
 
   function queueEditorSave() {
-    els.saveState.textContent = "保存中";
+    if (!getCurrentDoc()) {
+      window.clearTimeout(ui.saveTimer);
+      showSaveStatus("");
+      return;
+    }
+    showSaveStatus("保存中");
     window.clearTimeout(ui.saveTimer);
     ui.saveTimer = window.setTimeout(() => saveEditor(false), saveDelayMs);
   }
 
   function saveEditor(showToast) {
     const doc = getCurrentDoc();
-    if (!doc) return;
+    if (!doc) {
+      showSaveStatus("");
+      return;
+    }
     doc.title = els.titleInput.value.trim() || "未命名文档";
     doc.type = els.typeSelect.value || "custom";
     doc.folderId = els.folderSelect.value || state.folders[0]?.id || createDefaultFolder();
@@ -34,8 +43,7 @@ export function createDocumentEditor(deps) {
     doc.updatedAt = now();
     ui.selectedDocId = doc.id;
     persist();
-    els.saveState.textContent = "已保存";
-    els.saveState.title = `保存位置：${getDocumentLocation(doc)}`;
+    showSaveStatus("已保存", { transient: true, title: `保存位置：${getDocumentLocation(doc)}` });
     eventBus.emit(EVENTS.RENDER_DOC_LIST);
     if (showToast) {
       showSaveLocation(doc);
