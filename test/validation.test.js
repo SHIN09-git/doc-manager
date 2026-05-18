@@ -4,12 +4,31 @@ import {
   clampConfidence,
   coerceArray,
   guessTypeFromName,
+  isLegacyPresentationFile,
+  isLegacyWordFile,
+  isSupportedImportFile,
+  isSupportedPresentationFile,
   isSupportedTextFile,
+  isSupportedWordFile,
 } from "../src/utils/validation.js";
 
 test("isSupportedTextFile only accepts configured text extensions", () => {
   assert.equal(isSupportedTextFile("通知.md"), true);
   assert.equal(isSupportedTextFile("图片.png"), false);
+});
+
+test("word import validation supports docx but not legacy doc", () => {
+  assert.equal(isSupportedWordFile("通知.docx"), true);
+  assert.equal(isSupportedImportFile("通知.docx"), true);
+  assert.equal(isLegacyWordFile("旧版通知.doc"), true);
+  assert.equal(isSupportedImportFile("旧版通知.doc"), false);
+});
+
+test("presentation import validation supports pptx but not legacy ppt", () => {
+  assert.equal(isSupportedPresentationFile("汇报.pptx"), true);
+  assert.equal(isSupportedImportFile("汇报.pptx"), true);
+  assert.equal(isLegacyPresentationFile("旧版汇报.ppt"), true);
+  assert.equal(isSupportedImportFile("旧版汇报.ppt"), false);
 });
 
 test("guessTypeFromName infers common document types", () => {

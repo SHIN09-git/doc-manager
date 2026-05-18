@@ -13,6 +13,7 @@ const ICONS = {
   pencil: '<path d="M17 3a2.8 2.8 0 0 1 4 4L8 20l-5 1 1-5Z"/><path d="m15 5 4 4"/>',
   pilcrow: '<path d="M13 4v16"/><path d="M17 4v16"/><path d="M19 4H9a5 5 0 0 0 0 10h4"/>',
   "plug-zap": '<path d="M13 2 3 14h8l-1 8 10-12h-8Z"/>',
+  presentation: '<path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/>',
   plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
   "refresh-cw": '<path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 18h3v-3"/><path d="M3 12A9 9 0 0 1 18.5 5.8"/><path d="M21 6h-3v3"/>',
   replace: '<path d="M14 4h6v6"/><path d="m20 4-7 7"/><path d="M10 20H4v-6"/><path d="m4 20 7-7"/>',

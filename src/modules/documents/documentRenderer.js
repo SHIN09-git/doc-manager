@@ -15,13 +15,16 @@ export function createDocumentRenderer(deps) {
 
   function getVisibleDocuments() {
     const query = els.searchInput.value.trim().toLowerCase();
-    return state.docs
+    const docs = state.docs
       .filter((doc) => ui.selectedFolderId === "all" || doc.folderId === ui.selectedFolderId)
       .filter((doc) => {
         if (!query) return true;
         return `${doc.title}\n${doc.content}`.toLowerCase().includes(query);
-      })
-      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+      });
+    const selectedIndex = docs.findIndex((doc) => doc.id === ui.selectedDocId);
+    if (selectedIndex <= 0) return docs;
+    const selected = docs[selectedIndex];
+    return [selected, ...docs.slice(0, selectedIndex), ...docs.slice(selectedIndex + 1)];
   }
 
   function renderDocList() {
@@ -37,7 +40,7 @@ export function createDocumentRenderer(deps) {
       .map((doc) => {
         const type = getType(doc.type).name;
         const folder = state.folders.find((item) => item.id === doc.folderId);
-        return `<article class="doc-item ${doc.id === ui.selectedDocId ? "active" : ""}" data-doc-id="${doc.id}">
+        return `<article class="doc-item ${doc.id === ui.selectedDocId ? "active" : ""}" data-doc-id="${doc.id}" draggable="true">
           <div class="doc-title-row">
             <div class="doc-title">${escapeHtml(doc.title || "未命名文档")}</div>
             <span class="doc-actions">
@@ -59,6 +62,13 @@ export function createDocumentRenderer(deps) {
       item.addEventListener("click", (event) => {
         if (event.target.closest("[data-copy-doc], [data-delete-doc]")) return;
         onSelectDocument(item.dataset.docId);
+      });
+      item.addEventListener("dragstart", (event) => {
+        const doc = state.docs.find((entry) => entry.id === item.dataset.docId);
+        if (!doc || !event.dataTransfer) return;
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.setData("application/x-mowen-doc-id", doc.id);
+        event.dataTransfer.setData("text/plain", doc.title || "未命名文档");
       });
     });
     els.docList.querySelectorAll("[data-copy-doc]").forEach((button) => {

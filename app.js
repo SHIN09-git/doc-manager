@@ -3,21 +3,38 @@ import {
   DEFAULT_SYSTEM_PROMPT,
   DOCUMENT_TYPES,
   SEARCH_RENDER_DEBOUNCE_MS,
-  STORAGE_BOOTSTRAP_KEY,
-  STORAGE_KEY,
   folderColors,
 } from "./src/config/constants.js";
 import {
   readWorkspaceState,
   writeWorkspaceState,
 } from "./src/core/storage.js";
+import {
+  clearLegacyLocalStorageState,
+  readLegacyLocalStorageState,
+  readStorageBootstrap,
+  shouldPreferLocalStorageFallback,
+  writeLegacyLocalStorageState,
+  writeStorageBootstrap,
+} from "./src/core/storageBootstrap.js";
 import { EVENTS, eventBus } from "./src/core/eventBus.js";
 import { createAiClient } from "./src/modules/ai/aiClient.js";
 import { createDocumentEditor } from "./src/modules/documents/documentEditor.js";
 import { createDocumentManager } from "./src/modules/documents/documentManager.js";
 import { createDocumentRenderer } from "./src/modules/documents/documentRenderer.js";
+import { createBrowserFileSystemAdapter } from "./src/modules/folders/fileSystemAdapter.js";
 import { createFolderManager } from "./src/modules/folders/folderManager.js";
 import { createFolderRenderer } from "./src/modules/folders/folderRenderer.js";
+import {
+  buildGuizangPptPrompt,
+  formatPptQualityReport,
+  inspectPptSpec,
+  normalizePptSpec,
+  parseGuizangPptSpec,
+  PPT_STYLE_OPTIONS,
+  renderPptSpecPreview,
+} from "./src/modules/ppt/guizangPpt.js";
+import { createPptxBlob } from "./src/modules/ppt/pptxBuilder.js";
 import { createSkillBuilder } from "./src/modules/skills/skillBuilder.js";
 import { createSkillManager } from "./src/modules/skills/skillManager.js";
 import { createSkillRenderer } from "./src/modules/skills/skillRenderer.js";
@@ -33,6 +50,10 @@ import {
   normalizeEndpointPath,
   sanitizeFileName,
 } from "./src/utils/helpers.js";
+import { buildUnsupportedFileMessage, canImportFile, readImportFileText } from "./src/utils/fileReaders.js";
+import { isFileDragData } from "./src/utils/dragDrop.js";
+import { getDropImportTarget } from "./src/utils/dropRouting.js";
+import { filterImportableFilesBySize } from "./src/utils/importGuards.js";
 
 const state = {};
 const ui = {
@@ -46,9 +67,13 @@ const ui = {
   persistPromise: Promise.resolve(),
   progressElement: null,
   generatedDraft: "",
+  pptDraft: "",
+  pptDeckSpec: null,
 };
 
 const els = {};
+const WORKSPACE_LAYOUT_KEY = "mowen-nibi-workbench:workspace-layout";
+const DEFAULT_WORKSPACE_LAYOUT = { sidebar: 284, inspector: 360 };
 const aiClient = createAiClient({
   getSettings: () => state.settings || {},
   notify: (message, tone) => toast(message, tone),
@@ -73,6 +98,8 @@ const folderManager = createFolderManager({
   getFolderLocation,
   getDocumentLocation,
   toast,
+  fileSystem: createBrowserFileSystemAdapter(),
+  confirmLargeImport,
 });
 const folderRenderer = createFolderRenderer({
   state,
@@ -159,6 +186,8 @@ const documentManager = createDocumentManager({
   getType,
   downloadBlob,
   toast,
+  confirmLargeImport,
+  withImportProgress: withProgress,
 });
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -169,6 +198,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
   initThemeToggle(els.themeToggle);
   hydrateStaticSelects();
+  restoreWorkspaceLayout();
+  setupWorkspaceResizers();
   selectFirstDocumentIfNeeded();
   render();
   if (window.lucide) {
@@ -194,11 +225,15 @@ function bindEventBus() {
 function bindElements() {
   [
     "storageLabel",
+    "workspace",
+    "leftWorkspaceResizer",
+    "rightWorkspaceResizer",
     "themeToggle",
     "newDocBtn",
     "importInput",
     "exportDocBtn",
     "backupBtn",
+    "apiTopBtn",
     "linkFolderBtn",
     "addFolderBtn",
     "folderCreateBox",
@@ -225,10 +260,31 @@ function bindElements() {
     "editorMenu",
     "editorSkillSelect",
     "aiStatus",
+    "generatePanel",
     "generatePrompt",
     "skillMentionPanel",
     "generateDocBtn",
     "insertDraftBtn",
+    "pptPanel",
+    "pptTitleInput",
+    "pptStyleSelect",
+    "pptSlideCountSelect",
+    "pptAutoSlideCountInput",
+    "pptCustomStyleField",
+    "pptCustomStyleInput",
+    "pptPromptInput",
+    "pptDropZone",
+    "generatePptBtn",
+    "downloadPptBtn",
+    "savePptStyleBtn",
+    "pptOutput",
+    "pptQualityStatus",
+    "pptQualityReport",
+    "pptPreview",
+    "openPptPreviewBtn",
+    "pptPreviewOverlay",
+    "closePptPreviewBtn",
+    "pptPreviewModalFrame",
     "newStyleBtn",
     "styleNameInput",
     "skillHandleInput",
@@ -412,6 +468,7 @@ function bindEvents() {
   setupFileDrop(els.docList, importDocumentFiles);
   els.exportDocBtn.addEventListener("click", exportCurrentDocument);
   els.backupBtn.addEventListener("click", exportWorkspaceBackup);
+  els.apiTopBtn.addEventListener("click", () => switchTab("api"));
   preventWindowFileNavigation();
 
   els.linkFolderBtn.addEventListener("click", linkRealFolder);
@@ -473,6 +530,47 @@ function bindEvents() {
 
   els.generateDocBtn.addEventListener("click", () => generateDocument(false));
   els.insertDraftBtn.addEventListener("click", () => generateDocument(true));
+  setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
+  setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
+  setupFileDrop(els.pptPanel, importPptPromptFiles);
+  setupFileDrop(els.pptPromptInput, importPptPromptFiles);
+  setupFileDrop(els.pptDropZone, importPptPromptFiles);
+  els.generatePptBtn.addEventListener("click", generatePptDeck);
+  els.downloadPptBtn.addEventListener("click", downloadPptDeck);
+  els.savePptStyleBtn.addEventListener("click", savePptStyleAsSkill);
+  els.pptStyleSelect.addEventListener("change", updatePptStyleControls);
+  els.pptSlideCountSelect.addEventListener("input", () => {
+    if (ui.pptDeckSpec) renderPptQualityReport(ui.pptDeckSpec);
+  });
+  els.pptAutoSlideCountInput.addEventListener("change", () => {
+    updatePptSlideCountControls();
+    if (ui.pptDeckSpec) renderPptQualityReport(ui.pptDeckSpec);
+  });
+  els.pptOutput.addEventListener("input", () => {
+    ui.pptDraft = els.pptOutput.value;
+    try {
+      ui.pptDeckSpec = parseGuizangPptSpec(ui.pptDraft, {
+        title: els.pptTitleInput.value.trim(),
+        ...getPptOptions(),
+      });
+      renderPptPreview(ui.pptDeckSpec);
+      renderPptQualityReport(ui.pptDeckSpec);
+    } catch {
+      // Allow users to keep editing partial JSON without interrupting input.
+    }
+  });
+  els.openPptPreviewBtn.addEventListener("click", openPptPreviewModal);
+  els.closePptPreviewBtn.addEventListener("click", closePptPreviewModal);
+  els.pptPreviewOverlay.addEventListener("click", (event) => {
+    if (event.target === els.pptPreviewOverlay) closePptPreviewModal();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && els.pptPreviewOverlay && !els.pptPreviewOverlay.hidden) {
+      closePptPreviewModal();
+    }
+  });
+  updatePptStyleControls();
+  updatePptSlideCountControls();
 
   els.newStyleBtn.addEventListener("click", () => {
     ui.editingStyle = createEmptyStyle();
@@ -555,21 +653,183 @@ function setupFileDrop(target, handler) {
   });
 }
 
+function setupDocumentDrop(target, handler) {
+  if (!target) return;
+  ["dragenter", "dragover"].forEach((eventName) => {
+    target.addEventListener(eventName, (event) => {
+      if (!isDocumentDrag(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      target.classList.add("drag-over");
+    });
+  });
+  ["dragleave", "dragend"].forEach((eventName) => {
+    target.addEventListener(eventName, () => target.classList.remove("drag-over"));
+  });
+  target.addEventListener("drop", (event) => {
+    if (!isDocumentDrag(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    target.classList.remove("drag-over");
+    const docId = event.dataTransfer?.getData("application/x-mowen-doc-id");
+    if (docId) handler(docId);
+  });
+}
+
+function restoreWorkspaceLayout() {
+  const layout = readWorkspaceLayout();
+  applyWorkspaceLayout(layout);
+}
+
+function setupWorkspaceResizers() {
+  setupWorkspaceResizer(els.leftWorkspaceResizer, "left");
+  setupWorkspaceResizer(els.rightWorkspaceResizer, "right");
+}
+
+function setupWorkspaceResizer(handle, side) {
+  if (!handle || !els.workspace) return;
+  handle.addEventListener("pointerdown", (event) => {
+    if (window.matchMedia("(max-width: 1180px)").matches) return;
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add("dragging");
+    const startX = event.clientX;
+    const startLayout = readWorkspaceLayout();
+    const onPointerMove = (moveEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const nextLayout = resizeWorkspaceLayout(startLayout, side, delta);
+      applyWorkspaceLayout(nextLayout);
+    };
+    const onPointerUp = () => {
+      handle.classList.remove("dragging");
+      const nextLayout = readWorkspaceLayoutFromCss();
+      saveWorkspaceLayout(nextLayout);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+  });
+  handle.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const delta = event.key === "ArrowRight" ? 24 : -24;
+    const layout = resizeWorkspaceLayout(readWorkspaceLayout(), side, delta);
+    applyWorkspaceLayout(layout);
+    saveWorkspaceLayout(layout);
+  });
+}
+
+function resizeWorkspaceLayout(layout, side, delta) {
+  if (side === "left") return normalizeWorkspaceLayout({ ...layout, sidebar: layout.sidebar + delta });
+  return normalizeWorkspaceLayout({ ...layout, inspector: layout.inspector - delta });
+}
+
+function readWorkspaceLayout() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WORKSPACE_LAYOUT_KEY) || "null");
+    return normalizeWorkspaceLayout({ ...DEFAULT_WORKSPACE_LAYOUT, ...parsed });
+  } catch {
+    return normalizeWorkspaceLayout(DEFAULT_WORKSPACE_LAYOUT);
+  }
+}
+
+function readWorkspaceLayoutFromCss() {
+  const styles = getComputedStyle(document.documentElement);
+  return normalizeWorkspaceLayout({
+    sidebar: Number.parseInt(styles.getPropertyValue("--sidebar-w"), 10),
+    inspector: Number.parseInt(styles.getPropertyValue("--inspector-w"), 10),
+  });
+}
+
+function saveWorkspaceLayout(layout) {
+  try {
+    localStorage.setItem(WORKSPACE_LAYOUT_KEY, JSON.stringify(normalizeWorkspaceLayout(layout)));
+  } catch {
+    // Layout preferences are optional; ignore storage failures.
+  }
+}
+
+function applyWorkspaceLayout(layout) {
+  const normalized = normalizeWorkspaceLayout(layout);
+  document.documentElement.style.setProperty("--sidebar-w", `${normalized.sidebar}px`);
+  document.documentElement.style.setProperty("--inspector-w", `${normalized.inspector}px`);
+}
+
+function normalizeWorkspaceLayout(layout) {
+  const workspaceWidth = els.workspace?.clientWidth || window.innerWidth || 1280;
+  const handleWidth = 16;
+  const minEditor = 420;
+  const sidebar = clampNumber(layout.sidebar, 220, Math.min(440, workspaceWidth - 300 - minEditor - handleWidth));
+  const inspector = clampNumber(layout.inspector, 300, Math.min(560, workspaceWidth - sidebar - minEditor - handleWidth));
+  return { sidebar, inspector };
+}
+
+function clampNumber(value, min, max) {
+  const finiteValue = Number.isFinite(value) ? value : min;
+  const safeMax = Math.max(min, max);
+  return Math.min(Math.max(finiteValue, min), safeMax);
+}
+
 function preventWindowFileNavigation() {
   ["dragover", "drop"].forEach((eventName) => {
-    window.addEventListener(eventName, (event) => {
-      if (isFileDrag(event)) event.preventDefault();
+    window.addEventListener(eventName, async (event) => {
+      if (!isFileDrag(event)) return;
+      event.preventDefault();
+      if (eventName !== "drop") return;
+      const files = Array.from(event.dataTransfer?.files || []);
+      if (files.length === 0) return;
+      await importFilesFromGlobalDrop(files);
     });
   });
 }
 
 function isFileDrag(event) {
-  return Array.from(event.dataTransfer?.types || []).includes("Files");
+  return isFileDragData(event.dataTransfer);
+}
+
+function isDocumentDrag(event) {
+  return Array.from(event.dataTransfer?.types || []).includes("application/x-mowen-doc-id");
+}
+
+async function importFilesFromGlobalDrop(files) {
+  const target = getDropImportTarget(document.querySelector(".tab-panel.active")?.id || "");
+  if (target === "ppt") {
+    await importPptPromptFiles(files);
+    return;
+  }
+  if (target === "style") {
+    await importStyleExampleFiles(files);
+    return;
+  }
+  await importDocumentFiles(files);
 }
 
 function hydrateStaticSelects() {
   const options = DOCUMENT_TYPES.map((type) => `<option value="${type.id}">${type.name}</option>`).join("");
   els.typeSelect.innerHTML = options;
+  hydratePptStyleSelect();
+}
+
+function hydratePptStyleSelect() {
+  if (!els.pptStyleSelect) return;
+  const current = els.pptStyleSelect.value || "magazine";
+  const groups = [...new Set(PPT_STYLE_OPTIONS.map((option) => option.group))];
+  els.pptStyleSelect.innerHTML = groups
+    .map((group) => {
+      const options = PPT_STYLE_OPTIONS.filter((option) => option.group === group)
+        .map(
+          (option) =>
+            `<option value="${option.id}" title="${escapeHtml(option.description)}">${escapeHtml(option.name)}</option>`,
+        )
+        .join("");
+      return `<optgroup label="${escapeHtml(group)}">${options}</optgroup>`;
+    })
+    .join("");
+  els.pptStyleSelect.value = PPT_STYLE_OPTIONS.some((option) => option.id === current) ? current : "magazine";
+  updatePptStyleControls();
 }
 
 function render() {
@@ -804,6 +1064,17 @@ function insertTextAtCursor(textarea, text) {
   textarea.setSelectionRange(start + text.length, start + text.length);
 }
 
+function appendDocumentToGeneratePrompt(docId) {
+  const doc = state.docs.find((item) => item.id === docId);
+  if (!doc) return;
+  const block = [`# 引用文档：${doc.title || "未命名文档"}`, "", doc.content || "（空白文档）"].join("\n");
+  const separator = els.generatePrompt.value.trim() ? "\n\n---\n\n" : "";
+  els.generatePrompt.value = `${els.generatePrompt.value}${separator}${block}`;
+  els.generatePrompt.focus();
+  els.generatePrompt.dispatchEvent(new Event("input", { bubbles: true }));
+  toast(`已把“${doc.title || "未命名文档"}”加入生成提示词`);
+}
+
 function showSkillMentionsFor(textarea) {
   const mention = getCurrentMention(textarea);
   if (!mention) {
@@ -926,8 +1197,13 @@ async function importDocumentFiles(files) {
   return documentManager.importDocumentFiles(files);
 }
 
-function exportCurrentDocument() {
-  return documentManager.exportCurrentDocument();
+async function exportCurrentDocument() {
+  try {
+    return await documentManager.exportCurrentDocument();
+  } catch (error) {
+    toast(`导出 Word 文档失败：${error.message || "请稍后重试"}`, "error");
+    return null;
+  }
 }
 
 function exportWorkspaceBackup() {
@@ -1046,6 +1322,264 @@ async function generateDocument(insertIntoCurrent) {
   }));
 }
 
+async function generatePptDeck() {
+  const currentDoc = getCurrentDoc();
+  const title = els.pptTitleInput.value.trim() || els.titleInput.value.trim() || currentDoc?.title || "演示稿";
+  const pptOptions = getPptOptions();
+  const material =
+    els.pptPromptInput.value.trim() ||
+    [els.titleInput.value.trim(), els.contentEditor.value.trim()].filter(Boolean).join("\n\n");
+  if (!material) {
+    toast("请输入 PPT 内容要求，或先打开一篇可作为素材的文档", "warn");
+    return;
+  }
+
+  await withLoading(els.generatePptBtn, "生成中", async () => withProgress("AI 正在生成原生 PPTX 草稿", async (progress) => {
+    progress.update("正在整理归藏 PPTX 提示词", 20);
+    const invokedSkills = resolveInvokedSkills(material, "");
+    const prompt = buildGuizangPptPrompt({
+      title,
+      ...pptOptions,
+      content: material,
+      skillPrompt: formatSkillPrompt(invokedSkills),
+    });
+    progress.update("正在请求 AI 生成幻灯片结构", 44);
+    const output = await callAiJsonWithRepair([
+      { role: "system", content: state.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT },
+      { role: "user", content: prompt },
+    ], "PPT 结构 JSON");
+    progress.update("正在渲染结构预览", 74);
+    const spec = normalizePptSpec(output, {
+      title,
+      ...pptOptions,
+      content: material,
+    });
+    ui.pptDeckSpec = spec;
+    ui.pptDraft = JSON.stringify(spec, null, 2);
+    els.pptOutput.value = ui.pptDraft;
+    renderPptPreview(spec);
+    renderPptQualityReport(spec);
+    toast(`已生成 PPTX 草稿，点击“下载 PPTX”保存到：${getDownloadLocation(`${sanitizeFileName(title)}.pptx`)}`);
+  }));
+}
+
+async function importPptPromptFiles(files) {
+  if (!files || files.length === 0) return;
+  const { accepted: importFiles, skipped: sizeSkipped } = await filterImportableFilesBySize(files, {
+    confirm: confirmLargeImport,
+    notify: toast,
+  });
+  if (importFiles.length === 0) return;
+
+  let importedCount = 0;
+  const skippedFiles = [];
+  const sections = [];
+
+  await withProgress(`正在导入 ${importFiles.length} 个 PPT 素材`, async (progress) => {
+    for (const [index, file] of importFiles.entries()) {
+      progress.update(`正在读取 ${file.name}`, Math.round((index / importFiles.length) * 78) + 10);
+      if (!canImportFile(file.name)) {
+        skippedFiles.push(file.name);
+        continue;
+      }
+      try {
+        const text = await readImportFileText(file);
+        sections.push(`# ${file.name}\n\n${text}`);
+        importedCount += 1;
+      } catch (error) {
+        skippedFiles.push(file.name);
+        console.warn("导入 PPT 素材失败", file.name, error);
+      }
+    }
+    progress.update("正在写入 PPT 内容区", 92);
+  });
+
+  if (importedCount === 0 && skippedFiles.length > 0) {
+    toast(`未添加 PPT 素材：${buildUnsupportedFileMessage(skippedFiles[0])}`, "warn");
+    return;
+  }
+
+  const existing = els.pptPromptInput.value.trim();
+  const addition = sections.join("\n\n---\n\n");
+  els.pptPromptInput.value = [existing, addition].filter(Boolean).join("\n\n---\n\n");
+  els.pptPromptInput.focus();
+  const skippedCount = skippedFiles.length + sizeSkipped.length;
+  toast(`已添加 ${importedCount} 份素材到 PPT 内容区${skippedCount ? `，已跳过 ${skippedCount} 个暂不支持、过大或读取失败的文件` : ""}`);
+}
+
+async function downloadPptDeck() {
+  const jsonText = els.pptOutput.value.trim() || ui.pptDraft;
+  if (!jsonText && !ui.pptDeckSpec) {
+    toast("请先生成 PPTX 草稿", "warn");
+    return;
+  }
+  await withLoading(els.downloadPptBtn, "打包中", async () => withProgress("正在打包原生 PPTX", async (progress) => {
+    progress.update("正在读取幻灯片结构", 28);
+    const spec = jsonText
+      ? parseGuizangPptSpec(jsonText, {
+          title: els.pptTitleInput.value.trim(),
+          ...getPptOptions(),
+        })
+      : ui.pptDeckSpec;
+    const qualityReport = renderPptQualityReport(spec);
+    if (qualityReport?.errors?.length) {
+      toast("PPTX 结构自检发现需要处理的问题，仍将按当前结构导出。", "warn");
+    }
+    progress.update("正在生成 PowerPoint 文件", 68);
+    const fileName = `${sanitizeFileName(spec.title || els.pptTitleInput.value || "演示稿")}.pptx`;
+    const blob = await createPptxBlob(spec);
+    downloadBlob(fileName, blob, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+    progress.update("已完成", 100);
+    toast(`已导出原生 PPTX 到：${getDownloadLocation(fileName)}`);
+  }));
+}
+
+function renderPptPreview(spec) {
+  const html = spec ? renderPptSpecPreview(spec) : "";
+  if (els.pptPreview) els.pptPreview.srcdoc = html;
+  if (els.pptPreviewModalFrame) els.pptPreviewModalFrame.srcdoc = html;
+}
+
+function openPptPreviewModal() {
+  if (!ui.pptDeckSpec) {
+    toast("请先生成或粘贴一份可识别的 PPT 结构，再打开放大预览。", "warn");
+    return;
+  }
+  renderPptPreview(ui.pptDeckSpec);
+  els.pptPreviewOverlay.hidden = false;
+  document.body.classList.add("modal-open");
+}
+
+function closePptPreviewModal() {
+  if (!els.pptPreviewOverlay) return;
+  els.pptPreviewOverlay.hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+function getPptOptions() {
+  const autoSlideCount = Boolean(els.pptAutoSlideCountInput?.checked);
+  const slideCount = autoSlideCount ? null : normalizePptSlideCount(els.pptSlideCountSelect.value);
+  return {
+    style: els.pptStyleSelect.value || "magazine",
+    styleDescription: els.pptCustomStyleInput.value.trim(),
+    autoSlideCount,
+    slideCount,
+  };
+}
+
+function normalizePptSlideCount(value) {
+  const count = Number.parseInt(value, 10);
+  const normalized = Number.isFinite(count) ? Math.min(Math.max(count, 1), 40) : 12;
+  if (els.pptSlideCountSelect && String(els.pptSlideCountSelect.value) !== String(normalized)) {
+    els.pptSlideCountSelect.value = String(normalized);
+  }
+  return normalized;
+}
+
+function updatePptSlideCountControls() {
+  const autoSlideCount = Boolean(els.pptAutoSlideCountInput?.checked);
+  els.pptSlideCountSelect.disabled = autoSlideCount;
+  els.pptSlideCountSelect.title = autoSlideCount
+    ? "已启用自动页数，AI 会根据素材信息量自行决定页数"
+    : "手动指定 PPT 页数";
+}
+
+function updatePptStyleControls() {
+  const isCustom = els.pptStyleSelect.value === "custom";
+  els.pptCustomStyleField.classList.toggle("active", isCustom);
+  els.pptCustomStyleInput.placeholder = isCustom
+    ? "描述你希望复用的 PPT 风格、版式节奏、颜色倾向、适用场景和禁忌。"
+    : "可选：补充本次 PPT 的风格要求，也可以选择“自定义风格”后保存为 PPT 执笔人。";
+}
+
+function renderPptQualityReport(spec) {
+  if (!els.pptQualityReport || !spec) return null;
+  const report = inspectPptSpec(spec, getPptOptions());
+  els.pptQualityReport.textContent = formatPptQualityReport(report);
+  if (els.pptQualityStatus) {
+    els.pptQualityStatus.textContent = report.errors.length ? "需处理" : report.warnings.length ? "有提示" : "通过";
+    els.pptQualityStatus.classList.toggle("ready", !report.errors.length);
+    els.pptQualityStatus.classList.toggle("error", report.errors.length > 0);
+  }
+  return report;
+}
+
+function savePptStyleAsSkill() {
+  const styleDescription = els.pptCustomStyleInput.value.trim();
+  if (!styleDescription) {
+    toast("请先填写自定义风格描述，再保存为 PPT 执笔人", "warn");
+    els.pptCustomStyleInput.focus();
+    return null;
+  }
+
+  const defaultName = els.pptTitleInput.value.trim()
+    ? `${els.pptTitleInput.value.trim()} PPT 风格`
+    : "自定义 PPT 风格";
+  const name = window.prompt("PPT 执笔人名称", defaultName);
+  if (!name || !name.trim()) return null;
+
+  const handle = normalizeHandle(name);
+  const summary = [
+    `# ${name}`,
+    "",
+    "## 适用范围",
+    "用于生成可编辑的原生 PPTX 演示稿，控制页面风格、版式节奏、常用布局和审稿标准。",
+    "",
+    "## 风格描述",
+    styleDescription,
+    "",
+    "## 使用方式",
+    `在 PPT 内容与要求中输入 @${handle}，系统会把该风格作为额外执笔人规则传给 AI。`,
+  ].join("\n");
+  const skillJson = {
+    name,
+    handle,
+    category: "PPT",
+    confidence: "manual",
+    applicable_scope: "原生 PPTX 演示稿生成",
+    style_rules: {
+      must: [
+        "输出必须适合转换为可编辑的原生 PowerPoint 页面",
+        "每页只表达一个核心观点",
+        "根据内容选择 cover、section、content、data、roadmap、orgchart、imageText、appendix、closing 等布局",
+      ],
+      recommended: [styleDescription],
+      optional: [],
+    },
+    forbidden: ["不得依赖网页脚本、CSS 动画、本机路径或截图式输出", "不得编造用户未提供的事实、数字、时间和责任人"],
+    generation_steps: ["判断演示目标", "拆分页面结构", "选择页面类型", "控制文字密度", "补充演讲者备注", "执行结构自检"],
+    self_checklist: ["页数是否符合要求", "每页标题是否明确", "表格是否适合演示页", "备注是否完整", "布局是否有节奏变化"],
+    ppt_generation: {
+      style: "custom",
+      styleDescription,
+      supported_layouts: ["cover", "section", "content", "bullets", "timeline", "comparison", "quote", "data", "roadmap", "orgchart", "imageText", "appendix", "closing"],
+    },
+  };
+
+  try {
+    const saved = commitSkillToState({
+      id: null,
+      name: name.trim(),
+      handle,
+      category: "PPT",
+      description: "PPT 生成专用执笔人",
+      enabled: true,
+      summary,
+      skillJson: JSON.stringify(skillJson, null, 2),
+      examples: [],
+      versions: [],
+      feedbacks: [],
+      createdAt: now(),
+      updatedAt: now(),
+    });
+    toast(`已保存 PPT 执笔人 @${saved.handle} 到：${getSkillLocation(saved)}`);
+    return saved;
+  } catch (error) {
+    toast(error.message || "保存 PPT 执笔人失败", "error");
+    return null;
+  }
+}
+
 async function rewriteSelection(triggerButton = null) {
   const selection = getSelectionOrLine();
   if (!selection.text.trim()) {
@@ -1096,16 +1630,46 @@ async function importStyleExamples(event) {
 
 async function importStyleExampleFiles(files) {
   if (!files || files.length === 0) return;
-  for (const file of files) {
-    ui.editingStyle.examples.push({
-      id: createId(),
-      name: file.name,
-      text: await file.text(),
-      addedAt: now(),
-    });
+  const { accepted: importFiles, skipped: sizeSkipped } = await filterImportableFilesBySize(files, {
+    confirm: confirmLargeImport,
+    notify: toast,
+  });
+  if (importFiles.length === 0) return;
+
+  let importedCount = 0;
+  const skippedFiles = [];
+  await withProgress(`正在导入 ${importFiles.length} 个示范文件`, async (progress) => {
+    for (const [index, file] of importFiles.entries()) {
+      progress.update(`正在读取 ${file.name}`, Math.round((index / importFiles.length) * 78) + 10);
+      if (!canImportFile(file.name)) {
+        skippedFiles.push(file.name);
+        continue;
+      }
+      let text = "";
+      try {
+        text = await readImportFileText(file);
+      } catch (error) {
+        skippedFiles.push(file.name);
+        console.warn("导入示范文件失败", file.name, error);
+        continue;
+      }
+      ui.editingStyle.examples.push({
+        id: createId(),
+        name: file.name,
+        text,
+        addedAt: now(),
+      });
+      importedCount += 1;
+    }
+    progress.update("正在刷新示范列表", 92);
+  });
+  if (importedCount === 0 && skippedFiles.length > 0) {
+    toast(`未添加示范：${buildUnsupportedFileMessage(skippedFiles[0])}`, "warn");
+    return;
   }
   renderStyleExamples();
-  toast(`已添加 ${files.length} 份示范到：${getSkillTrainingLocation(ui.editingStyle)}`);
+  const skippedCount = skippedFiles.length + sizeSkipped.length;
+  toast(`已添加 ${importedCount} 份示范到：${getSkillTrainingLocation(ui.editingStyle)}${skippedCount ? `，已跳过 ${skippedCount} 个暂不支持、过大或读取失败的文件` : ""}`);
 }
 
 async function summarizeStyle() {
@@ -1296,6 +1860,10 @@ async function withProgress(message, task, initialProgress = 8) {
   return progressController.withProgress(message, task, initialProgress);
 }
 
+function confirmLargeImport(message) {
+  return window.confirm(message);
+}
+
 function getSelectionOrLine() {
   const editor = els.contentEditor;
   const content = editor.value;
@@ -1337,6 +1905,11 @@ function switchTab(tabName) {
   document.querySelectorAll(".tab-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === targetPanelId);
   });
+  if (els.apiTopBtn) {
+    const apiActive = tabName === "api";
+    els.apiTopBtn.classList.toggle("active", apiActive);
+    els.apiTopBtn.setAttribute("aria-pressed", String(apiActive));
+  }
   if (window.lucide) window.lucide.createIcons();
 }
 
@@ -1394,14 +1967,23 @@ function deriveGeneratedTitle(content, prompt) {
     .map((line) => line.trim())
     .find(Boolean);
   if (firstContentLine && firstContentLine.length <= 48) {
-    return firstContentLine.replace(/^#+\s*/, "");
+    return cleanGeneratedTitle(firstContentLine);
   }
   const firstPromptLine = String(prompt || "")
     .split("\n")
     .map((line) => line.trim())
     .find(Boolean);
   if (!firstPromptLine) return "AI 起草文档";
-  return firstPromptLine.replace(/^请(起草|撰写|写一份)?/, "").slice(0, 32) || "AI 起草文档";
+  return cleanGeneratedTitle(firstPromptLine.replace(/^请(起草|撰写|写一份)?/, "")).slice(0, 32) || "AI 起草文档";
+}
+
+function cleanGeneratedTitle(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/^\*\*(.+)\*\*$/, "$1")
+    .replace(/^__(.+)__$/, "$1")
+    .trim();
 }
 
 function createDefaultFolder() {
@@ -1417,7 +1999,7 @@ function persist() {
     .then(async () => {
       await writeWorkspaceState(snapshot);
       writeStorageBootstrap(snapshot);
-      localStorage.removeItem(STORAGE_KEY);
+      clearLegacyLocalStorageState();
     })
     .catch((error) => {
       console.error("保存工作台数据失败", error);
@@ -1436,6 +2018,12 @@ async function hydrateState() {
 }
 
 async function loadState() {
+  const bootstrap = readStorageBootstrap();
+  if (shouldPreferLocalStorageFallback(bootstrap)) {
+    const fallback = readLegacyLocalStorageState();
+    if (fallback) return fallback;
+  }
+
   try {
     const indexedDbState = await readWorkspaceState();
     if (indexedDbState) return indexedDbState;
@@ -1448,7 +2036,7 @@ async function loadState() {
     try {
       await writeWorkspaceState(legacy);
       writeStorageBootstrap(legacy);
-      localStorage.removeItem(STORAGE_KEY);
+      clearLegacyLocalStorageState();
     } catch (error) {
       console.warn("迁移旧 localStorage 数据到 IndexedDB 失败，暂时继续使用旧数据", error);
     }
@@ -1458,38 +2046,10 @@ async function loadState() {
   return {};
 }
 
-function readLegacyLocalStorageState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorageBootstrap(snapshot) {
-  try {
-    localStorage.setItem(
-      STORAGE_BOOTSTRAP_KEY,
-      JSON.stringify({
-        storage: "indexedDB",
-        updatedAt: now(),
-        selectedFolderId: snapshot.selectedFolderId || "all",
-        selectedDocId: snapshot.selectedDocId || null,
-        docCount: Array.isArray(snapshot.docs) ? snapshot.docs.length : 0,
-        skillCount: Array.isArray(snapshot.styles) ? snapshot.styles.length : 0,
-      }),
-    );
-  } catch (error) {
-    console.warn("写入本机启动摘要失败", error);
-  }
-}
-
 function tryLocalStorageFallback(snapshot) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-    writeStorageBootstrap({ ...snapshot, storageFallback: "localStorage" });
+    writeLegacyLocalStorageState(snapshot);
+    writeStorageBootstrap(snapshot, "localStorage");
   } catch (error) {
     toast("本机存储空间不足，部分最新更改可能无法保存。请导出备份或减少大型样本文件。", "error");
   }

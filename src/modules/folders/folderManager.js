@@ -1,12 +1,10 @@
 import { folderColors } from "../../config/constants.js";
 import { EVENTS } from "../../core/eventBus.js";
-import {
-  getAuthorizedDirectoryHandle,
-  removeDirectoryHandle,
-  saveDirectoryHandle,
-} from "../../core/storage.js";
+import { canImportFile, readImportFileText } from "../../utils/fileReaders.js";
 import { createId, now, sanitizeFileName } from "../../utils/helpers.js";
-import { guessTypeFromName, isSupportedTextFile } from "../../utils/validation.js";
+import { filterImportableFilesBySize } from "../../utils/importGuards.js";
+import { guessTypeFromName } from "../../utils/validation.js";
+import { createBrowserFileSystemAdapter } from "./fileSystemAdapter.js";
 
 export function createFolderManager(deps) {
   const {
@@ -18,6 +16,8 @@ export function createFolderManager(deps) {
     getFolderLocation,
     getDocumentLocation,
     toast,
+    fileSystem = createBrowserFileSystemAdapter(),
+    confirmLargeImport = (message) => globalThis.window?.confirm?.(message) ?? true,
   } = deps;
 
   function normalizeFolder(folder) {
@@ -46,12 +46,12 @@ export function createFolderManager(deps) {
   }
 
   async function linkRealFolder() {
-    if (!window.showDirectoryPicker) {
+    if (!fileSystem.isSupported()) {
       toast("当前浏览器不支持关联真实文件夹，请使用支持 File System Access API 的 Chromium 浏览器。", "warn");
       return null;
     }
     try {
-      const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+      const handle = await fileSystem.pickDirectory({ mode: "readwrite" });
       const id = createId();
       const folder = {
         id,
@@ -62,7 +62,7 @@ export function createFolderManager(deps) {
         createdAt: now(),
         updatedAt: now(),
       };
-      await saveDirectoryHandle(id, handle);
+      await fileSystem.saveDirectoryHandle(id, handle);
       state.folders.push(folder);
       ui.selectedFolderId = id;
       const importedCount = await importFilesFromDirectoryHandle(folder, handle);
@@ -82,7 +82,7 @@ export function createFolderManager(deps) {
     const folder = getFolderById(folderId);
     if (!folder || folder.kind !== "real") return 0;
     try {
-      const handle = await getAuthorizedDirectoryHandle(folder, "read");
+      const handle = await fileSystem.getAuthorizedDirectoryHandle(folder, "read");
       const importedCount = await importFilesFromDirectoryHandle(folder, handle);
       persist();
       eventBus.emit(EVENTS.RENDER_ALL);
@@ -96,21 +96,33 @@ export function createFolderManager(deps) {
 
   async function importFilesFromDirectoryHandle(folder, handle) {
     let importedCount = 0;
-    for await (const entry of handle.values()) {
-      if (entry.kind !== "file" || !isSupportedTextFile(entry.name)) continue;
-      const file = await entry.getFile();
-      const sourceKey = `${folder.id}:${entry.name}:${file.lastModified}:${file.size}`;
+    for await (const item of fileSystem.listFiles(handle)) {
+      const entryName = item.name || item.entry?.name || "未命名文件";
+      if (!canImportFile(entryName)) continue;
+      const file = await item.getFile();
+      const { accepted } = await filterImportableFilesBySize([file], {
+        confirm: confirmLargeImport,
+        notify: toast,
+      });
+      if (accepted.length === 0) continue;
+      const sourceKey = `${folder.id}:${entryName}:${file.lastModified}:${file.size}`;
       if (state.docs.some((doc) => doc.sourceKey === sourceKey)) continue;
-      const content = await file.text();
+      let content = "";
+      try {
+        content = await readImportFileText(file);
+      } catch (error) {
+        console.warn("读取真实文件夹文件失败", entryName, error);
+        continue;
+      }
       state.docs.unshift({
         id: createId(),
-        title: entry.name.replace(/\.[^.]+$/, ""),
-        type: guessTypeFromName(entry.name),
+        title: entryName.replace(/\.[^.]+$/, ""),
+        type: guessTypeFromName(entryName),
         folderId: folder.id,
         styleId: state.styles[0]?.id || "",
         content,
         sourceKey,
-        sourceFileName: entry.name,
+        sourceFileName: entryName,
         createdAt: now(),
         updatedAt: now(),
       });
@@ -122,12 +134,9 @@ export function createFolderManager(deps) {
   async function syncDocumentToRealFolder(doc) {
     const folder = getFolderById(doc.folderId);
     if (!folder || folder.kind !== "real") return getDocumentLocation(doc);
-    const handle = await getAuthorizedDirectoryHandle(folder, "readwrite");
+    const handle = await fileSystem.getAuthorizedDirectoryHandle(folder, "readwrite");
     const fileName = `${sanitizeFileName(doc.title || "未命名文档")}.txt`;
-    const fileHandle = await handle.getFileHandle(fileName, { create: true });
-    const writable = await fileHandle.createWritable();
-    await writable.write(`${doc.title || "未命名文档"}\n\n${doc.content || ""}`);
-    await writable.close();
+    await fileSystem.writeTextFile(handle, fileName, `${doc.title || "未命名文档"}\n\n${doc.content || ""}`);
     doc.syncedFileName = fileName;
     doc.updatedAt = now();
     persist();
@@ -187,7 +196,7 @@ export function createFolderManager(deps) {
     ui.selectedFolderId = "all";
     persist();
     if (folder.kind === "real") {
-      removeDirectoryHandle(folder.id).catch((error) => {
+      fileSystem.removeDirectoryHandle(folder.id).catch((error) => {
         console.warn("移除真实文件夹授权失败", error);
       });
     }

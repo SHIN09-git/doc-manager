@@ -4,6 +4,9 @@ export class EventBus {
   }
 
   on(event, callback) {
+    if (typeof callback !== "function") {
+      throw new TypeError(`EventBus listener for ${event} must be a function`);
+    }
     if (!this.listeners.has(event)) {
       this.listeners.set(event, []);
     }
@@ -16,6 +19,9 @@ export class EventBus {
     const callbacks = this.listeners.get(event);
     const index = callbacks.indexOf(callback);
     if (index > -1) callbacks.splice(index, 1);
+    if (callbacks.length === 0) {
+      this.listeners.delete(event);
+    }
   }
 
   emit(event, data) {

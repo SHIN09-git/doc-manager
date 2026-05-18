@@ -1,6 +1,9 @@
 import { clone, createId, now, sanitizeFileName } from "../../utils/helpers.js";
+import { buildUnsupportedFileMessage, canImportFile, readImportFileText } from "../../utils/fileReaders.js";
+import { filterImportableFilesBySize } from "../../utils/importGuards.js";
 import { guessTypeFromName } from "../../utils/validation.js";
 import { EVENTS } from "../../core/eventBus.js";
+import { createDocxBlob, DOCX_MIME, prepareDocumentExport } from "./docxExporter.js";
 
 export function createDocumentManager(deps) {
   const {
@@ -17,6 +20,8 @@ export function createDocumentManager(deps) {
     getType,
     downloadBlob,
     toast,
+    confirmLargeImport = (message) => globalThis.window?.confirm?.(message) ?? true,
+    withImportProgress = async (_message, task) => task({ update: () => {} }),
   } = deps;
 
   function getCurrentDoc() {
@@ -100,37 +105,65 @@ export function createDocumentManager(deps) {
 
   async function importDocumentFiles(files) {
     if (!files || files.length === 0) return 0;
+    const { accepted: importFiles, skipped: sizeSkipped } = await filterImportableFilesBySize(files, {
+      confirm: confirmLargeImport,
+      notify: toast,
+    });
+    if (importFiles.length === 0) return 0;
+
     const folderId = ui.selectedFolderId !== "all" ? ui.selectedFolderId : state.folders[0]?.id || createDefaultFolder();
     saveEditor(false);
     let importedCount = 0;
-    for (const file of files) {
-      const content = await file.text();
-      const doc = buildDocument({
-        title: file.name.replace(/\.[^.]+$/, ""),
-        type: guessTypeFromName(file.name),
-        folderId,
-        content,
-      });
-      state.docs.unshift(doc);
-      ui.selectedDocId = doc.id;
-      importedCount += 1;
+    const skippedFiles = [];
+    await withImportProgress(`正在导入 ${importFiles.length} 个文件`, async (progress) => {
+      for (const [index, file] of importFiles.entries()) {
+        progress.update(`正在读取 ${file.name}`, Math.round((index / importFiles.length) * 78) + 10);
+        if (!canImportFile(file.name)) {
+          skippedFiles.push(file.name);
+          continue;
+        }
+        let content = "";
+        try {
+          content = await readImportFileText(file);
+        } catch (error) {
+          skippedFiles.push(file.name);
+          console.warn("导入文件失败", file.name, error);
+          continue;
+        }
+        const doc = buildDocument({
+          title: file.name.replace(/\.[^.]+$/, ""),
+          type: guessTypeFromName(file.name),
+          folderId,
+          content,
+        });
+        state.docs.unshift(doc);
+        ui.selectedDocId = doc.id;
+        importedCount += 1;
+      }
+      progress.update("正在保存导入结果", 92);
+    });
+    if (importedCount === 0 && skippedFiles.length > 0) {
+      toast(`未导入文件：${buildUnsupportedFileMessage(skippedFiles[0])}`, "warn");
+      return 0;
     }
     persist();
     eventBus.emit(EVENTS.RENDER_ALL);
     const folder = state.folders.find((item) => item.id === folderId);
-    toast(`已导入 ${importedCount} 份文档到：${getFolderLocation(folder)}`);
+    const skippedCount = skippedFiles.length + sizeSkipped.length;
+    toast(`已导入 ${importedCount} 份文档到：${getFolderLocation(folder)}${skippedCount ? `，已跳过 ${skippedCount} 个暂不支持、过大或读取失败的文件` : ""}`);
     return importedCount;
   }
 
-  function exportCurrentDocument() {
+  async function exportCurrentDocument() {
     saveEditor(false);
     const doc = getCurrentDoc();
     if (!doc) return null;
     const type = getType(doc.type).name;
-    const content = `${doc.title}\n\n${doc.content}`;
-    const fileName = `${sanitizeFileName(doc.title || "未命名文档")}.txt`;
-    downloadBlob(fileName, content, "text/plain;charset=utf-8");
-    toast(`已导出 ${type} 到：${getDownloadLocation(fileName)}`);
+    const exportDoc = prepareDocumentExport(doc);
+    const fileName = `${sanitizeFileName(exportDoc.title || "未命名文档")}.docx`;
+    const blob = await createDocxBlob(exportDoc);
+    downloadBlob(fileName, blob, DOCX_MIME);
+    toast(`已导出 ${type} Word 文档到：${getDownloadLocation(fileName)}`);
     return fileName;
   }
 

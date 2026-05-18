@@ -10,6 +10,7 @@ test("EventBus emits data and supports unsubscribe", () => {
   off();
   bus.emit("demo", { ok: false });
   assert.deepEqual(received, [{ ok: true }]);
+  assert.equal(bus.listeners.has("demo"), false);
 });
 
 test("EventBus.clear removes all listeners", () => {
@@ -21,4 +22,9 @@ test("EventBus.clear removes all listeners", () => {
   bus.clear();
   bus.emit("demo");
   assert.equal(count, 0);
+});
+
+test("EventBus rejects non-function listeners", () => {
+  const bus = new EventBus();
+  assert.throws(() => bus.on("demo", null), /must be a function/);
 });

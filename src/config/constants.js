@@ -6,10 +6,16 @@ export const WORKSPACE_STATE_ID = "current";
 export const HANDLE_DB_NAME = "school-doc-manager-handles";
 export const HANDLE_STORE_NAME = "directory-handles";
 export const SUPPORTED_TEXT_EXTENSIONS = [".txt", ".md", ".text", ".csv"];
+export const SUPPORTED_WORD_EXTENSIONS = [".docx"];
+export const LEGACY_WORD_EXTENSIONS = [".doc"];
+export const SUPPORTED_PRESENTATION_EXTENSIONS = [".pptx"];
+export const LEGACY_PRESENTATION_EXTENSIONS = [".ppt"];
 export const SEARCH_RENDER_DEBOUNCE_MS = 160;
 export const AI_REQUEST_TIMEOUT_MS = 90000;
 export const AI_RETRY_BASE_DELAY_MS = 1000;
 export const AI_MAX_RETRIES = 3;
+export const LARGE_IMPORT_WARNING_BYTES = 10 * 1024 * 1024;
+export const MAX_IMPORT_FILE_BYTES = 50 * 1024 * 1024;
 
 export const DOCUMENT_TYPES = [
   {

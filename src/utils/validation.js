@@ -1,8 +1,38 @@
-import { SUPPORTED_TEXT_EXTENSIONS } from "../config/constants.js";
+import {
+  LEGACY_PRESENTATION_EXTENSIONS,
+  LEGACY_WORD_EXTENSIONS,
+  SUPPORTED_PRESENTATION_EXTENSIONS,
+  SUPPORTED_TEXT_EXTENSIONS,
+  SUPPORTED_WORD_EXTENSIONS,
+} from "../config/constants.js";
 
 export function isSupportedTextFile(name) {
   const lower = String(name || "").toLowerCase();
   return SUPPORTED_TEXT_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+export function isSupportedWordFile(name) {
+  const lower = String(name || "").toLowerCase();
+  return SUPPORTED_WORD_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+export function isLegacyWordFile(name) {
+  const lower = String(name || "").toLowerCase();
+  return LEGACY_WORD_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+export function isSupportedPresentationFile(name) {
+  const lower = String(name || "").toLowerCase();
+  return SUPPORTED_PRESENTATION_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+export function isLegacyPresentationFile(name) {
+  const lower = String(name || "").toLowerCase();
+  return LEGACY_PRESENTATION_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+export function isSupportedImportFile(name) {
+  return isSupportedTextFile(name) || isSupportedWordFile(name) || isSupportedPresentationFile(name);
 }
 
 export function guessTypeFromName(name) {

@@ -37,7 +37,7 @@
           <label class="icon-button" title="导入文档">
             <i data-lucide="upload"></i>
             <span>导入</span>
-            <input id="importInput" type="file" accept=".txt,.md,.text,.csv" multiple hidden />
+            <input id="importInput" type="file" accept=".txt,.md,.text,.csv,.docx,.pptx" multiple hidden />
           </label>
           <button class="icon-button" id="exportDocBtn" type="button" title="导出当前文档">
             <i data-lucide="download"></i>
@@ -47,10 +47,14 @@
             <i data-lucide="archive"></i>
             <span>备份</span>
           </button>
+          <button class="icon-button" id="apiTopBtn" type="button" title="打开 AI 接口配置" aria-controls="apiPanel" aria-pressed="false">
+            <i data-lucide="plug-zap"></i>
+            <span>接口</span>
+          </button>
         </div>
       </header>
 
-      <main class="workspace">
+      <main class="workspace" id="workspace">
         <aside class="sidebar" aria-label="文档管理">
           <section class="panel section-folders">
             <div class="panel-heading">
@@ -87,6 +91,8 @@
             <div class="doc-list" id="docList"></div>
           </section>
         </aside>
+
+        <div class="workspace-resizer workspace-resizer-left" id="leftWorkspaceResizer" role="separator" aria-orientation="vertical" aria-label="调整左侧文档栏宽度" tabindex="0"></div>
 
         <section class="editor-panel" aria-label="文档编辑">
           <div class="editor-meta">
@@ -145,11 +151,13 @@
           </div>
         </section>
 
+        <div class="workspace-resizer workspace-resizer-right" id="rightWorkspaceResizer" role="separator" aria-orientation="vertical" aria-label="调整右侧功能栏宽度" tabindex="0"></div>
+
         <aside class="inspector" aria-label="AI 与执笔人">
           <div class="tabs" role="tablist" aria-label="右侧功能">
             <button class="tab active" data-tab="generate" type="button" role="tab" aria-controls="generatePanel" aria-selected="true">生成</button>
             <button class="tab" data-tab="style" type="button" role="tab" aria-controls="stylePanel" aria-selected="false">执笔人</button>
-            <button class="tab" data-tab="api" type="button" role="tab" aria-controls="apiPanel" aria-selected="false">接口</button>
+            <button class="tab" data-tab="ppt" type="button" role="tab" aria-controls="pptPanel" aria-selected="false">PPT</button>
           </div>
 
           <section class="tab-panel active" id="generatePanel">
@@ -211,7 +219,7 @@
             <label class="file-chip" id="styleDropZone">
               <i data-lucide="paperclip"></i>
               <span>添加或拖入示范文件</span>
-              <input id="styleFileInput" type="file" accept=".txt,.md,.text" multiple hidden />
+              <input id="styleFileInput" type="file" accept=".txt,.md,.text,.csv,.docx,.pptx" multiple hidden />
             </label>
             <button id="summarizeStyleBtn" class="primary-action" type="button">
               <i data-lucide="scan-text"></i>
@@ -297,6 +305,83 @@
               </section>
             </div>
           </section>
+
+          <section class="tab-panel" id="pptPanel">
+            <div class="panel-heading">
+              <h2>PPT 生成</h2>
+              <span class="status-pill">原生 PPTX</span>
+            </div>
+            <label>
+              <span>标题</span>
+              <input id="pptTitleInput" type="text" placeholder="例如：年度工作复盘" />
+            </label>
+            <div class="ppt-options">
+              <label>
+                <span>风格</span>
+                <select id="pptStyleSelect">
+                  <option value="magazine">电子杂志</option>
+                  <option value="swiss">瑞士国际主义</option>
+                  <option value="custom">自定义风格</option>
+                </select>
+              </label>
+              <label>
+                <span>页数</span>
+                <div class="slide-count-control">
+                  <input id="pptSlideCountSelect" type="number" min="1" max="40" step="1" value="12" />
+                  <label class="inline-check">
+                    <input id="pptAutoSlideCountInput" type="checkbox" />
+                    <span>自动</span>
+                  </label>
+                </div>
+              </label>
+            </div>
+            <label class="wide-field custom-style-field" id="pptCustomStyleField">
+              <span>自定义风格描述</span>
+              <textarea id="pptCustomStyleInput" rows="3" placeholder="例如：用于校内述职汇报，版式克制、留白充足、强调关键数据和行动清单。"></textarea>
+            </label>
+            <label class="wide-field">
+              <span>内容与要求</span>
+              <textarea id="pptPromptInput" rows="8" placeholder="粘贴大纲、文档内容、导入后的 PPT 文本，或直接描述要生成的演示稿。"></textarea>
+            </label>
+            <div class="drop-zone compact" id="pptDropZone">
+              <i data-lucide="file-up"></i>
+              <span>拖入 PPTX / Word / 文本作为生成素材</span>
+            </div>
+            <div class="two-actions">
+              <button id="generatePptBtn" class="primary-action" type="button">
+                <i data-lucide="presentation"></i>
+                生成 PPTX 草稿
+              </button>
+              <button id="downloadPptBtn" type="button">下载 PPTX</button>
+              <button id="savePptStyleBtn" type="button">保存为 PPT 执笔人</button>
+            </div>
+            <label class="wide-field">
+              <span>幻灯片结构</span>
+              <textarea id="pptOutput" rows="8" spellcheck="false" placeholder="生成后会得到可编辑的幻灯片 JSON 结构，下载时会打包成原生 .pptx。"></textarea>
+            </label>
+            <section class="wide-field">
+              <div class="panel-heading compact-heading">
+                <h3>结构自检</h3>
+                <span id="pptQualityStatus" class="status-pill">待生成</span>
+              </div>
+              <pre id="pptQualityReport" class="quality-report">生成 PPTX 草稿后会检查页数、标题、表格、备注和布局丰富度。</pre>
+            </section>
+            <div class="preview-toolbar wide-field">
+              <span>HTML 预览</span>
+              <button id="openPptPreviewBtn" type="button">放大预览</button>
+            </div>
+            <iframe id="pptPreview" class="ppt-preview" title="PPT 结构预览" sandbox="allow-same-origin"></iframe>
+          </section>
+
+          <div class="preview-overlay" id="pptPreviewOverlay" hidden>
+            <div class="preview-modal" role="dialog" aria-modal="true" aria-labelledby="pptPreviewModalTitle">
+              <div class="preview-modal-head">
+                <h2 id="pptPreviewModalTitle">PPT HTML 预览</h2>
+                <button id="closePptPreviewBtn" type="button">关闭</button>
+              </div>
+              <iframe id="pptPreviewModalFrame" class="ppt-preview-modal-frame" title="PPT 放大预览" sandbox="allow-same-origin"></iframe>
+            </div>
+          </div>
 
           <section class="tab-panel" id="apiPanel">
             <div class="panel-heading">
