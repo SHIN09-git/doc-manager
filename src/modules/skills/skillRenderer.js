@@ -19,6 +19,18 @@ export function createSkillRenderer(deps) {
     commitSkillToState,
     getSkillLocation,
     toast,
+    onNewSkill = () => {},
+    onEditSkill = () => {},
+    onRetrainSkill = () => {},
+    onInvokeSkill = () => {},
+    onToggleSkillEnabled = () => {},
+    onCopySkillHandle = () => {},
+    onOpenSkillDetail = null,
+    onTestSkill = () => {},
+    onExportSkill = () => {},
+    onDeleteSkill = () => {},
+    onRetrySkill = () => {},
+    onCancelSkillBuild = () => {},
   } = deps;
 
   function renderStyleSelect() {
@@ -30,55 +42,96 @@ export function createSkillRenderer(deps) {
     els.editorSkillSelect.innerHTML = [
       '<option value="">不指定执笔人</option>',
       ...enabledStyles.map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)}</option>`),
-    ]
-      .join("");
+    ].join("");
   }
 
   function renderStyleEditor() {
     if (!ui.editingStyle) {
       ui.editingStyle = clone(state.styles[0] || createEmptyStyle());
     }
-    els.styleNameInput.value = ui.editingStyle.name || "";
-    els.skillHandleInput.value = ui.editingStyle.handle ? `@${ui.editingStyle.handle}` : "";
-    els.skillCategorySelect.value = ui.editingStyle.category || "自定义";
-    els.skillDescriptionInput.value = ui.editingStyle.description || "";
-    els.skillEnabledInput.checked = ui.editingStyle.enabled !== false;
-    els.skillAnalysisInput.value = ui.editingStyle.analysis || "";
-    els.skillAggregationInput.value = ui.editingStyle.aggregation || "";
-    els.styleSummaryInput.value = ui.editingStyle.summary || "";
-    els.skillJsonInput.value = ui.editingStyle.skillJson || "";
+    if (els.styleNameInput) els.styleNameInput.value = ui.editingStyle.name || "";
+    if (els.skillHandleInput) els.skillHandleInput.value = ui.editingStyle.handle || normalizeHandle(ui.editingStyle.name);
+    if (els.skillCategorySelect) {
+      const category = ui.editingStyle.category || "自定义";
+      const builtInCategories = ["公文写作", "文风格式", "材料整理", "段落改写", "自定义"];
+      els.skillCategorySelect.value = builtInCategories.includes(category) ? category : "自定义";
+      if (els.skillCustomCategoryInput) {
+        els.skillCustomCategoryInput.value = builtInCategories.includes(category) ? "" : category;
+        if (els.skillCustomCategoryField) {
+          els.skillCustomCategoryField.hidden = els.skillCategorySelect.value !== "自定义";
+        }
+      }
+    }
+    if (els.skillDescriptionInput) els.skillDescriptionInput.value = ui.editingStyle.description || "";
+    if (els.skillEnabledInput) els.skillEnabledInput.checked = ui.editingStyle.enabled !== false;
+    if (els.skillAnalysisInput) els.skillAnalysisInput.value = ui.editingStyle.analysis || "";
+    if (els.skillAggregationInput) els.skillAggregationInput.value = ui.editingStyle.aggregation || "";
+    if (els.styleSummaryInput) {
+      const keepDraft = Boolean(ui.skillMarkdownDirty && ui.skillMarkdownDirtySkillId === ui.editingStyle.id);
+      if (!keepDraft) els.styleSummaryInput.value = ui.editingStyle.summary || "";
+    }
+    if (els.skillJsonInput) els.skillJsonInput.value = ui.editingStyle.skillJson || "";
     renderSkillQualityReport();
     renderStyleExamples();
+    renderSkillDetailExamples();
     renderSkillVersions();
     renderSkillTest();
   }
 
   function renderStyleExamples() {
-    const examples = ui.editingStyle.examples || [];
+    renderExampleList(els.styleExampleList, ui.editingStyle, {
+      emptyText: "尚未添加训练样本",
+      removable: true,
+      onRemove: (index) => {
+        ui.editingStyle.examples.splice(index, 1);
+        renderStyleExamples();
+      },
+    });
+  }
+
+  function renderSkillDetailExamples() {
+    renderExampleList(els.skillDetailExampleList, ui.editingStyle, {
+      emptyText: "尚未记录训练文本",
+      removable: true,
+      onRemove: (index) => {
+        ui.editingStyle.examples.splice(index, 1);
+        commitSkillToState(ui.editingStyle);
+        renderStyleEditor();
+        renderStyleList();
+        toast("已移除该训练文本");
+      },
+    });
+  }
+
+  function renderExampleList(target, skill, options = {}) {
+    if (!target) return;
+    const examples = skill?.examples || [];
+    const { emptyText = "暂无文本", removable = false, onRemove = () => {} } = options;
     if (examples.length === 0) {
-      els.styleExampleList.innerHTML = '<div class="empty-state">尚未添加示范文件</div>';
+      target.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
       return;
     }
-    els.styleExampleList.innerHTML = examples
+    target.innerHTML = examples
       .map(
         (example, index) => `<div class="example-item">
           <div class="example-title">
             <span>${escapeHtml(example.name)}</span>
-            <button class="tiny-button danger-text" type="button" title="移除" data-remove-example="${index}"><i data-lucide="x"></i></button>
+            ${
+              removable
+                ? `<button class="tiny-button danger-text" type="button" title="移除" data-remove-example="${index}"><i data-lucide="x"></i></button>`
+                : ""
+            }
           </div>
-          <div class="example-size">${example.text.length} 字符</div>
+          <div class="example-size">${Number(example.text?.length || example.originalLength || 0)} 字符</div>
           <details class="example-preview">
             <summary>预览文本</summary>
-            <pre>${escapeHtml(example.text.slice(0, 2000))}${example.text.length > 2000 ? "\n..." : ""}</pre>
+            <pre>${escapeHtml(String(example.text || "").slice(0, 2000))}${String(example.text || "").length > 2000 ? "\n..." : ""}</pre>
           </details>
         </div>`,
       )
       .join("");
-    els.styleExampleList.querySelectorAll("[data-remove-example]").forEach((button) => {
-      button.addEventListener("click", () => {
-        ui.editingStyle.examples.splice(Number(button.dataset.removeExample), 1);
-        renderStyleExamples();
-      });
+    target.querySelectorAll("[data-remove-example]").forEach((button) => {
+      button.addEventListener("click", () => onRemove(Number(button.dataset.removeExample)));
     });
     if (window.lucide) window.lucide.createIcons();
   }
@@ -91,11 +144,11 @@ export function createSkillRenderer(deps) {
     const lines = [
       `启用状态：${style.enabled === false ? "未启用" : "已启用"}`,
       `规则置信度：${report.confidence || aggregationData.overall_confidence || "未评估"}`,
-      `强规则：${(aggregationData.strong_rules || report.strong_rules || []).length || 0} 条`,
-      `候选规则：${(aggregationData.candidate_rules || report.candidate_rules || []).length || 0} 条`,
+      `强规则：${countStrongRules(style)} 条`,
+      `候选规则：${countCandidateRules(style)} 条`,
       `冲突提示：${(aggregationData.conflicts || report.conflicts || []).length || 0} 条`,
-      `个案排除：${(aggregationData.case_specific_exclusions || report.case_specific_exclusions || []).length || 0} 条`,
-      `隐私过滤：${(aggregationData.privacy_findings || report.privacy_findings || []).length || 0} 条`,
+      `个案排除：${countCaseExclusions(style)} 条`,
+      `隐私过滤：${countPrivacyFindings(style)} 条`,
     ];
     if (style.lastTest?.report) {
       lines.push("", "最近测试：", formatPossiblyJson(style.lastTest.report).slice(0, 1200));
@@ -185,6 +238,9 @@ export function createSkillRenderer(deps) {
     ui.editingStyle.summary = version.summary || "";
     ui.editingStyle.skillJson = version.skillJson || ui.editingStyle.skillJson;
     ui.editingStyle.qualityReport = version.qualityReport || ui.editingStyle.qualityReport || null;
+    ui.editingStyle.status = "ready";
+    ui.editingStyle.lastBuildError = "";
+    ui.editingStyle.lastBuildAt = now();
     ui.editingStyle.lastTest = {
       id: createId(),
       createdAt: now(),
@@ -195,6 +251,7 @@ export function createSkillRenderer(deps) {
     ui.editingStyle.updatedAt = now();
     commitSkillToState(ui.editingStyle);
     renderStyleEditor();
+    renderStyleList();
     switchSkillDetailTab("versions");
     showSkillVersion(index);
     toast(`已回退到 v${version.version || index + 1}，当前执笔人已保存到：${getSkillLocation(ui.editingStyle)}`);
@@ -211,43 +268,272 @@ export function createSkillRenderer(deps) {
   }
 
   function renderStyleList() {
+    if (!els.styleList) return;
+    const visibleStyles = getFilteredStyles();
     if (state.styles.length === 0) {
-      els.styleList.innerHTML = '<div class="empty-state">暂无执笔人</div>';
+      els.styleList.innerHTML = renderEmptySkillCard("还没有执笔人", "拖入 1-3 篇同类正式文档训练你的第一个执笔人");
+      bindGridEvents();
+      if (window.lucide) window.lucide.createIcons();
       return;
     }
-    els.styleList.innerHTML = state.styles
-      .map(
-        (style) => `<div class="style-item ${ui.editingStyle?.id === style.id ? "active" : ""}">
-          <button class="style-select-button" type="button" data-style-id="${style.id}">
-            <span class="style-main">
-              <i data-lucide="book-open-text"></i>
-              <span>${escapeHtml(style.name)}</span>
-            </span>
-            <span class="skill-handle">@${escapeHtml(style.handle)}</span>
-            <span>${escapeHtml(style.category || "自定义")} · ${isSkillEnabled(style) ? "已启用" : "未启用"}</span>
+    if (visibleStyles.length === 0) {
+      els.styleList.innerHTML = renderEmptySkillCard("没有匹配的执笔人", "调整筛选条件后再查看");
+      bindGridEvents();
+      if (window.lucide) window.lucide.createIcons();
+      return;
+    }
+    els.styleList.innerHTML = visibleStyles.map(renderSkillCard).join("");
+    bindGridEvents();
+    if (window.lucide) window.lucide.createIcons();
+  }
+
+  function getFilteredStyles() {
+    const category = els.skillCategoryFilter?.value || "all";
+    const enabledOnly = Boolean(els.skillEnabledOnlyInput?.checked);
+    const keyword = String(els.skillSearchInput?.value || "").trim().toLowerCase();
+    return state.styles.filter((style) => {
+      if (category !== "all" && (style.category || "自定义") !== category) return false;
+      if (enabledOnly && !isSkillEnabled(style)) return false;
+      if (!keyword) return true;
+      const haystack = [style.name, style.handle, style.description, style.category].join(" ").toLowerCase();
+      return haystack.includes(keyword);
+    });
+  }
+
+  function renderEmptySkillCard(title, description) {
+    return `<article class="skill-empty-card">
+      <div class="skill-avatar"><i data-lucide="book-open-text"></i></div>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(description)}</p>
+      <button class="primary-action" type="button" data-new-skill>
+        <i data-lucide="plus"></i>
+        新建执笔人
+      </button>
+    </article>`;
+  }
+
+  function renderSkillCard(style) {
+    const status = getSkillStatus(style);
+    const result = style.lastBuildResult || {};
+    const buildProgress = style.buildProgress || {};
+    const isSelected = ui.selectedSkillCardId === style.id;
+    const isExpanded = isSelected || status.key === "building" || status.key === "failed";
+    if (!isExpanded) {
+      return `<article class="skill-card is-collapsed is-${status.key}" data-skill-card="${style.id}" tabindex="0" aria-expanded="false">
+        <div class="skill-card-compact">
+          <div class="skill-card-title">
+            <span class="skill-avatar"><i data-lucide="book-open-text"></i></span>
+            <h3>${escapeHtml(style.name || "未命名执笔人")}</h3>
+          </div>
+          <button class="primary-action" type="button" data-invoke-skill="${style.id}">
+            <i data-lucide="at-sign"></i>
+            调用
           </button>
-          <button class="tiny-button" type="button" title="查看详情" data-skill-detail="${style.id}">
-            <i data-lucide="panel-right-open"></i>
-          </button>
-        </div>`,
-      )
-      .join("");
-    els.styleList.querySelectorAll("[data-style-id]").forEach((button) => {
-      button.addEventListener("click", () => {
-        ui.editingStyle = clone(state.styles.find((style) => style.id === button.dataset.styleId));
-        renderStyleEditor();
-        renderStyleList();
+        </div>
+      </article>`;
+    }
+    return `<article class="skill-card is-expanded ${isSelected ? "is-active" : ""} is-${status.key}" data-skill-card="${style.id}" tabindex="0" aria-expanded="true">
+      <div class="skill-card-head">
+        <div class="skill-card-title">
+          <span class="skill-avatar"><i data-lucide="book-open-text"></i></span>
+          <div>
+            <h3>${escapeHtml(style.name || "未命名执笔人")}</h3>
+            <button class="skill-handle-copy" type="button" data-copy-skill-handle="${style.id}" title="复制调用名">@${escapeHtml(style.handle || normalizeHandle(style.name))}</button>
+          </div>
+        </div>
+        <span class="skill-status-badge ${status.className}">${status.label}</span>
+      </div>
+      <div class="skill-card-tags">
+        <span>${escapeHtml(style.category || "自定义")}</span>
+      </div>
+      <p class="skill-card-desc">${escapeHtml(getSkillDescription(style))}</p>
+      <div class="skill-card-meta">
+        <span>${(style.examples || []).length} 份样本</span>
+        <span>${(style.versions || []).length} 个版本</span>
+        <span>${escapeHtml(formatSkillDate(style.lastBuildAt || style.updatedAt || style.createdAt))}</span>
+      </div>
+      ${status.key === "building" ? renderBuildProgress(style, buildProgress) : ""}
+      ${status.key === "failed" ? renderBuildFailure(style) : renderBuildResult(style, result)}
+      <div class="skill-card-actions">
+        <button class="primary-action" type="button" data-invoke-skill="${style.id}">
+          <i data-lucide="at-sign"></i>
+          调用
+        </button>
+        <button type="button" data-edit-skill="${style.id}">编辑</button>
+        <button type="button" data-retrain-skill="${style.id}">重训</button>
+        <label class="inline-check skill-toggle">
+          <input type="checkbox" data-toggle-skill="${style.id}" ${style.enabled !== false ? "checked" : ""} />
+          <span>启用</span>
+        </label>
+        <details class="skill-more">
+          <summary title="更多操作"><i data-lucide="more-horizontal"></i></summary>
+          <div class="skill-more-menu">
+            <button type="button" data-skill-detail="${style.id}">查看详情</button>
+            <button type="button" data-skill-test="${style.id}">测试</button>
+            <button type="button" data-skill-export="${style.id}">导出该执笔人</button>
+            <button class="danger-text" type="button" data-skill-delete="${style.id}">删除</button>
+          </div>
+        </details>
+      </div>
+    </article>`;
+  }
+
+  function renderBuildProgress(style, progress) {
+    const value = Math.max(0, Math.min(100, Number(progress.progress) || 8));
+    return `<div class="skill-build-progress" role="status" aria-live="polite">
+      <div class="skill-build-progress-head">
+        <span>${escapeHtml(progress.message || "正在生成执笔人")}</span>
+        <button class="tiny-button" type="button" data-cancel-skill-build="${style.id}">取消</button>
+      </div>
+      <div class="skill-progress-track"><span style="width: ${value}%"></span></div>
+    </div>`;
+  }
+
+  function renderBuildFailure(style) {
+    return `<div class="skill-build-result is-failed">
+      <span>生成失败：${escapeHtml(style.lastBuildError || "请稍后重试")}</span>
+      <button class="tiny-button" type="button" data-retry-skill="${style.id}">重试</button>
+      <button class="tiny-button" type="button" data-skill-detail="${style.id}">查看日志</button>
+    </div>`;
+  }
+
+  function renderBuildResult(style, result) {
+    if (!result.version && !style.lastBuildAt) return "";
+    return `<div class="skill-build-result">
+      已生成${result.version ? ` v${escapeHtml(String(result.version))}` : ""}，
+      强规则 ${Number(result.strongRuleCount || countStrongRules(style))} 条 ·
+      候选 ${Number(result.candidateRuleCount || countCandidateRules(style))} 条
+    </div>`;
+  }
+
+  function bindGridEvents() {
+    els.styleList.querySelectorAll("[data-new-skill]").forEach((button) => {
+      button.addEventListener("click", () => onNewSkill());
+    });
+    els.styleList.querySelectorAll("[data-skill-card]").forEach((card) => {
+      card.addEventListener("click", (event) => {
+        if (event.target.closest("button, input, label, details, summary")) return;
+        selectSkillCard(card.dataset.skillCard);
+      });
+      card.addEventListener("keydown", (event) => {
+        if (event.target !== card || !["Enter", " "].includes(event.key)) return;
+        event.preventDefault();
+        selectSkillCard(card.dataset.skillCard);
       });
     });
-    els.styleList.querySelectorAll("[data-skill-detail]").forEach((button) => {
-      button.addEventListener("click", () => openSkillDetail(button.dataset.skillDetail));
+    bindButton("[data-copy-skill-handle]", (button) => onCopySkillHandle(button.dataset.copySkillHandle));
+    bindButton("[data-invoke-skill]", (button) => onInvokeSkill(button.dataset.invokeSkill));
+    bindButton("[data-edit-skill]", (button) => onEditSkill(button.dataset.editSkill));
+    bindButton("[data-retrain-skill]", (button) => onRetrainSkill(button.dataset.retrainSkill));
+    bindButton("[data-skill-detail]", (button) => {
+      const opener = onOpenSkillDetail || openSkillDetail;
+      opener(button.dataset.skillDetail);
     });
-    if (window.lucide) window.lucide.createIcons();
+    bindButton("[data-skill-test]", (button) => onTestSkill(button.dataset.skillTest));
+    bindButton("[data-skill-export]", (button) => onExportSkill(button.dataset.skillExport));
+    bindButton("[data-skill-delete]", (button) => onDeleteSkill(button.dataset.skillDelete));
+    bindButton("[data-retry-skill]", (button) => onRetrySkill(button.dataset.retrySkill));
+    bindButton("[data-cancel-skill-build]", (button) => onCancelSkillBuild(button.dataset.cancelSkillBuild));
+    els.styleList.querySelectorAll("[data-toggle-skill]").forEach((input) => {
+      input.addEventListener("change", () => onToggleSkillEnabled(input.dataset.toggleSkill, input.checked));
+    });
+  }
+
+  function selectSkillCard(skillId) {
+    const skill = state.styles.find((item) => item.id === skillId);
+    if (!skill) return;
+    ui.selectedSkillCardId = skill.id;
+    ui.editingStyle = clone(skill);
+    renderStyleEditor();
+    renderStyleList();
+  }
+
+  function bindButton(selector, callback) {
+    els.styleList.querySelectorAll(selector).forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        callback(button);
+      });
+    });
+  }
+
+  function getSkillStatus(style) {
+    if (style.status === "building") return { key: "building", label: "生成中", className: "is-building" };
+    if (style.status === "failed") return { key: "failed", label: "生成失败", className: "is-failed" };
+    const hasTraining = (style.examples || []).length > 0 || (style.versions || []).length > 0 || style.summary;
+    if (!hasTraining) return { key: "pending", label: "待训练", className: "is-pending" };
+    return style.enabled === false
+      ? { key: "disabled", label: "未启用", className: "is-disabled" }
+      : { key: "ready", label: "已启用", className: "is-ready" };
+  }
+
+  function getSkillConfidence(style) {
+    const parsed = parseSkillJson(style.skillJson);
+    const confidence = style.lastBuildResult?.confidence ||
+      style.qualityReport?.confidence ||
+      style.aggregationData?.overall_confidence ||
+      parsed.confidence ||
+      "low";
+    return ["low", "medium", "high"].includes(confidence) ? confidence : "low";
+  }
+
+  function getSkillDescription(style) {
+    const parsed = parseSkillJson(style.skillJson);
+    return (
+      style.description ||
+      parsed.description ||
+      parsed.concise_instruction ||
+      parsed.trigger_description ||
+      `${style.category || "自定义"}执笔人，用于按训练样本控制文本结构、文风和格式。`
+    );
+  }
+
+  function countStrongRules(style) {
+    return Number(style.lastBuildResult?.strongRuleCount || 0) ||
+      (style.aggregationData?.strong_rules || style.qualityReport?.strong_rules || []).length ||
+      (parseSkillJson(style.skillJson).style_rules?.must || []).length ||
+      0;
+  }
+
+  function countCandidateRules(style) {
+    const parsed = parseSkillJson(style.skillJson);
+    return Number(style.lastBuildResult?.candidateRuleCount || 0) ||
+      (style.aggregationData?.candidate_rules || style.qualityReport?.candidate_rules || []).length ||
+      (parsed.style_rules?.recommended || []).length + (parsed.style_rules?.optional || []).length ||
+      0;
+  }
+
+  function countPrivacyFindings(style) {
+    return Number(style.lastBuildResult?.privacyCount || 0) ||
+      (style.aggregationData?.privacy_findings || style.qualityReport?.privacy_filter_notes || []).length ||
+      0;
+  }
+
+  function countCaseExclusions(style) {
+    return Number(style.lastBuildResult?.caseSpecificCount || 0) ||
+      (style.aggregationData?.case_specific_exclusions || style.qualityReport?.excluded_case_specific_items || []).length ||
+      0;
+  }
+
+  function parseSkillJson(value) {
+    try {
+      return JSON.parse(value || "{}");
+    } catch {
+      return {};
+    }
+  }
+
+  function formatSkillDate(value) {
+    if (!value) return "未更新";
+    const text = formatLocalDate(value);
+    return text || "未更新";
   }
 
   function openSkillDetail(skillId) {
     const skill = state.styles.find((item) => item.id === skillId);
     if (!skill) return;
+    ui.selectedSkillCardId = skill.id;
     ui.editingStyle = clone(skill);
     renderStyleEditor();
     renderStyleList();
@@ -275,6 +561,7 @@ export function createSkillRenderer(deps) {
     renderStyleSelect,
     renderStyleEditor,
     renderStyleExamples,
+    renderSkillDetailExamples,
     renderSkillQualityReport,
     renderSkillVersions,
     showSkillVersion,

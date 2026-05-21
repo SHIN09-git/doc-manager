@@ -10,6 +10,11 @@ test("getDropImportTarget routes active style panel drops to example import", ()
   assert.equal(getDropImportTarget("stylePanel"), "style");
 });
 
+test("getDropImportTarget prioritizes the skill builder modal drop route", () => {
+  assert.equal(getDropImportTarget("docPanel", { skillBuilderOpen: true }), "skill-builder");
+  assert.equal(getDropImportTarget("stylePanel", { skillBuilderOpen: true }), "skill-builder");
+});
+
 test("getDropImportTarget uses document import as the default route", () => {
   assert.equal(getDropImportTarget("docPanel"), "documents");
   assert.equal(getDropImportTarget(""), "documents");

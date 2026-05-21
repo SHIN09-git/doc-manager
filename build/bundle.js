@@ -33256,6 +33256,11 @@ ${JSON.stringify(testInput, null, 2)}`
         versions: [],
         feedbacks: [],
         lastTest: null,
+        status: "",
+        buildProgress: null,
+        lastBuildError: "",
+        lastBuildAt: "",
+        lastBuildResult: null,
         createdAt: now(),
         updatedAt: now()
       };
@@ -33285,6 +33290,7 @@ ${JSON.stringify(testInput, null, 2)}`
           version: Number(version.version || index + 1),
           createdAt: version.createdAt || now(),
           sourceExamples: Array.isArray(version.sourceExamples) ? version.sourceExamples : [],
+          analyses: Array.isArray(version.analyses) ? version.analyses : [],
           analysis: version.analysis || "",
           aggregation: version.aggregation || "",
           aggregationData: version.aggregationData || null,
@@ -33299,7 +33305,15 @@ ${JSON.stringify(testInput, null, 2)}`
           text: feedback.text || "",
           createdAt: feedback.createdAt || now()
         })) : [],
-        lastTest: style.lastTest || null
+        lastTest: style.lastTest || null,
+        status: ["building", "failed", "ready"].includes(style.status) ? style.status : "",
+        buildProgress: style.buildProgress && typeof style.buildProgress === "object" ? {
+          message: style.buildProgress.message || "",
+          progress: Math.max(0, Math.min(100, Number(style.buildProgress.progress) || 0))
+        } : null,
+        lastBuildError: style.lastBuildError || "",
+        lastBuildAt: style.lastBuildAt || "",
+        lastBuildResult: style.lastBuildResult && typeof style.lastBuildResult === "object" ? style.lastBuildResult : null
       };
     }
     function synthesizeSkillJson(style) {
@@ -33392,9 +33406,9 @@ ${JSON.stringify(testInput, null, 2)}`
     function syncEditingStyleFromInputs2() {
       const draft = ui2.editingStyle || createEmptyStyle2();
       draft.name = els2.styleNameInput.value.trim() || draft.name || "";
-      draft.handle = normalizeHandle(els2.skillHandleInput.value || draft.handle || draft.name);
-      draft.category = els2.skillCategorySelect.value || draft.category || "\u81EA\u5B9A\u4E49";
-      draft.description = els2.skillDescriptionInput.value.trim();
+      draft.handle = normalizeHandle(draft.name || els2.skillHandleInput.value || draft.handle);
+      draft.category = getSelectedCategoryFromInputs(draft.category);
+      draft.description = els2.skillDescriptionInput?.value.trim() || draft.description || "";
       draft.enabled = els2.skillEnabledInput.checked;
       draft.analysis = els2.skillAnalysisInput.value.trim();
       draft.aggregation = els2.skillAggregationInput.value.trim();
@@ -33411,13 +33425,13 @@ ${JSON.stringify(testInput, null, 2)}`
         return null;
       }
       draft.name = name;
-      draft.handle = normalizeHandle(els2.skillHandleInput.value || name);
+      draft.handle = normalizeHandle(name || els2.skillHandleInput.value);
       if (!draft.handle) {
         toast2("\u8BF7\u8F93\u5165 @ \u8C03\u7528\u540D", "warn");
         return null;
       }
-      draft.category = els2.skillCategorySelect.value || "\u81EA\u5B9A\u4E49";
-      draft.description = els2.skillDescriptionInput.value.trim();
+      draft.category = getSelectedCategoryFromInputs("\u81EA\u5B9A\u4E49");
+      draft.description = els2.skillDescriptionInput?.value.trim() || draft.description || "";
       draft.enabled = els2.skillEnabledInput.checked;
       draft.analysis = els2.skillAnalysisInput.value.trim();
       draft.aggregation = els2.skillAggregationInput.value.trim();
@@ -33471,6 +33485,12 @@ ${JSON.stringify(testInput, null, 2)}`
       eventBus2.emit(EVENTS.RENDER_STYLE_SELECT);
       eventBus2.emit(EVENTS.RENDER_STYLE_LIST);
       return normalized;
+    }
+    function getSelectedCategoryFromInputs(fallback = "\u81EA\u5B9A\u4E49") {
+      if (!els2.skillCategorySelect) return fallback || "\u81EA\u5B9A\u4E49";
+      const selected = els2.skillCategorySelect.value || fallback || "\u81EA\u5B9A\u4E49";
+      if (selected !== "\u81EA\u5B9A\u4E49") return selected;
+      return els2.skillCustomCategoryInput?.value.trim() || "\u81EA\u5B9A\u4E49";
     }
     function importSkillPackage(payload) {
       const draft = parseImportedSkillPackage(payload);
@@ -33538,6 +33558,8 @@ ${JSON.stringify(testInput, null, 2)}`
             `${index + 1}. @${skill.handle} \xB7 ${skill.name}`,
             skill.category ? `\u5206\u7C7B\uFF1A${skill.category}` : "",
             skill.description ? `\u80FD\u529B\uFF1A${skill.description}` : "",
+            skill.summary ? `\u7528\u6237\u53EF\u7F16\u8F91\u8BF4\u660E.md\uFF1A
+${String(skill.summary).slice(0, 4e3)}` : "",
             `\u89C4\u5219\u7F6E\u4FE1\u5EA6\uFF1A${skillJson.confidence || skill.qualityReport?.confidence || "low"}`,
             `\u7A0B\u5E8F\u8C03\u7528\u6267\u884C\u5361 JSON\uFF1A
 ${JSON.stringify(payload, null, 2)}`
@@ -33573,7 +33595,30 @@ ${JSON.stringify(payload, null, 2)}`
       isSkillEnabled: isSkillEnabled2,
       commitSkillToState: commitSkillToState2,
       getSkillLocation: getSkillLocation2,
-      toast: toast2
+      toast: toast2,
+      onNewSkill = () => {
+      },
+      onEditSkill = () => {
+      },
+      onRetrainSkill = () => {
+      },
+      onInvokeSkill = () => {
+      },
+      onToggleSkillEnabled = () => {
+      },
+      onCopySkillHandle = () => {
+      },
+      onOpenSkillDetail = null,
+      onTestSkill = () => {
+      },
+      onExportSkill = () => {
+      },
+      onDeleteSkill = () => {
+      },
+      onRetrySkill = () => {
+      },
+      onCancelSkillBuild = () => {
+      }
     } = deps;
     function renderStyleSelect2() {
       const enabledStyles = state2.styles.filter(isSkillEnabled2);
@@ -33590,44 +33635,81 @@ ${JSON.stringify(payload, null, 2)}`
       if (!ui2.editingStyle) {
         ui2.editingStyle = clone(state2.styles[0] || createEmptyStyle2());
       }
-      els2.styleNameInput.value = ui2.editingStyle.name || "";
-      els2.skillHandleInput.value = ui2.editingStyle.handle ? `@${ui2.editingStyle.handle}` : "";
-      els2.skillCategorySelect.value = ui2.editingStyle.category || "\u81EA\u5B9A\u4E49";
-      els2.skillDescriptionInput.value = ui2.editingStyle.description || "";
-      els2.skillEnabledInput.checked = ui2.editingStyle.enabled !== false;
-      els2.skillAnalysisInput.value = ui2.editingStyle.analysis || "";
-      els2.skillAggregationInput.value = ui2.editingStyle.aggregation || "";
-      els2.styleSummaryInput.value = ui2.editingStyle.summary || "";
-      els2.skillJsonInput.value = ui2.editingStyle.skillJson || "";
+      if (els2.styleNameInput) els2.styleNameInput.value = ui2.editingStyle.name || "";
+      if (els2.skillHandleInput) els2.skillHandleInput.value = ui2.editingStyle.handle || normalizeHandle(ui2.editingStyle.name);
+      if (els2.skillCategorySelect) {
+        const category = ui2.editingStyle.category || "\u81EA\u5B9A\u4E49";
+        const builtInCategories = ["\u516C\u6587\u5199\u4F5C", "\u6587\u98CE\u683C\u5F0F", "\u6750\u6599\u6574\u7406", "\u6BB5\u843D\u6539\u5199", "\u81EA\u5B9A\u4E49"];
+        els2.skillCategorySelect.value = builtInCategories.includes(category) ? category : "\u81EA\u5B9A\u4E49";
+        if (els2.skillCustomCategoryInput) {
+          els2.skillCustomCategoryInput.value = builtInCategories.includes(category) ? "" : category;
+          if (els2.skillCustomCategoryField) {
+            els2.skillCustomCategoryField.hidden = els2.skillCategorySelect.value !== "\u81EA\u5B9A\u4E49";
+          }
+        }
+      }
+      if (els2.skillDescriptionInput) els2.skillDescriptionInput.value = ui2.editingStyle.description || "";
+      if (els2.skillEnabledInput) els2.skillEnabledInput.checked = ui2.editingStyle.enabled !== false;
+      if (els2.skillAnalysisInput) els2.skillAnalysisInput.value = ui2.editingStyle.analysis || "";
+      if (els2.skillAggregationInput) els2.skillAggregationInput.value = ui2.editingStyle.aggregation || "";
+      if (els2.styleSummaryInput) {
+        const keepDraft = Boolean(ui2.skillMarkdownDirty && ui2.skillMarkdownDirtySkillId === ui2.editingStyle.id);
+        if (!keepDraft) els2.styleSummaryInput.value = ui2.editingStyle.summary || "";
+      }
+      if (els2.skillJsonInput) els2.skillJsonInput.value = ui2.editingStyle.skillJson || "";
       renderSkillQualityReport2();
       renderStyleExamples2();
+      renderSkillDetailExamples();
       renderSkillVersions();
       renderSkillTest2();
     }
     function renderStyleExamples2() {
-      const examples = ui2.editingStyle.examples || [];
+      renderExampleList(els2.styleExampleList, ui2.editingStyle, {
+        emptyText: "\u5C1A\u672A\u6DFB\u52A0\u8BAD\u7EC3\u6837\u672C",
+        removable: true,
+        onRemove: (index) => {
+          ui2.editingStyle.examples.splice(index, 1);
+          renderStyleExamples2();
+        }
+      });
+    }
+    function renderSkillDetailExamples() {
+      renderExampleList(els2.skillDetailExampleList, ui2.editingStyle, {
+        emptyText: "\u5C1A\u672A\u8BB0\u5F55\u8BAD\u7EC3\u6587\u672C",
+        removable: true,
+        onRemove: (index) => {
+          ui2.editingStyle.examples.splice(index, 1);
+          commitSkillToState2(ui2.editingStyle);
+          renderStyleEditor2();
+          renderStyleList2();
+          toast2("\u5DF2\u79FB\u9664\u8BE5\u8BAD\u7EC3\u6587\u672C");
+        }
+      });
+    }
+    function renderExampleList(target, skill, options = {}) {
+      if (!target) return;
+      const examples = skill?.examples || [];
+      const { emptyText = "\u6682\u65E0\u6587\u672C", removable = false, onRemove = () => {
+      } } = options;
       if (examples.length === 0) {
-        els2.styleExampleList.innerHTML = '<div class="empty-state">\u5C1A\u672A\u6DFB\u52A0\u793A\u8303\u6587\u4EF6</div>';
+        target.innerHTML = `<div class="empty-state">${escapeHtml(emptyText)}</div>`;
         return;
       }
-      els2.styleExampleList.innerHTML = examples.map(
+      target.innerHTML = examples.map(
         (example, index) => `<div class="example-item">
           <div class="example-title">
             <span>${escapeHtml(example.name)}</span>
-            <button class="tiny-button danger-text" type="button" title="\u79FB\u9664" data-remove-example="${index}"><i data-lucide="x"></i></button>
+            ${removable ? `<button class="tiny-button danger-text" type="button" title="\u79FB\u9664" data-remove-example="${index}"><i data-lucide="x"></i></button>` : ""}
           </div>
-          <div class="example-size">${example.text.length} \u5B57\u7B26</div>
+          <div class="example-size">${Number(example.text?.length || example.originalLength || 0)} \u5B57\u7B26</div>
           <details class="example-preview">
             <summary>\u9884\u89C8\u6587\u672C</summary>
-            <pre>${escapeHtml(example.text.slice(0, 2e3))}${example.text.length > 2e3 ? "\n..." : ""}</pre>
+            <pre>${escapeHtml(String(example.text || "").slice(0, 2e3))}${String(example.text || "").length > 2e3 ? "\n..." : ""}</pre>
           </details>
         </div>`
       ).join("");
-      els2.styleExampleList.querySelectorAll("[data-remove-example]").forEach((button) => {
-        button.addEventListener("click", () => {
-          ui2.editingStyle.examples.splice(Number(button.dataset.removeExample), 1);
-          renderStyleExamples2();
-        });
+      target.querySelectorAll("[data-remove-example]").forEach((button) => {
+        button.addEventListener("click", () => onRemove(Number(button.dataset.removeExample)));
       });
       if (window.lucide) window.lucide.createIcons();
     }
@@ -33639,11 +33721,11 @@ ${JSON.stringify(payload, null, 2)}`
       const lines = [
         `\u542F\u7528\u72B6\u6001\uFF1A${style.enabled === false ? "\u672A\u542F\u7528" : "\u5DF2\u542F\u7528"}`,
         `\u89C4\u5219\u7F6E\u4FE1\u5EA6\uFF1A${report.confidence || aggregationData.overall_confidence || "\u672A\u8BC4\u4F30"}`,
-        `\u5F3A\u89C4\u5219\uFF1A${(aggregationData.strong_rules || report.strong_rules || []).length || 0} \u6761`,
-        `\u5019\u9009\u89C4\u5219\uFF1A${(aggregationData.candidate_rules || report.candidate_rules || []).length || 0} \u6761`,
+        `\u5F3A\u89C4\u5219\uFF1A${countStrongRules(style)} \u6761`,
+        `\u5019\u9009\u89C4\u5219\uFF1A${countCandidateRules(style)} \u6761`,
         `\u51B2\u7A81\u63D0\u793A\uFF1A${(aggregationData.conflicts || report.conflicts || []).length || 0} \u6761`,
-        `\u4E2A\u6848\u6392\u9664\uFF1A${(aggregationData.case_specific_exclusions || report.case_specific_exclusions || []).length || 0} \u6761`,
-        `\u9690\u79C1\u8FC7\u6EE4\uFF1A${(aggregationData.privacy_findings || report.privacy_findings || []).length || 0} \u6761`
+        `\u4E2A\u6848\u6392\u9664\uFF1A${countCaseExclusions(style)} \u6761`,
+        `\u9690\u79C1\u8FC7\u6EE4\uFF1A${countPrivacyFindings(style)} \u6761`
       ];
       if (style.lastTest?.report) {
         lines.push("", "\u6700\u8FD1\u6D4B\u8BD5\uFF1A", formatPossiblyJson(style.lastTest.report).slice(0, 1200));
@@ -33726,6 +33808,9 @@ ${JSON.stringify(payload, null, 2)}`
       ui2.editingStyle.summary = version.summary || "";
       ui2.editingStyle.skillJson = version.skillJson || ui2.editingStyle.skillJson;
       ui2.editingStyle.qualityReport = version.qualityReport || ui2.editingStyle.qualityReport || null;
+      ui2.editingStyle.status = "ready";
+      ui2.editingStyle.lastBuildError = "";
+      ui2.editingStyle.lastBuildAt = now();
       ui2.editingStyle.lastTest = {
         id: createId(),
         createdAt: now(),
@@ -33736,6 +33821,7 @@ ${JSON.stringify(payload, null, 2)}`
       ui2.editingStyle.updatedAt = now();
       commitSkillToState2(ui2.editingStyle);
       renderStyleEditor2();
+      renderStyleList2();
       switchSkillDetailTab2("versions");
       showSkillVersion(index);
       toast2(`\u5DF2\u56DE\u9000\u5230 v${version.version || index + 1}\uFF0C\u5F53\u524D\u6267\u7B14\u4EBA\u5DF2\u4FDD\u5B58\u5230\uFF1A${getSkillLocation2(ui2.editingStyle)}`);
@@ -33750,40 +33836,231 @@ ${JSON.stringify(payload, null, 2)}`
       els2.skillFeedbackInput.value = "";
     }
     function renderStyleList2() {
+      if (!els2.styleList) return;
+      const visibleStyles = getFilteredStyles();
       if (state2.styles.length === 0) {
-        els2.styleList.innerHTML = '<div class="empty-state">\u6682\u65E0\u6267\u7B14\u4EBA</div>';
+        els2.styleList.innerHTML = renderEmptySkillCard("\u8FD8\u6CA1\u6709\u6267\u7B14\u4EBA", "\u62D6\u5165 1-3 \u7BC7\u540C\u7C7B\u6B63\u5F0F\u6587\u6863\u8BAD\u7EC3\u4F60\u7684\u7B2C\u4E00\u4E2A\u6267\u7B14\u4EBA");
+        bindGridEvents();
+        if (window.lucide) window.lucide.createIcons();
         return;
       }
-      els2.styleList.innerHTML = state2.styles.map(
-        (style) => `<div class="style-item ${ui2.editingStyle?.id === style.id ? "active" : ""}">
-          <button class="style-select-button" type="button" data-style-id="${style.id}">
-            <span class="style-main">
-              <i data-lucide="book-open-text"></i>
-              <span>${escapeHtml(style.name)}</span>
-            </span>
-            <span class="skill-handle">@${escapeHtml(style.handle)}</span>
-            <span>${escapeHtml(style.category || "\u81EA\u5B9A\u4E49")} \xB7 ${isSkillEnabled2(style) ? "\u5DF2\u542F\u7528" : "\u672A\u542F\u7528"}</span>
-          </button>
-          <button class="tiny-button" type="button" title="\u67E5\u770B\u8BE6\u60C5" data-skill-detail="${style.id}">
-            <i data-lucide="panel-right-open"></i>
-          </button>
-        </div>`
-      ).join("");
-      els2.styleList.querySelectorAll("[data-style-id]").forEach((button) => {
-        button.addEventListener("click", () => {
-          ui2.editingStyle = clone(state2.styles.find((style) => style.id === button.dataset.styleId));
-          renderStyleEditor2();
-          renderStyleList2();
-        });
-      });
-      els2.styleList.querySelectorAll("[data-skill-detail]").forEach((button) => {
-        button.addEventListener("click", () => openSkillDetail(button.dataset.skillDetail));
-      });
+      if (visibleStyles.length === 0) {
+        els2.styleList.innerHTML = renderEmptySkillCard("\u6CA1\u6709\u5339\u914D\u7684\u6267\u7B14\u4EBA", "\u8C03\u6574\u7B5B\u9009\u6761\u4EF6\u540E\u518D\u67E5\u770B");
+        bindGridEvents();
+        if (window.lucide) window.lucide.createIcons();
+        return;
+      }
+      els2.styleList.innerHTML = visibleStyles.map(renderSkillCard).join("");
+      bindGridEvents();
       if (window.lucide) window.lucide.createIcons();
     }
-    function openSkillDetail(skillId) {
+    function getFilteredStyles() {
+      const category = els2.skillCategoryFilter?.value || "all";
+      const enabledOnly = Boolean(els2.skillEnabledOnlyInput?.checked);
+      const keyword = String(els2.skillSearchInput?.value || "").trim().toLowerCase();
+      return state2.styles.filter((style) => {
+        if (category !== "all" && (style.category || "\u81EA\u5B9A\u4E49") !== category) return false;
+        if (enabledOnly && !isSkillEnabled2(style)) return false;
+        if (!keyword) return true;
+        const haystack = [style.name, style.handle, style.description, style.category].join(" ").toLowerCase();
+        return haystack.includes(keyword);
+      });
+    }
+    function renderEmptySkillCard(title, description) {
+      return `<article class="skill-empty-card">
+      <div class="skill-avatar"><i data-lucide="book-open-text"></i></div>
+      <h3>${escapeHtml(title)}</h3>
+      <p>${escapeHtml(description)}</p>
+      <button class="primary-action" type="button" data-new-skill>
+        <i data-lucide="plus"></i>
+        \u65B0\u5EFA\u6267\u7B14\u4EBA
+      </button>
+    </article>`;
+    }
+    function renderSkillCard(style) {
+      const status = getSkillStatus(style);
+      const result2 = style.lastBuildResult || {};
+      const buildProgress = style.buildProgress || {};
+      const isSelected = ui2.selectedSkillCardId === style.id;
+      const isExpanded = isSelected || status.key === "building" || status.key === "failed";
+      if (!isExpanded) {
+        return `<article class="skill-card is-collapsed is-${status.key}" data-skill-card="${style.id}" tabindex="0" aria-expanded="false">
+        <div class="skill-card-compact">
+          <div class="skill-card-title">
+            <span class="skill-avatar"><i data-lucide="book-open-text"></i></span>
+            <h3>${escapeHtml(style.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA")}</h3>
+          </div>
+          <button class="primary-action" type="button" data-invoke-skill="${style.id}">
+            <i data-lucide="at-sign"></i>
+            \u8C03\u7528
+          </button>
+        </div>
+      </article>`;
+      }
+      return `<article class="skill-card is-expanded ${isSelected ? "is-active" : ""} is-${status.key}" data-skill-card="${style.id}" tabindex="0" aria-expanded="true">
+      <div class="skill-card-head">
+        <div class="skill-card-title">
+          <span class="skill-avatar"><i data-lucide="book-open-text"></i></span>
+          <div>
+            <h3>${escapeHtml(style.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA")}</h3>
+            <button class="skill-handle-copy" type="button" data-copy-skill-handle="${style.id}" title="\u590D\u5236\u8C03\u7528\u540D">@${escapeHtml(style.handle || normalizeHandle(style.name))}</button>
+          </div>
+        </div>
+        <span class="skill-status-badge ${status.className}">${status.label}</span>
+      </div>
+      <div class="skill-card-tags">
+        <span>${escapeHtml(style.category || "\u81EA\u5B9A\u4E49")}</span>
+      </div>
+      <p class="skill-card-desc">${escapeHtml(getSkillDescription(style))}</p>
+      <div class="skill-card-meta">
+        <span>${(style.examples || []).length} \u4EFD\u6837\u672C</span>
+        <span>${(style.versions || []).length} \u4E2A\u7248\u672C</span>
+        <span>${escapeHtml(formatSkillDate(style.lastBuildAt || style.updatedAt || style.createdAt))}</span>
+      </div>
+      ${status.key === "building" ? renderBuildProgress(style, buildProgress) : ""}
+      ${status.key === "failed" ? renderBuildFailure(style) : renderBuildResult(style, result2)}
+      <div class="skill-card-actions">
+        <button class="primary-action" type="button" data-invoke-skill="${style.id}">
+          <i data-lucide="at-sign"></i>
+          \u8C03\u7528
+        </button>
+        <button type="button" data-edit-skill="${style.id}">\u7F16\u8F91</button>
+        <button type="button" data-retrain-skill="${style.id}">\u91CD\u8BAD</button>
+        <label class="inline-check skill-toggle">
+          <input type="checkbox" data-toggle-skill="${style.id}" ${style.enabled !== false ? "checked" : ""} />
+          <span>\u542F\u7528</span>
+        </label>
+        <details class="skill-more">
+          <summary title="\u66F4\u591A\u64CD\u4F5C"><i data-lucide="more-horizontal"></i></summary>
+          <div class="skill-more-menu">
+            <button type="button" data-skill-detail="${style.id}">\u67E5\u770B\u8BE6\u60C5</button>
+            <button type="button" data-skill-test="${style.id}">\u6D4B\u8BD5</button>
+            <button type="button" data-skill-export="${style.id}">\u5BFC\u51FA\u8BE5\u6267\u7B14\u4EBA</button>
+            <button class="danger-text" type="button" data-skill-delete="${style.id}">\u5220\u9664</button>
+          </div>
+        </details>
+      </div>
+    </article>`;
+    }
+    function renderBuildProgress(style, progress) {
+      const value = Math.max(0, Math.min(100, Number(progress.progress) || 8));
+      return `<div class="skill-build-progress" role="status" aria-live="polite">
+      <div class="skill-build-progress-head">
+        <span>${escapeHtml(progress.message || "\u6B63\u5728\u751F\u6210\u6267\u7B14\u4EBA")}</span>
+        <button class="tiny-button" type="button" data-cancel-skill-build="${style.id}">\u53D6\u6D88</button>
+      </div>
+      <div class="skill-progress-track"><span style="width: ${value}%"></span></div>
+    </div>`;
+    }
+    function renderBuildFailure(style) {
+      return `<div class="skill-build-result is-failed">
+      <span>\u751F\u6210\u5931\u8D25\uFF1A${escapeHtml(style.lastBuildError || "\u8BF7\u7A0D\u540E\u91CD\u8BD5")}</span>
+      <button class="tiny-button" type="button" data-retry-skill="${style.id}">\u91CD\u8BD5</button>
+      <button class="tiny-button" type="button" data-skill-detail="${style.id}">\u67E5\u770B\u65E5\u5FD7</button>
+    </div>`;
+    }
+    function renderBuildResult(style, result2) {
+      if (!result2.version && !style.lastBuildAt) return "";
+      return `<div class="skill-build-result">
+      \u5DF2\u751F\u6210${result2.version ? ` v${escapeHtml(String(result2.version))}` : ""}\uFF0C
+      \u5F3A\u89C4\u5219 ${Number(result2.strongRuleCount || countStrongRules(style))} \u6761 \xB7
+      \u5019\u9009 ${Number(result2.candidateRuleCount || countCandidateRules(style))} \u6761
+    </div>`;
+    }
+    function bindGridEvents() {
+      els2.styleList.querySelectorAll("[data-new-skill]").forEach((button) => {
+        button.addEventListener("click", () => onNewSkill());
+      });
+      els2.styleList.querySelectorAll("[data-skill-card]").forEach((card) => {
+        card.addEventListener("click", (event) => {
+          if (event.target.closest("button, input, label, details, summary")) return;
+          selectSkillCard(card.dataset.skillCard);
+        });
+        card.addEventListener("keydown", (event) => {
+          if (event.target !== card || !["Enter", " "].includes(event.key)) return;
+          event.preventDefault();
+          selectSkillCard(card.dataset.skillCard);
+        });
+      });
+      bindButton("[data-copy-skill-handle]", (button) => onCopySkillHandle(button.dataset.copySkillHandle));
+      bindButton("[data-invoke-skill]", (button) => onInvokeSkill(button.dataset.invokeSkill));
+      bindButton("[data-edit-skill]", (button) => onEditSkill(button.dataset.editSkill));
+      bindButton("[data-retrain-skill]", (button) => onRetrainSkill(button.dataset.retrainSkill));
+      bindButton("[data-skill-detail]", (button) => {
+        const opener = onOpenSkillDetail || openSkillDetail2;
+        opener(button.dataset.skillDetail);
+      });
+      bindButton("[data-skill-test]", (button) => onTestSkill(button.dataset.skillTest));
+      bindButton("[data-skill-export]", (button) => onExportSkill(button.dataset.skillExport));
+      bindButton("[data-skill-delete]", (button) => onDeleteSkill(button.dataset.skillDelete));
+      bindButton("[data-retry-skill]", (button) => onRetrySkill(button.dataset.retrySkill));
+      bindButton("[data-cancel-skill-build]", (button) => onCancelSkillBuild(button.dataset.cancelSkillBuild));
+      els2.styleList.querySelectorAll("[data-toggle-skill]").forEach((input) => {
+        input.addEventListener("change", () => onToggleSkillEnabled(input.dataset.toggleSkill, input.checked));
+      });
+    }
+    function selectSkillCard(skillId) {
       const skill = state2.styles.find((item) => item.id === skillId);
       if (!skill) return;
+      ui2.selectedSkillCardId = skill.id;
+      ui2.editingStyle = clone(skill);
+      renderStyleEditor2();
+      renderStyleList2();
+    }
+    function bindButton(selector, callback) {
+      els2.styleList.querySelectorAll(selector).forEach((button) => {
+        button.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          callback(button);
+        });
+      });
+    }
+    function getSkillStatus(style) {
+      if (style.status === "building") return { key: "building", label: "\u751F\u6210\u4E2D", className: "is-building" };
+      if (style.status === "failed") return { key: "failed", label: "\u751F\u6210\u5931\u8D25", className: "is-failed" };
+      const hasTraining = (style.examples || []).length > 0 || (style.versions || []).length > 0 || style.summary;
+      if (!hasTraining) return { key: "pending", label: "\u5F85\u8BAD\u7EC3", className: "is-pending" };
+      return style.enabled === false ? { key: "disabled", label: "\u672A\u542F\u7528", className: "is-disabled" } : { key: "ready", label: "\u5DF2\u542F\u7528", className: "is-ready" };
+    }
+    function getSkillConfidence(style) {
+      const parsed = parseSkillJson(style.skillJson);
+      const confidence = style.lastBuildResult?.confidence || style.qualityReport?.confidence || style.aggregationData?.overall_confidence || parsed.confidence || "low";
+      return ["low", "medium", "high"].includes(confidence) ? confidence : "low";
+    }
+    function getSkillDescription(style) {
+      const parsed = parseSkillJson(style.skillJson);
+      return style.description || parsed.description || parsed.concise_instruction || parsed.trigger_description || `${style.category || "\u81EA\u5B9A\u4E49"}\u6267\u7B14\u4EBA\uFF0C\u7528\u4E8E\u6309\u8BAD\u7EC3\u6837\u672C\u63A7\u5236\u6587\u672C\u7ED3\u6784\u3001\u6587\u98CE\u548C\u683C\u5F0F\u3002`;
+    }
+    function countStrongRules(style) {
+      return Number(style.lastBuildResult?.strongRuleCount || 0) || (style.aggregationData?.strong_rules || style.qualityReport?.strong_rules || []).length || (parseSkillJson(style.skillJson).style_rules?.must || []).length || 0;
+    }
+    function countCandidateRules(style) {
+      const parsed = parseSkillJson(style.skillJson);
+      return Number(style.lastBuildResult?.candidateRuleCount || 0) || (style.aggregationData?.candidate_rules || style.qualityReport?.candidate_rules || []).length || (parsed.style_rules?.recommended || []).length + (parsed.style_rules?.optional || []).length || 0;
+    }
+    function countPrivacyFindings(style) {
+      return Number(style.lastBuildResult?.privacyCount || 0) || (style.aggregationData?.privacy_findings || style.qualityReport?.privacy_filter_notes || []).length || 0;
+    }
+    function countCaseExclusions(style) {
+      return Number(style.lastBuildResult?.caseSpecificCount || 0) || (style.aggregationData?.case_specific_exclusions || style.qualityReport?.excluded_case_specific_items || []).length || 0;
+    }
+    function parseSkillJson(value) {
+      try {
+        return JSON.parse(value || "{}");
+      } catch {
+        return {};
+      }
+    }
+    function formatSkillDate(value) {
+      if (!value) return "\u672A\u66F4\u65B0";
+      const text = formatLocalDate(value);
+      return text || "\u672A\u66F4\u65B0";
+    }
+    function openSkillDetail2(skillId) {
+      const skill = state2.styles.find((item) => item.id === skillId);
+      if (!skill) return;
+      ui2.selectedSkillCardId = skill.id;
       ui2.editingStyle = clone(skill);
       renderStyleEditor2();
       renderStyleList2();
@@ -33808,13 +34085,14 @@ ${JSON.stringify(payload, null, 2)}`
       renderStyleSelect: renderStyleSelect2,
       renderStyleEditor: renderStyleEditor2,
       renderStyleExamples: renderStyleExamples2,
+      renderSkillDetailExamples,
       renderSkillQualityReport: renderSkillQualityReport2,
       renderSkillVersions,
       showSkillVersion,
       restoreSkillVersion,
       renderSkillTest: renderSkillTest2,
       renderStyleList: renderStyleList2,
-      openSkillDetail,
+      openSkillDetail: openSkillDetail2,
       hideSkillDetailMenu: hideSkillDetailMenu2,
       switchSkillDetailTab: switchSkillDetailTab2
     };
@@ -34137,7 +34415,8 @@ ${JSON.stringify(payload, null, 2)}`
   }
 
   // src/utils/dropRouting.js
-  function getDropImportTarget(activePanelId = "") {
+  function getDropImportTarget(activePanelId = "", options = {}) {
+    if (options.skillBuilderOpen) return "skill-builder";
     if (activePanelId === "pptPanel") return "ppt";
     if (activePanelId === "stylePanel") return "style";
     return "documents";
@@ -34149,6 +34428,9 @@ ${JSON.stringify(payload, null, 2)}`
     selectedFolderId: "all",
     selectedDocId: null,
     editingStyle: null,
+    selectedSkillCardId: null,
+    skillMarkdownDirty: false,
+    skillMarkdownDirtySkillId: null,
     mentionTarget: null,
     mentionRange: null,
     saveTimer: null,
@@ -34165,6 +34447,7 @@ ${JSON.stringify(payload, null, 2)}`
     mobileView: "editor",
     pptPreviewReturnFocus: null,
     trashModalReturnFocus: null,
+    skillBuilderReturnFocus: null,
     generatedDraft: "",
     pptDraft: "",
     pptDeckSpec: null
@@ -34235,7 +34518,19 @@ ${JSON.stringify(payload, null, 2)}`
     isSkillEnabled,
     commitSkillToState,
     getSkillLocation,
-    toast
+    toast,
+    onNewSkill: () => openSkillBuilderModal(),
+    onEditSkill: editSkillMarkdownFromCard,
+    onRetrainSkill: (skillId) => openSkillBuilderModal(skillId),
+    onInvokeSkill: invokeSkillFromCard,
+    onToggleSkillEnabled: toggleSkillEnabledFromCard,
+    onCopySkillHandle: copySkillHandleFromCard,
+    onOpenSkillDetail: openSkillDetail,
+    onTestSkill: openSkillTestFromCard,
+    onExportSkill: exportSkillPackageById,
+    onDeleteSkill: deleteSkillById,
+    onRetrySkill: (skillId) => openSkillBuilderModal(skillId),
+    onCancelSkillBuild: cancelSkillBuild
   });
   var documentRenderer = createDocumentRenderer({
     state,
@@ -34475,14 +34770,26 @@ ${JSON.stringify(payload, null, 2)}`
       "closePptPreviewBtn",
       "pptPreviewModalFrame",
       "newStyleBtn",
+      "skillCategoryFilter",
+      "skillEnabledOnlyInput",
+      "skillSearchInput",
+      "skillBuilderModal",
+      "skillBuilderModalTitle",
+      "skillBuilderModeLabel",
+      "closeSkillBuilderModalBtn",
+      "skillBuilderCancelBtn",
       "styleNameInput",
       "skillHandleInput",
       "skillCategorySelect",
+      "skillCustomCategoryField",
+      "skillCustomCategoryInput",
       "skillDescriptionInput",
       "skillEnabledInput",
       "styleDropZone",
       "styleFileInput",
       "styleExampleList",
+      "skillSourceDocSelect",
+      "addSourceDocsToSkillBtn",
       "importSkillPackageBtn",
       "exportSkillPackageBtn",
       "importSkillPackageInput",
@@ -34491,7 +34798,10 @@ ${JSON.stringify(payload, null, 2)}`
       "skillAggregationInput",
       "skillQualityReport",
       "styleSummaryInput",
+      "saveSkillMdBtn",
       "skillJsonInput",
+      "skillAutoTestInput",
+      "skillBuilderTestPrompt",
       "exportSkillMdBtn",
       "exportSkillJsonBtn",
       "skillVersionList",
@@ -34508,6 +34818,7 @@ ${JSON.stringify(payload, null, 2)}`
       "skillDetailMenu",
       "skillDetailTitle",
       "skillDetailMeta",
+      "skillDetailExampleList",
       "skillDetailCloseBtn",
       "apiSavedLabel",
       "providerSelect",
@@ -34705,6 +35016,7 @@ ${JSON.stringify(payload, null, 2)}`
       if (event.key === "Escape") {
         hideEditorMenu({ restoreFocus: true });
         hideSkillMentionPanel();
+        if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
         layoutController.closeResponsiveInspector();
       }
     });
@@ -34732,13 +35044,28 @@ ${JSON.stringify(payload, null, 2)}`
     setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
     setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
     pptController.bindEvents();
-    els.newStyleBtn.addEventListener("click", () => {
-      ui.editingStyle = createEmptyStyle();
-      eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-      hideSkillDetailMenu();
-    });
+    els.newStyleBtn.addEventListener("click", () => openSkillBuilderModal());
+    els.skillCategoryFilter.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
+    els.skillEnabledOnlyInput.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
+    els.skillSearchInput.addEventListener("input", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
     els.styleFileInput.addEventListener("change", importStyleExamples);
     setupFileDrop(els.styleDropZone, importStyleDropFiles);
+    els.styleDropZone.addEventListener("click", (event) => {
+      event.preventDefault();
+      els.styleFileInput.click();
+    });
+    els.styleDropZone.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        els.styleFileInput.click();
+      }
+    });
+    els.closeSkillBuilderModalBtn.addEventListener("click", () => closeSkillBuilderModal());
+    els.skillBuilderCancelBtn.addEventListener("click", () => closeSkillBuilderModal());
+    els.skillBuilderModal.addEventListener("mousedown", (event) => {
+      if (event.target === els.skillBuilderModal) closeSkillBuilderModal();
+    });
+    els.skillBuilderModal.addEventListener("keydown", handleSkillBuilderModalKeydown);
     els.importSkillPackageBtn.addEventListener("click", () => els.importSkillPackageInput.click());
     els.exportSkillPackageBtn.addEventListener("click", exportSkillPackage);
     els.importSkillPackageInput.addEventListener("change", importSkillPackages);
@@ -34747,20 +35074,23 @@ ${JSON.stringify(payload, null, 2)}`
     els.deleteStyleBtn.addEventListener("click", deleteStyle);
     els.styleNameInput.addEventListener("input", () => {
       ui.editingStyle.name = els.styleNameInput.value;
-      if (!els.skillHandleInput.value.trim()) {
-        ui.editingStyle.handle = normalizeHandle(els.styleNameInput.value);
-        els.skillHandleInput.value = `@${ui.editingStyle.handle}`;
-      }
-    });
-    els.skillHandleInput.addEventListener("input", () => {
-      ui.editingStyle.handle = normalizeHandle(els.skillHandleInput.value);
+      ui.editingStyle.handle = normalizeHandle(els.styleNameInput.value);
+      els.skillHandleInput.value = ui.editingStyle.handle;
     });
     els.skillCategorySelect.addEventListener("change", () => {
-      ui.editingStyle.category = els.skillCategorySelect.value;
+      updateSkillCategoryCustomState();
+      ui.editingStyle.category = getSelectedSkillCategory();
+      if (els.skillCategorySelect.value === "\u81EA\u5B9A\u4E49") {
+        window.setTimeout(() => els.skillCustomCategoryInput.focus(), 0);
+      }
+    });
+    els.skillCustomCategoryInput.addEventListener("input", () => {
+      ui.editingStyle.category = getSelectedSkillCategory();
     });
     els.skillDescriptionInput.addEventListener("input", () => {
       ui.editingStyle.description = els.skillDescriptionInput.value;
     });
+    els.addSourceDocsToSkillBtn.addEventListener("click", addSelectedDocsAsSkillExamples);
     els.skillEnabledInput.addEventListener("change", () => {
       ui.editingStyle.enabled = els.skillEnabledInput.checked;
       eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
@@ -34773,8 +35103,18 @@ ${JSON.stringify(payload, null, 2)}`
       ui.editingStyle.aggregation = els.skillAggregationInput.value;
     });
     els.styleSummaryInput.addEventListener("input", () => {
+      if (!ui.editingStyle) return;
       ui.editingStyle.summary = els.styleSummaryInput.value;
+      ui.skillMarkdownDirty = true;
+      ui.skillMarkdownDirtySkillId = ui.editingStyle.id || null;
+      updateSkillMarkdownSaveState();
     });
+    els.styleSummaryInput.addEventListener("blur", () => {
+      if (ui.skillMarkdownDirty && ui.skillMarkdownDirtySkillId === ui.editingStyle?.id) {
+        saveSkillMarkdownEdits({ silent: true });
+      }
+    });
+    els.saveSkillMdBtn.addEventListener("click", saveSkillMarkdownEdits);
     els.skillJsonInput.addEventListener("input", () => {
       ui.editingStyle.skillJson = els.skillJsonInput.value;
     });
@@ -34854,12 +35194,14 @@ ${JSON.stringify(payload, null, 2)}`
     return Array.from(event.dataTransfer?.types || []).includes("application/x-mowen-doc-id");
   }
   async function importFilesFromGlobalDrop(files) {
-    const target = getDropImportTarget(document.querySelector(".tab-panel.active")?.id || "");
+    const target = getDropImportTarget(document.querySelector(".tab-panel.active")?.id || "", {
+      skillBuilderOpen: Boolean(els.skillBuilderModal && !els.skillBuilderModal.hidden)
+    });
     if (target === "ppt") {
       await pptController.importPptPromptFiles(files);
       return;
     }
-    if (target === "style") {
+    if (target === "style" || target === "skill-builder") {
       await importStyleDropFiles(files);
       return;
     }
@@ -35428,12 +35770,285 @@ ${JSON.stringify(payload, null, 2)}`
   function exportWorkspaceBackup() {
     return documentManager.exportWorkspaceBackup();
   }
+  function openSkillBuilderModal(skillId = null) {
+    flushSkillMarkdownEdits();
+    const skill = skillId ? state.styles.find((item) => item.id === skillId) : null;
+    ui.skillBuilderReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    ui.editingStyle = clone(skill || createEmptyStyle());
+    if (!skill) {
+      ui.editingStyle.handle = normalizeHandle(ui.editingStyle.name || "");
+    }
+    hideSkillDetailMenu();
+    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+    renderSkillBuilderDocumentPicker();
+    updateSkillCategoryCustomState(ui.editingStyle.category);
+    els.skillBuilderModalTitle.textContent = skill ? `\u91CD\u8BAD\uFF1A${skill.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA"}` : "\u65B0\u5EFA\u6267\u7B14\u4EBA";
+    els.skillBuilderModeLabel.textContent = skill ? `\u5DF2\u6709 ${(skill.examples || []).length} \u7BC7\u5386\u53F2\u6837\u672C\u5C06\u4E00\u5E76\u53C2\u4E0E\u8BAD\u7EC3\uFF0C\u53EF\u79FB\u9664\u540E\u91CD\u8BAD\u3002` : "\u62D6\u5165\u540C\u7C7B\u6B63\u5F0F\u6587\u6863\uFF0C\u751F\u6210\u53EF\u590D\u7528\u7684\u5199\u4F5C\u89C4\u5219\u3002";
+    els.saveStyleBtn.hidden = !skill;
+    els.deleteStyleBtn.hidden = !skill;
+    els.skillBuilderModal.hidden = false;
+    window.setTimeout(() => {
+      els.styleNameInput.focus();
+      if (window.lucide) window.lucide.createIcons();
+    }, 0);
+  }
+  function closeSkillBuilderModal({ restoreFocus = true } = {}) {
+    if (!els.skillBuilderModal || els.skillBuilderModal.hidden) return;
+    els.skillBuilderModal.hidden = true;
+    if (restoreFocus && ui.skillBuilderReturnFocus) {
+      ui.skillBuilderReturnFocus.focus();
+    }
+    ui.skillBuilderReturnFocus = null;
+  }
+  function handleSkillBuilderModalKeydown(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSkillBuilderModal();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = getFocusableElements(els.skillBuilderModal);
+    if (focusable.length === 0) return;
+    const first2 = focusable[0];
+    const last2 = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first2) {
+      event.preventDefault();
+      last2.focus();
+    } else if (!event.shiftKey && document.activeElement === last2) {
+      event.preventDefault();
+      first2.focus();
+    }
+  }
+  function getBuiltInSkillCategories() {
+    return ["\u516C\u6587\u5199\u4F5C", "\u6587\u98CE\u683C\u5F0F", "\u6750\u6599\u6574\u7406", "\u6BB5\u843D\u6539\u5199", "\u81EA\u5B9A\u4E49"];
+  }
+  function getSelectedSkillCategory() {
+    if (els.skillCategorySelect.value === "\u81EA\u5B9A\u4E49") {
+      return els.skillCustomCategoryInput.value.trim() || "\u81EA\u5B9A\u4E49";
+    }
+    return els.skillCategorySelect.value || "\u81EA\u5B9A\u4E49";
+  }
+  function updateSkillCategoryCustomState(category = getSelectedSkillCategory()) {
+    if (!els.skillCustomCategoryInput || !els.skillCategorySelect) return;
+    const builtIns = getBuiltInSkillCategories();
+    const shouldUseCustom = !builtIns.includes(category) || els.skillCategorySelect.value === "\u81EA\u5B9A\u4E49";
+    if (!builtIns.includes(category)) {
+      els.skillCategorySelect.value = "\u81EA\u5B9A\u4E49";
+      els.skillCustomCategoryInput.value = category || "";
+    }
+    if (els.skillCustomCategoryField) els.skillCustomCategoryField.hidden = !shouldUseCustom;
+  }
+  function renderSkillBuilderDocumentPicker() {
+    if (!els.skillSourceDocSelect) return;
+    const docs = (state.docs || []).filter((doc) => !doc.deletedAt && String(doc.content || "").trim());
+    if (docs.length === 0) {
+      els.skillSourceDocSelect.innerHTML = "<option disabled>\u6587\u6863\u5E93\u6682\u65E0\u53EF\u7528\u6B63\u6587</option>";
+      els.skillSourceDocSelect.disabled = true;
+      els.addSourceDocsToSkillBtn.disabled = true;
+      return;
+    }
+    els.skillSourceDocSelect.disabled = false;
+    els.addSourceDocsToSkillBtn.disabled = false;
+    els.skillSourceDocSelect.innerHTML = docs.map((doc) => `<option value="${escapeHtml(doc.id)}">${escapeHtml(doc.title || "\u672A\u547D\u540D\u6587\u6863")}</option>`).join("");
+  }
+  function addSelectedDocsAsSkillExamples() {
+    const selectedIds = Array.from(els.skillSourceDocSelect.selectedOptions || []).map((option) => option.value);
+    if (selectedIds.length === 0) {
+      toast("\u8BF7\u5148\u9009\u62E9\u8981\u52A0\u5165\u8BAD\u7EC3\u7684\u6587\u6863", "warn");
+      return;
+    }
+    ui.editingStyle.examples = Array.isArray(ui.editingStyle.examples) ? ui.editingStyle.examples : [];
+    const existingSourceIds = new Set(ui.editingStyle.examples.map((example) => example.sourceDocId).filter(Boolean));
+    let addedCount = 0;
+    selectedIds.forEach((docId) => {
+      if (existingSourceIds.has(docId)) return;
+      const doc = state.docs.find((item) => item.id === docId && !item.deletedAt);
+      if (!doc || !String(doc.content || "").trim()) return;
+      ui.editingStyle.examples.push({
+        id: createId(),
+        sourceDocId: doc.id,
+        name: `${doc.title || "\u672A\u547D\u540D\u6587\u6863"}.txt`,
+        text: doc.content,
+        addedAt: now(),
+        importedFrom: "workspace-doc"
+      });
+      existingSourceIds.add(docId);
+      addedCount += 1;
+    });
+    if (addedCount === 0) {
+      toast("\u6240\u9009\u6587\u6863\u5DF2\u5728\u8BAD\u7EC3\u6837\u672C\u4E2D", "warn");
+      return;
+    }
+    renderStyleExamples();
+    skillRenderer.renderSkillDetailExamples();
+    toast(`\u5DF2\u52A0\u5165 ${addedCount} \u4EFD\u6587\u6863\u5E93\u6837\u672C`);
+  }
+  function updateSkillBuildState(skillId, patch) {
+    const index = state.styles.findIndex((style) => style.id === skillId);
+    if (index < 0) return null;
+    state.styles[index] = normalizeSkill({
+      ...state.styles[index],
+      ...patch,
+      updatedAt: now()
+    });
+    if (ui.editingStyle?.id === skillId) ui.editingStyle = clone(state.styles[index]);
+    persist();
+    eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
+    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+    return state.styles[index];
+  }
+  function createSkillCardProgress(skillId) {
+    return {
+      update(message, progress = 0) {
+        updateSkillBuildState(skillId, {
+          status: "building",
+          buildProgress: { message, progress },
+          lastBuildError: ""
+        });
+      }
+    };
+  }
+  function getSkillBuildResult(style, version, outputs) {
+    const aggregationData = outputs.aggregationData || {};
+    const qualityReport = outputs.qualityReport || {};
+    let parsedTestReport = {};
+    try {
+      parsedTestReport = JSON.parse(outputs.testReport || "{}");
+    } catch {
+      parsedTestReport = {};
+    }
+    return {
+      version: version.version,
+      confidence: qualityReport.confidence || aggregationData.overall_confidence || "low",
+      strongRuleCount: (aggregationData.strong_rules || qualityReport.strong_rules || []).length || 0,
+      candidateRuleCount: (aggregationData.candidate_rules || qualityReport.candidate_rules || []).length || 0,
+      privacyCount: (aggregationData.privacy_findings || qualityReport.privacy_filter_notes || []).length || 0,
+      caseSpecificCount: (aggregationData.case_specific_exclusions || qualityReport.excluded_case_specific_items || []).length || 0,
+      passed: parsedTestReport.passed ?? parsedTestReport.check_report?.passed ?? null,
+      sampleCount: (style.examples || []).length
+    };
+  }
+  function invokeSkillFromCard(skillId) {
+    const skill = state.styles.find((item) => item.id === skillId);
+    if (!skill) return;
+    const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
+    const prompt = els.generatePrompt;
+    const current = prompt.value.trimEnd();
+    prompt.value = current ? `${current}
+${mention} ` : `${mention} `;
+    prompt.dispatchEvent(new Event("input", { bubbles: true }));
+    switchTab("generate");
+    layoutController.openResponsiveTools();
+    prompt.focus();
+    toast(`\u5DF2\u63D2\u5165 ${mention}\uFF0C\u53EF\u7EE7\u7EED\u8865\u5145\u751F\u6210\u8981\u6C42`);
+  }
+  function copySkillHandleFromCard(skillId) {
+    const skill = state.styles.find((item) => item.id === skillId);
+    if (!skill) return;
+    const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(mention).catch(() => fallbackCopyText(mention));
+    } else {
+      fallbackCopyText(mention);
+    }
+    toast(`\u5DF2\u590D\u5236 ${mention}`);
+  }
+  function fallbackCopyText(text) {
+    const input = document.createElement("textarea");
+    input.value = text;
+    input.setAttribute("readonly", "");
+    input.style.position = "fixed";
+    input.style.left = "-9999px";
+    document.body.appendChild(input);
+    input.select();
+    try {
+      document.execCommand("copy");
+    } catch {
+    } finally {
+      input.remove();
+    }
+  }
+  function toggleSkillEnabledFromCard(skillId, enabled) {
+    const skill = updateSkillBuildState(skillId, { enabled });
+    if (!skill) return;
+    toast(`${enabled ? "\u5DF2\u542F\u7528" : "\u5DF2\u505C\u7528"} @${skill.handle}`);
+  }
+  function openSkillTestFromCard(skillId) {
+    openSkillDetail(skillId);
+    switchSkillDetailTab("test");
+  }
+  function editSkillMarkdownFromCard(skillId) {
+    flushSkillMarkdownEdits();
+    openSkillDetail(skillId);
+    switchSkillDetailTab("markdown");
+    els.styleSummaryInput?.focus();
+    toast("\u5DF2\u6253\u5F00\u6267\u7B14\u4EBA\u8BF4\u660E.md\uFF0C\u53EF\u76F4\u63A5\u7F16\u8F91\u5E76\u4FDD\u5B58");
+  }
+  function updateSkillMarkdownSaveState() {
+    if (!els.saveSkillMdBtn) return;
+    const isDirty = Boolean(ui.skillMarkdownDirty && ui.skillMarkdownDirtySkillId === ui.editingStyle?.id);
+    els.saveSkillMdBtn.classList.toggle("is-dirty", isDirty);
+    els.saveSkillMdBtn.title = isDirty ? "\u8BF4\u660E.md \u6709\u672A\u4FDD\u5B58\u4FEE\u6539" : "\u4FDD\u5B58\u8BF4\u660E.md \u4FEE\u6539";
+    els.saveSkillMdBtn.dataset.dirty = isDirty ? "true" : "false";
+  }
+  function flushSkillMarkdownEdits() {
+    if (!ui.skillMarkdownDirty || ui.skillMarkdownDirtySkillId !== ui.editingStyle?.id) return;
+    saveSkillMarkdownEdits({ silent: true });
+  }
+  function saveSkillMarkdownEdits({ silent = false } = {}) {
+    const skillId = ui.editingStyle?.id;
+    if (!skillId) {
+      if (!silent) toast("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u6267\u7B14\u4EBA", "warn");
+      ui.skillMarkdownDirty = false;
+      ui.skillMarkdownDirtySkillId = null;
+      updateSkillMarkdownSaveState();
+      return;
+    }
+    const index = state.styles.findIndex((style) => style.id === skillId);
+    if (index < 0) {
+      if (!silent) toast("\u672A\u627E\u5230\u5F53\u524D\u6267\u7B14\u4EBA", "warn");
+      ui.skillMarkdownDirty = false;
+      ui.skillMarkdownDirtySkillId = null;
+      updateSkillMarkdownSaveState();
+      return;
+    }
+    const next = normalizeSkill({
+      ...state.styles[index],
+      summary: els.styleSummaryInput.value,
+      updatedAt: now()
+    });
+    state.styles[index] = next;
+    ui.editingStyle = clone(next);
+    ui.skillMarkdownDirty = false;
+    ui.skillMarkdownDirtySkillId = null;
+    updateSkillMarkdownSaveState();
+    persist();
+    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+    if (!silent) toast(`\u8BF4\u660E.md \u5DF2\u4FDD\u5B58\u5230\uFF1A${getSkillLocation(next)} / \u8BF4\u660E.md`);
+  }
+  function exportSkillPackageById(skillId) {
+    const skill = state.styles.find((item) => item.id === skillId);
+    if (!skill) return;
+    ui.editingStyle = clone(skill);
+    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+    exportSkillPackage();
+  }
+  function deleteSkillById(skillId) {
+    const skill = state.styles.find((item) => item.id === skillId);
+    if (!skill) return;
+    ui.editingStyle = clone(skill);
+    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+    deleteStyle();
+  }
+  function cancelSkillBuild(skillId) {
+    cancelActiveTask(`skill-build:${skillId}`);
+  }
   function exportSkillMarkdown() {
     const skill = {
       ...ui.editingStyle,
       name: els.styleNameInput.value.trim() || ui.editingStyle.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
       handle: normalizeHandle(els.skillHandleInput.value || ui.editingStyle.handle || ui.editingStyle.name),
-      summary: els.styleSummaryInput.value.trim()
+      summary: els.styleSummaryInput.value
     };
     const content = skill.summary || `# ${skill.name}
 
@@ -35447,8 +36062,8 @@ ${JSON.stringify(payload, null, 2)}`
       ...ui.editingStyle,
       name: els.styleNameInput.value.trim() || ui.editingStyle.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
       handle: normalizeHandle(els.skillHandleInput.value || ui.editingStyle.handle || ui.editingStyle.name),
-      category: els.skillCategorySelect.value || ui.editingStyle.category || "\u81EA\u5B9A\u4E49",
-      description: els.skillDescriptionInput.value.trim()
+      category: getSelectedSkillCategory(),
+      description: els.skillDescriptionInput.value.trim() || ui.editingStyle.description || ""
     };
     const content = normalizeSkillJsonText(els.skillJsonInput.value, skill);
     const fileName = `${sanitizeFileName(skill.name)}-\u6267\u7B14\u4EBA\u89C4\u5219.json`;
@@ -35501,6 +36116,14 @@ ${JSON.stringify(payload, null, 2)}`
   }
   async function syncRealFolder(folderId) {
     return folderManager.syncRealFolder(folderId);
+  }
+  function openSkillDetail(skillId) {
+    flushSkillMarkdownEdits();
+    const result2 = skillRenderer.openSkillDetail(skillId);
+    ui.skillMarkdownDirty = false;
+    ui.skillMarkdownDirtySkillId = null;
+    updateSkillMarkdownSaveState();
+    return result2;
   }
   function hideSkillDetailMenu() {
     skillRenderer.hideSkillDetailMenu();
@@ -35736,14 +36359,15 @@ ${JSON.stringify(payload, null, 2)}`
       return;
     }
     renderStyleExamples();
+    skillRenderer.renderSkillDetailExamples();
     const skippedCount = skippedFiles.length + sizeSkipped.length;
     toast(`\u5DF2\u6DFB\u52A0 ${importedCount} \u4EFD\u793A\u8303\u5230\uFF1A${getSkillTrainingLocation(ui.editingStyle)}${skippedCount ? `\uFF0C\u5DF2\u8DF3\u8FC7 ${skippedCount} \u4E2A\u6682\u4E0D\u652F\u6301\u3001\u8FC7\u5927\u6216\u8BFB\u53D6\u5931\u8D25\u7684\u6587\u4EF6` : ""}`);
   }
   async function summarizeStyle() {
-    if (cancelActiveTask("skill-build")) return;
     const style = syncEditingStyleFromInputs();
     if (!style.name.trim()) {
       toast("\u8BF7\u8F93\u5165\u6267\u7B14\u4EBA\u540D\u79F0", "warn");
+      els.styleNameInput.focus();
       return;
     }
     if (!style.examples || style.examples.length === 0) {
@@ -35754,37 +36378,79 @@ ${JSON.stringify(payload, null, 2)}`
       const ok = window.confirm("\u53EA\u6709 1 \u7BC7\u793A\u8303\u53EA\u80FD\u751F\u6210\u4E0D\u7A33\u5B9A\u8349\u6848\uFF0C\u5EFA\u8BAE\u81F3\u5C11 3-5 \u7BC7\u3002\u662F\u5426\u7EE7\u7EED\u751F\u6210\u8349\u6848\uFF1F");
       if (!ok) return;
     }
-    await withCancelableTask({
-      key: "skill-build",
-      button: els.summarizeStyleBtn,
-      busyText: "\u751F\u6210\u4E2D",
-      progressMessage: "\u6B63\u5728\u6784\u5EFA\u591A\u6587\u6863\u6267\u7B14\u4EBA",
+    style.status = "building";
+    style.buildProgress = { message: "\u51C6\u5907\u6784\u5EFA\u6267\u7B14\u4EBA", progress: 8 };
+    style.lastBuildError = "";
+    style.lastBuildAt = now();
+    let saved;
+    try {
+      saved = commitSkillToState(style);
+    } catch (error) {
+      toast(error.message || "\u4FDD\u5B58\u6267\u7B14\u4EBA\u5931\u8D25", "error");
+      return;
+    }
+    closeSkillBuilderModal({ restoreFocus: false });
+    ui.selectedSkillCardId = saved.id;
+    switchTab("style");
+    const taskKey = `skill-build:${saved.id}`;
+    if (ui.activeTasks[taskKey]) {
+      toast("\u8BE5\u6267\u7B14\u4EBA\u6B63\u5728\u751F\u6210\u4E2D", "warn");
+      return;
+    }
+    const controller = new AbortController();
+    ui.activeTasks[taskKey] = {
+      key: taskKey,
+      controller,
+      button: null,
+      oldHtml: "",
       cancelToast: "\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6784\u5EFA"
-    }, async ({ progress, signal }) => {
-      const outputs = await skillBuilder.buildSkillWithAiChain(style, progress, { signal });
-      throwIfTaskAborted(signal);
-      const version = skillBuilder.createSkillVersion(style, outputs);
+    };
+    const progress = createSkillCardProgress(saved.id);
+    try {
+      const outputs = await skillBuilder.buildSkillWithAiChain(saved, progress, { signal: controller.signal });
+      throwIfTaskAborted(controller.signal);
+      const version = skillBuilder.createSkillVersion(saved, outputs);
       progress.update("\u6B63\u5728\u4FDD\u5B58\u6267\u7B14\u4EBA\u7248\u672C", 92);
-      style.analyses = outputs.analyses;
-      style.analysis = outputs.analysis;
-      style.aggregationData = outputs.aggregationData;
-      style.aggregation = outputs.aggregation;
-      style.qualityReport = outputs.qualityReport;
-      style.summary = outputs.markdown;
-      style.skillJson = outputs.skillJson;
-      style.lastTest = {
-        id: createId(),
-        createdAt: now(),
-        prompt: "AI \u81EA\u52A8\u751F\u6210\u7684\u6267\u7B14\u4EBA\u6D4B\u8BD5",
-        result: outputs.testDoc,
-        report: outputs.testReport
+      const generatedRule = parseSkillJsonObject(outputs.skillJson, saved);
+      const nextStyle = {
+        ...saved,
+        description: generatedRule.description || generatedRule.concise_instruction || saved.description || "",
+        analyses: outputs.analyses,
+        analysis: outputs.analysis,
+        aggregationData: outputs.aggregationData,
+        aggregation: outputs.aggregation,
+        qualityReport: outputs.qualityReport,
+        summary: outputs.markdown,
+        skillJson: outputs.skillJson,
+        status: "ready",
+        buildProgress: null,
+        lastBuildError: "",
+        lastBuildAt: now(),
+        lastTest: {
+          id: createId(),
+          createdAt: now(),
+          prompt: "AI \u81EA\u52A8\u751F\u6210\u7684\u6267\u7B14\u4EBA\u6D4B\u8BD5",
+          result: outputs.testDoc,
+          report: outputs.testReport
+        },
+        versions: [...saved.versions || [], version].slice(-30)
       };
-      style.versions = [...style.versions || [], version].slice(-30);
-      commitSkillToState(style);
+      nextStyle.lastBuildResult = getSkillBuildResult(nextStyle, version, outputs);
+      const committed = commitSkillToState(nextStyle);
       eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-      switchSkillDetailTab("workflow");
-      toast(`\u5DF2\u751F\u6210 v${version.version} \u5E76\u4FDD\u5B58\u5230\uFF1A${getSkillLocation(ui.editingStyle)}`);
-    });
+      toast(`\u5DF2\u751F\u6210 v${version.version} \u5E76\u4FDD\u5B58\u5230\uFF1A${getSkillLocation(committed)}`);
+    } catch (error) {
+      const isCanceled = isTaskAbortError(error) || controller.signal.aborted;
+      updateSkillBuildState(saved.id, {
+        status: "failed",
+        buildProgress: null,
+        lastBuildError: isCanceled ? "\u7528\u6237\u53D6\u6D88\u4E86\u672C\u6B21\u751F\u6210" : friendlyAiErrorMessage2(error) || error.message || "\u751F\u6210\u5931\u8D25",
+        lastBuildAt: now()
+      });
+      toast(isCanceled ? "\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6784\u5EFA" : friendlyAiErrorMessage2(error) || "\u6267\u7B14\u4EBA\u751F\u6210\u5931\u8D25", isCanceled ? "warn" : "error");
+    } finally {
+      if (ui.activeTasks[taskKey]?.controller === controller) delete ui.activeTasks[taskKey];
+    }
   }
   function syncEditingStyleFromInputs() {
     return skillManager.syncEditingStyleFromInputs();
@@ -35845,6 +36511,7 @@ ${JSON.stringify(payload, null, 2)}`
     commitSkillToState(style);
     eventBus.emit(EVENTS.RENDER_SKILL_TEST);
     toast(`\u53CD\u9988\u5DF2\u4FDD\u5B58\u5230\uFF1A${getSkillLocation(ui.editingStyle)} / \u6301\u7EED\u4F18\u5316`);
+    openSkillBuilderModal(style.id);
   }
   function normalizeSkillJsonText(value, style) {
     return skillManager.normalizeSkillJsonText(value, style);
@@ -35853,13 +36520,24 @@ ${JSON.stringify(payload, null, 2)}`
     return skillManager.parseSkillJsonObject(value, style);
   }
   function saveStyle() {
-    return skillManager.saveStyle();
+    const saved = skillManager.saveStyle();
+    if (saved) {
+      closeSkillBuilderModal({ restoreFocus: false });
+      eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+      eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+    }
+    return saved;
   }
   function commitSkillToState(draft) {
     return skillManager.commitSkillToState(draft);
   }
   function deleteStyle() {
-    return skillManager.deleteStyle();
+    const deleted = skillManager.deleteStyle();
+    if (deleted) {
+      closeSkillBuilderModal({ restoreFocus: false });
+      hideSkillDetailMenu();
+    }
+    return deleted;
   }
   function saveApiSettings() {
     state.settings = {

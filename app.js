@@ -64,6 +64,9 @@ const ui = {
   selectedFolderId: "all",
   selectedDocId: null,
   editingStyle: null,
+  selectedSkillCardId: null,
+  skillMarkdownDirty: false,
+  skillMarkdownDirtySkillId: null,
   mentionTarget: null,
   mentionRange: null,
   saveTimer: null,
@@ -80,6 +83,7 @@ const ui = {
   mobileView: "editor",
   pptPreviewReturnFocus: null,
   trashModalReturnFocus: null,
+  skillBuilderReturnFocus: null,
   generatedDraft: "",
   pptDraft: "",
   pptDeckSpec: null,
@@ -152,6 +156,18 @@ const skillRenderer = createSkillRenderer({
   commitSkillToState,
   getSkillLocation,
   toast,
+  onNewSkill: () => openSkillBuilderModal(),
+  onEditSkill: editSkillMarkdownFromCard,
+  onRetrainSkill: (skillId) => openSkillBuilderModal(skillId),
+  onInvokeSkill: invokeSkillFromCard,
+  onToggleSkillEnabled: toggleSkillEnabledFromCard,
+  onCopySkillHandle: copySkillHandleFromCard,
+  onOpenSkillDetail: openSkillDetail,
+  onTestSkill: openSkillTestFromCard,
+  onExportSkill: exportSkillPackageById,
+  onDeleteSkill: deleteSkillById,
+  onRetrySkill: (skillId) => openSkillBuilderModal(skillId),
+  onCancelSkillBuild: cancelSkillBuild,
 });
 const documentRenderer = createDocumentRenderer({
   state,
@@ -394,14 +410,26 @@ function bindElements() {
     "closePptPreviewBtn",
     "pptPreviewModalFrame",
     "newStyleBtn",
+    "skillCategoryFilter",
+    "skillEnabledOnlyInput",
+    "skillSearchInput",
+    "skillBuilderModal",
+    "skillBuilderModalTitle",
+    "skillBuilderModeLabel",
+    "closeSkillBuilderModalBtn",
+    "skillBuilderCancelBtn",
     "styleNameInput",
     "skillHandleInput",
     "skillCategorySelect",
+    "skillCustomCategoryField",
+    "skillCustomCategoryInput",
     "skillDescriptionInput",
     "skillEnabledInput",
     "styleDropZone",
     "styleFileInput",
     "styleExampleList",
+    "skillSourceDocSelect",
+    "addSourceDocsToSkillBtn",
     "importSkillPackageBtn",
     "exportSkillPackageBtn",
     "importSkillPackageInput",
@@ -410,7 +438,10 @@ function bindElements() {
     "skillAggregationInput",
     "skillQualityReport",
     "styleSummaryInput",
+    "saveSkillMdBtn",
     "skillJsonInput",
+    "skillAutoTestInput",
+    "skillBuilderTestPrompt",
     "exportSkillMdBtn",
     "exportSkillJsonBtn",
     "skillVersionList",
@@ -427,6 +458,7 @@ function bindElements() {
     "skillDetailMenu",
     "skillDetailTitle",
     "skillDetailMeta",
+    "skillDetailExampleList",
     "skillDetailCloseBtn",
     "apiSavedLabel",
     "providerSelect",
@@ -646,6 +678,7 @@ function bindEvents() {
     if (event.key === "Escape") {
       hideEditorMenu({ restoreFocus: true });
       hideSkillMentionPanel();
+      if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
       layoutController.closeResponsiveInspector();
     }
   });
@@ -676,13 +709,28 @@ function bindEvents() {
   setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
   pptController.bindEvents();
 
-  els.newStyleBtn.addEventListener("click", () => {
-    ui.editingStyle = createEmptyStyle();
-    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-    hideSkillDetailMenu();
-  });
+  els.newStyleBtn.addEventListener("click", () => openSkillBuilderModal());
+  els.skillCategoryFilter.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
+  els.skillEnabledOnlyInput.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
+  els.skillSearchInput.addEventListener("input", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
   els.styleFileInput.addEventListener("change", importStyleExamples);
   setupFileDrop(els.styleDropZone, importStyleDropFiles);
+  els.styleDropZone.addEventListener("click", (event) => {
+    event.preventDefault();
+    els.styleFileInput.click();
+  });
+  els.styleDropZone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      els.styleFileInput.click();
+    }
+  });
+  els.closeSkillBuilderModalBtn.addEventListener("click", () => closeSkillBuilderModal());
+  els.skillBuilderCancelBtn.addEventListener("click", () => closeSkillBuilderModal());
+  els.skillBuilderModal.addEventListener("mousedown", (event) => {
+    if (event.target === els.skillBuilderModal) closeSkillBuilderModal();
+  });
+  els.skillBuilderModal.addEventListener("keydown", handleSkillBuilderModalKeydown);
   els.importSkillPackageBtn.addEventListener("click", () => els.importSkillPackageInput.click());
   els.exportSkillPackageBtn.addEventListener("click", exportSkillPackage);
   els.importSkillPackageInput.addEventListener("change", importSkillPackages);
@@ -691,20 +739,23 @@ function bindEvents() {
   els.deleteStyleBtn.addEventListener("click", deleteStyle);
   els.styleNameInput.addEventListener("input", () => {
     ui.editingStyle.name = els.styleNameInput.value;
-    if (!els.skillHandleInput.value.trim()) {
-      ui.editingStyle.handle = normalizeHandle(els.styleNameInput.value);
-      els.skillHandleInput.value = `@${ui.editingStyle.handle}`;
-    }
-  });
-  els.skillHandleInput.addEventListener("input", () => {
-    ui.editingStyle.handle = normalizeHandle(els.skillHandleInput.value);
+    ui.editingStyle.handle = normalizeHandle(els.styleNameInput.value);
+    els.skillHandleInput.value = ui.editingStyle.handle;
   });
   els.skillCategorySelect.addEventListener("change", () => {
-    ui.editingStyle.category = els.skillCategorySelect.value;
+    updateSkillCategoryCustomState();
+    ui.editingStyle.category = getSelectedSkillCategory();
+    if (els.skillCategorySelect.value === "自定义") {
+      window.setTimeout(() => els.skillCustomCategoryInput.focus(), 0);
+    }
+  });
+  els.skillCustomCategoryInput.addEventListener("input", () => {
+    ui.editingStyle.category = getSelectedSkillCategory();
   });
   els.skillDescriptionInput.addEventListener("input", () => {
     ui.editingStyle.description = els.skillDescriptionInput.value;
   });
+  els.addSourceDocsToSkillBtn.addEventListener("click", addSelectedDocsAsSkillExamples);
   els.skillEnabledInput.addEventListener("change", () => {
     ui.editingStyle.enabled = els.skillEnabledInput.checked;
     eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
@@ -717,8 +768,18 @@ function bindEvents() {
     ui.editingStyle.aggregation = els.skillAggregationInput.value;
   });
   els.styleSummaryInput.addEventListener("input", () => {
+    if (!ui.editingStyle) return;
     ui.editingStyle.summary = els.styleSummaryInput.value;
+    ui.skillMarkdownDirty = true;
+    ui.skillMarkdownDirtySkillId = ui.editingStyle.id || null;
+    updateSkillMarkdownSaveState();
   });
+  els.styleSummaryInput.addEventListener("blur", () => {
+    if (ui.skillMarkdownDirty && ui.skillMarkdownDirtySkillId === ui.editingStyle?.id) {
+      saveSkillMarkdownEdits({ silent: true });
+    }
+  });
+  els.saveSkillMdBtn.addEventListener("click", saveSkillMarkdownEdits);
   els.skillJsonInput.addEventListener("input", () => {
     ui.editingStyle.skillJson = els.skillJsonInput.value;
   });
@@ -805,12 +866,14 @@ function isDocumentDrag(event) {
 }
 
 async function importFilesFromGlobalDrop(files) {
-  const target = getDropImportTarget(document.querySelector(".tab-panel.active")?.id || "");
+  const target = getDropImportTarget(document.querySelector(".tab-panel.active")?.id || "", {
+    skillBuilderOpen: Boolean(els.skillBuilderModal && !els.skillBuilderModal.hidden),
+  });
   if (target === "ppt") {
     await pptController.importPptPromptFiles(files);
     return;
   }
-  if (target === "style") {
+  if (target === "style" || target === "skill-builder") {
     await importStyleDropFiles(files);
     return;
   }
@@ -1482,12 +1545,312 @@ function exportWorkspaceBackup() {
   return documentManager.exportWorkspaceBackup();
 }
 
+function openSkillBuilderModal(skillId = null) {
+  flushSkillMarkdownEdits();
+  const skill = skillId ? state.styles.find((item) => item.id === skillId) : null;
+  ui.skillBuilderReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  ui.editingStyle = clone(skill || createEmptyStyle());
+  if (!skill) {
+    ui.editingStyle.handle = normalizeHandle(ui.editingStyle.name || "");
+  }
+  hideSkillDetailMenu();
+  eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+  renderSkillBuilderDocumentPicker();
+  updateSkillCategoryCustomState(ui.editingStyle.category);
+  els.skillBuilderModalTitle.textContent = skill ? `重训：${skill.name || "未命名执笔人"}` : "新建执笔人";
+  els.skillBuilderModeLabel.textContent = skill
+    ? `已有 ${(skill.examples || []).length} 篇历史样本将一并参与训练，可移除后重训。`
+    : "拖入同类正式文档，生成可复用的写作规则。";
+  els.saveStyleBtn.hidden = !skill;
+  els.deleteStyleBtn.hidden = !skill;
+  els.skillBuilderModal.hidden = false;
+  window.setTimeout(() => {
+    els.styleNameInput.focus();
+    if (window.lucide) window.lucide.createIcons();
+  }, 0);
+}
+
+function closeSkillBuilderModal({ restoreFocus = true } = {}) {
+  if (!els.skillBuilderModal || els.skillBuilderModal.hidden) return;
+  els.skillBuilderModal.hidden = true;
+  if (restoreFocus && ui.skillBuilderReturnFocus) {
+    ui.skillBuilderReturnFocus.focus();
+  }
+  ui.skillBuilderReturnFocus = null;
+}
+
+function handleSkillBuilderModalKeydown(event) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeSkillBuilderModal();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = getFocusableElements(els.skillBuilderModal);
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function getBuiltInSkillCategories() {
+  return ["公文写作", "文风格式", "材料整理", "段落改写", "自定义"];
+}
+
+function getSelectedSkillCategory() {
+  if (els.skillCategorySelect.value === "自定义") {
+    return els.skillCustomCategoryInput.value.trim() || "自定义";
+  }
+  return els.skillCategorySelect.value || "自定义";
+}
+
+function updateSkillCategoryCustomState(category = getSelectedSkillCategory()) {
+  if (!els.skillCustomCategoryInput || !els.skillCategorySelect) return;
+  const builtIns = getBuiltInSkillCategories();
+  const shouldUseCustom = !builtIns.includes(category) || els.skillCategorySelect.value === "自定义";
+  if (!builtIns.includes(category)) {
+    els.skillCategorySelect.value = "自定义";
+    els.skillCustomCategoryInput.value = category || "";
+  }
+  if (els.skillCustomCategoryField) els.skillCustomCategoryField.hidden = !shouldUseCustom;
+}
+
+function renderSkillBuilderDocumentPicker() {
+  if (!els.skillSourceDocSelect) return;
+  const docs = (state.docs || []).filter((doc) => !doc.deletedAt && String(doc.content || "").trim());
+  if (docs.length === 0) {
+    els.skillSourceDocSelect.innerHTML = '<option disabled>文档库暂无可用正文</option>';
+    els.skillSourceDocSelect.disabled = true;
+    els.addSourceDocsToSkillBtn.disabled = true;
+    return;
+  }
+  els.skillSourceDocSelect.disabled = false;
+  els.addSourceDocsToSkillBtn.disabled = false;
+  els.skillSourceDocSelect.innerHTML = docs
+    .map((doc) => `<option value="${escapeHtml(doc.id)}">${escapeHtml(doc.title || "未命名文档")}</option>`)
+    .join("");
+}
+
+function addSelectedDocsAsSkillExamples() {
+  const selectedIds = Array.from(els.skillSourceDocSelect.selectedOptions || []).map((option) => option.value);
+  if (selectedIds.length === 0) {
+    toast("请先选择要加入训练的文档", "warn");
+    return;
+  }
+  ui.editingStyle.examples = Array.isArray(ui.editingStyle.examples) ? ui.editingStyle.examples : [];
+  const existingSourceIds = new Set(ui.editingStyle.examples.map((example) => example.sourceDocId).filter(Boolean));
+  let addedCount = 0;
+  selectedIds.forEach((docId) => {
+    if (existingSourceIds.has(docId)) return;
+    const doc = state.docs.find((item) => item.id === docId && !item.deletedAt);
+    if (!doc || !String(doc.content || "").trim()) return;
+    ui.editingStyle.examples.push({
+      id: createId(),
+      sourceDocId: doc.id,
+      name: `${doc.title || "未命名文档"}.txt`,
+      text: doc.content,
+      addedAt: now(),
+      importedFrom: "workspace-doc",
+    });
+    existingSourceIds.add(docId);
+    addedCount += 1;
+  });
+  if (addedCount === 0) {
+    toast("所选文档已在训练样本中", "warn");
+    return;
+  }
+  renderStyleExamples();
+  skillRenderer.renderSkillDetailExamples();
+  toast(`已加入 ${addedCount} 份文档库样本`);
+}
+
+function updateSkillBuildState(skillId, patch) {
+  const index = state.styles.findIndex((style) => style.id === skillId);
+  if (index < 0) return null;
+  state.styles[index] = normalizeSkill({
+    ...state.styles[index],
+    ...patch,
+    updatedAt: now(),
+  });
+  if (ui.editingStyle?.id === skillId) ui.editingStyle = clone(state.styles[index]);
+  persist();
+  eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
+  eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+  return state.styles[index];
+}
+
+function createSkillCardProgress(skillId) {
+  return {
+    update(message, progress = 0) {
+      updateSkillBuildState(skillId, {
+        status: "building",
+        buildProgress: { message, progress },
+        lastBuildError: "",
+      });
+    },
+  };
+}
+
+function getSkillBuildResult(style, version, outputs) {
+  const aggregationData = outputs.aggregationData || {};
+  const qualityReport = outputs.qualityReport || {};
+  let parsedTestReport = {};
+  try {
+    parsedTestReport = JSON.parse(outputs.testReport || "{}");
+  } catch {
+    parsedTestReport = {};
+  }
+  return {
+    version: version.version,
+    confidence: qualityReport.confidence || aggregationData.overall_confidence || "low",
+    strongRuleCount: (aggregationData.strong_rules || qualityReport.strong_rules || []).length || 0,
+    candidateRuleCount: (aggregationData.candidate_rules || qualityReport.candidate_rules || []).length || 0,
+    privacyCount: (aggregationData.privacy_findings || qualityReport.privacy_filter_notes || []).length || 0,
+    caseSpecificCount: (aggregationData.case_specific_exclusions || qualityReport.excluded_case_specific_items || []).length || 0,
+    passed: parsedTestReport.passed ?? parsedTestReport.check_report?.passed ?? null,
+    sampleCount: (style.examples || []).length,
+  };
+}
+
+function invokeSkillFromCard(skillId) {
+  const skill = state.styles.find((item) => item.id === skillId);
+  if (!skill) return;
+  const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
+  const prompt = els.generatePrompt;
+  const current = prompt.value.trimEnd();
+  prompt.value = current ? `${current}\n${mention} ` : `${mention} `;
+  prompt.dispatchEvent(new Event("input", { bubbles: true }));
+  switchTab("generate");
+  layoutController.openResponsiveTools();
+  prompt.focus();
+  toast(`已插入 ${mention}，可继续补充生成要求`);
+}
+
+function copySkillHandleFromCard(skillId) {
+  const skill = state.styles.find((item) => item.id === skillId);
+  if (!skill) return;
+  const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(mention).catch(() => fallbackCopyText(mention));
+  } else {
+    fallbackCopyText(mention);
+  }
+  toast(`已复制 ${mention}`);
+}
+
+function fallbackCopyText(text) {
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  document.body.appendChild(input);
+  input.select();
+  try {
+    document.execCommand("copy");
+  } catch {
+    // Clipboard fallback is best effort only.
+  } finally {
+    input.remove();
+  }
+}
+
+function toggleSkillEnabledFromCard(skillId, enabled) {
+  const skill = updateSkillBuildState(skillId, { enabled });
+  if (!skill) return;
+  toast(`${enabled ? "已启用" : "已停用"} @${skill.handle}`);
+}
+
+function openSkillTestFromCard(skillId) {
+  openSkillDetail(skillId);
+  switchSkillDetailTab("test");
+}
+
+function editSkillMarkdownFromCard(skillId) {
+  flushSkillMarkdownEdits();
+  openSkillDetail(skillId);
+  switchSkillDetailTab("markdown");
+  els.styleSummaryInput?.focus();
+  toast("已打开执笔人说明.md，可直接编辑并保存");
+}
+
+function updateSkillMarkdownSaveState() {
+  if (!els.saveSkillMdBtn) return;
+  const isDirty = Boolean(ui.skillMarkdownDirty && ui.skillMarkdownDirtySkillId === ui.editingStyle?.id);
+  els.saveSkillMdBtn.classList.toggle("is-dirty", isDirty);
+  els.saveSkillMdBtn.title = isDirty ? "说明.md 有未保存修改" : "保存说明.md 修改";
+  els.saveSkillMdBtn.dataset.dirty = isDirty ? "true" : "false";
+}
+
+function flushSkillMarkdownEdits() {
+  if (!ui.skillMarkdownDirty || ui.skillMarkdownDirtySkillId !== ui.editingStyle?.id) return;
+  saveSkillMarkdownEdits({ silent: true });
+}
+
+function saveSkillMarkdownEdits({ silent = false } = {}) {
+  const skillId = ui.editingStyle?.id;
+  if (!skillId) {
+    if (!silent) toast("请先选择一个执笔人", "warn");
+    ui.skillMarkdownDirty = false;
+    ui.skillMarkdownDirtySkillId = null;
+    updateSkillMarkdownSaveState();
+    return;
+  }
+  const index = state.styles.findIndex((style) => style.id === skillId);
+  if (index < 0) {
+    if (!silent) toast("未找到当前执笔人", "warn");
+    ui.skillMarkdownDirty = false;
+    ui.skillMarkdownDirtySkillId = null;
+    updateSkillMarkdownSaveState();
+    return;
+  }
+  const next = normalizeSkill({
+    ...state.styles[index],
+    summary: els.styleSummaryInput.value,
+    updatedAt: now(),
+  });
+  state.styles[index] = next;
+  ui.editingStyle = clone(next);
+  ui.skillMarkdownDirty = false;
+  ui.skillMarkdownDirtySkillId = null;
+  updateSkillMarkdownSaveState();
+  persist();
+  eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+  if (!silent) toast(`说明.md 已保存到：${getSkillLocation(next)} / 说明.md`);
+}
+
+function exportSkillPackageById(skillId) {
+  const skill = state.styles.find((item) => item.id === skillId);
+  if (!skill) return;
+  ui.editingStyle = clone(skill);
+  eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+  exportSkillPackage();
+}
+
+function deleteSkillById(skillId) {
+  const skill = state.styles.find((item) => item.id === skillId);
+  if (!skill) return;
+  ui.editingStyle = clone(skill);
+  eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+  deleteStyle();
+}
+
+function cancelSkillBuild(skillId) {
+  cancelActiveTask(`skill-build:${skillId}`);
+}
+
 function exportSkillMarkdown() {
   const skill = {
     ...ui.editingStyle,
     name: els.styleNameInput.value.trim() || ui.editingStyle.name || "未命名执笔人",
     handle: normalizeHandle(els.skillHandleInput.value || ui.editingStyle.handle || ui.editingStyle.name),
-    summary: els.styleSummaryInput.value.trim(),
+    summary: els.styleSummaryInput.value,
   };
   const content = skill.summary || `# ${skill.name}\n\n`;
   const fileName = `${sanitizeFileName(skill.name)}-执笔人说明.md`;
@@ -1500,8 +1863,8 @@ function exportSkillJson() {
     ...ui.editingStyle,
     name: els.styleNameInput.value.trim() || ui.editingStyle.name || "未命名执笔人",
     handle: normalizeHandle(els.skillHandleInput.value || ui.editingStyle.handle || ui.editingStyle.name),
-    category: els.skillCategorySelect.value || ui.editingStyle.category || "自定义",
-    description: els.skillDescriptionInput.value.trim(),
+    category: getSelectedSkillCategory(),
+    description: els.skillDescriptionInput.value.trim() || ui.editingStyle.description || "",
   };
   const content = normalizeSkillJsonText(els.skillJsonInput.value, skill);
   const fileName = `${sanitizeFileName(skill.name)}-执笔人规则.json`;
@@ -1562,7 +1925,12 @@ async function syncRealFolder(folderId) {
 }
 
 function openSkillDetail(skillId) {
-  return skillRenderer.openSkillDetail(skillId);
+  flushSkillMarkdownEdits();
+  const result = skillRenderer.openSkillDetail(skillId);
+  ui.skillMarkdownDirty = false;
+  ui.skillMarkdownDirtySkillId = null;
+  updateSkillMarkdownSaveState();
+  return result;
 }
 
 function hideSkillDetailMenu() {
@@ -1824,15 +2192,16 @@ async function importStyleExampleFiles(files) {
     return;
   }
   renderStyleExamples();
+  skillRenderer.renderSkillDetailExamples();
   const skippedCount = skippedFiles.length + sizeSkipped.length;
   toast(`已添加 ${importedCount} 份示范到：${getSkillTrainingLocation(ui.editingStyle)}${skippedCount ? `，已跳过 ${skippedCount} 个暂不支持、过大或读取失败的文件` : ""}`);
 }
 
 async function summarizeStyle() {
-  if (cancelActiveTask("skill-build")) return;
   const style = syncEditingStyleFromInputs();
   if (!style.name.trim()) {
     toast("请输入执笔人名称", "warn");
+    els.styleNameInput.focus();
     return;
   }
   if (!style.examples || style.examples.length === 0) {
@@ -1844,37 +2213,83 @@ async function summarizeStyle() {
     if (!ok) return;
   }
 
-  await withCancelableTask({
-    key: "skill-build",
-    button: els.summarizeStyleBtn,
-    busyText: "生成中",
-    progressMessage: "正在构建多文档执笔人",
+  style.status = "building";
+  style.buildProgress = { message: "准备构建执笔人", progress: 8 };
+  style.lastBuildError = "";
+  style.lastBuildAt = now();
+
+  let saved;
+  try {
+    saved = commitSkillToState(style);
+  } catch (error) {
+    toast(error.message || "保存执笔人失败", "error");
+    return;
+  }
+
+  closeSkillBuilderModal({ restoreFocus: false });
+  ui.selectedSkillCardId = saved.id;
+  switchTab("style");
+  const taskKey = `skill-build:${saved.id}`;
+  if (ui.activeTasks[taskKey]) {
+    toast("该执笔人正在生成中", "warn");
+    return;
+  }
+
+  const controller = new AbortController();
+  ui.activeTasks[taskKey] = {
+    key: taskKey,
+    controller,
+    button: null,
+    oldHtml: "",
     cancelToast: "已取消本次执笔人构建",
-  }, async ({ progress, signal }) => {
-    const outputs = await skillBuilder.buildSkillWithAiChain(style, progress, { signal });
-    throwIfTaskAborted(signal);
-    const version = skillBuilder.createSkillVersion(style, outputs);
+  };
+  const progress = createSkillCardProgress(saved.id);
+
+  try {
+    const outputs = await skillBuilder.buildSkillWithAiChain(saved, progress, { signal: controller.signal });
+    throwIfTaskAborted(controller.signal);
+    const version = skillBuilder.createSkillVersion(saved, outputs);
     progress.update("正在保存执笔人版本", 92);
-    style.analyses = outputs.analyses;
-    style.analysis = outputs.analysis;
-    style.aggregationData = outputs.aggregationData;
-    style.aggregation = outputs.aggregation;
-    style.qualityReport = outputs.qualityReport;
-    style.summary = outputs.markdown;
-    style.skillJson = outputs.skillJson;
-    style.lastTest = {
-      id: createId(),
-      createdAt: now(),
-      prompt: "AI 自动生成的执笔人测试",
-      result: outputs.testDoc,
-      report: outputs.testReport,
+    const generatedRule = parseSkillJsonObject(outputs.skillJson, saved);
+    const nextStyle = {
+      ...saved,
+      description: generatedRule.description || generatedRule.concise_instruction || saved.description || "",
+      analyses: outputs.analyses,
+      analysis: outputs.analysis,
+      aggregationData: outputs.aggregationData,
+      aggregation: outputs.aggregation,
+      qualityReport: outputs.qualityReport,
+      summary: outputs.markdown,
+      skillJson: outputs.skillJson,
+      status: "ready",
+      buildProgress: null,
+      lastBuildError: "",
+      lastBuildAt: now(),
+      lastTest: {
+        id: createId(),
+        createdAt: now(),
+        prompt: "AI 自动生成的执笔人测试",
+        result: outputs.testDoc,
+        report: outputs.testReport,
+      },
+      versions: [...(saved.versions || []), version].slice(-30),
     };
-    style.versions = [...(style.versions || []), version].slice(-30);
-    commitSkillToState(style);
+    nextStyle.lastBuildResult = getSkillBuildResult(nextStyle, version, outputs);
+    const committed = commitSkillToState(nextStyle);
     eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-    switchSkillDetailTab("workflow");
-    toast(`已生成 v${version.version} 并保存到：${getSkillLocation(ui.editingStyle)}`);
-  });
+    toast(`已生成 v${version.version} 并保存到：${getSkillLocation(committed)}`);
+  } catch (error) {
+    const isCanceled = isTaskAbortError(error) || controller.signal.aborted;
+    updateSkillBuildState(saved.id, {
+      status: "failed",
+      buildProgress: null,
+      lastBuildError: isCanceled ? "用户取消了本次生成" : friendlyAiErrorMessage(error) || error.message || "生成失败",
+      lastBuildAt: now(),
+    });
+    toast(isCanceled ? "已取消本次执笔人构建" : friendlyAiErrorMessage(error) || "执笔人生成失败", isCanceled ? "warn" : "error");
+  } finally {
+    if (ui.activeTasks[taskKey]?.controller === controller) delete ui.activeTasks[taskKey];
+  }
 }
 
 function syncEditingStyleFromInputs() {
@@ -1939,6 +2354,7 @@ function saveSkillFeedback() {
   commitSkillToState(style);
   eventBus.emit(EVENTS.RENDER_SKILL_TEST);
   toast(`反馈已保存到：${getSkillLocation(ui.editingStyle)} / 持续优化`);
+  openSkillBuilderModal(style.id);
 }
 
 function normalizeSkillJsonText(value, style) {
@@ -1950,7 +2366,13 @@ function parseSkillJsonObject(value, style) {
 }
 
 function saveStyle() {
-  return skillManager.saveStyle();
+  const saved = skillManager.saveStyle();
+  if (saved) {
+    closeSkillBuilderModal({ restoreFocus: false });
+    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+  }
+  return saved;
 }
 
 function commitSkillToState(draft) {
@@ -1958,7 +2380,12 @@ function commitSkillToState(draft) {
 }
 
 function deleteStyle() {
-  return skillManager.deleteStyle();
+  const deleted = skillManager.deleteStyle();
+  if (deleted) {
+    closeSkillBuilderModal({ restoreFocus: false });
+    hideSkillDetailMenu();
+  }
+  return deleted;
 }
 
 function saveApiSettings() {

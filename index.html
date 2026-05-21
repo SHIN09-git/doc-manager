@@ -209,12 +209,12 @@
 
         <aside class="inspector" id="workspaceInspector" aria-label="AI 与执笔人">
           <div class="tabs" role="tablist" aria-label="右侧功能">
-            <button class="tab active" data-tab="generate" type="button" role="tab" aria-controls="generatePanel" aria-selected="true">生成</button>
-            <button class="tab" data-tab="style" type="button" role="tab" aria-controls="stylePanel" aria-selected="false">执笔人</button>
+            <button class="tab active" data-tab="style" type="button" role="tab" aria-controls="stylePanel" aria-selected="true">执笔人</button>
+            <button class="tab" data-tab="generate" type="button" role="tab" aria-controls="generatePanel" aria-selected="false">生成</button>
             <button class="tab" data-tab="ppt" type="button" role="tab" aria-controls="pptPanel" aria-selected="false">PPT</button>
           </div>
 
-          <section class="tab-panel active" id="generatePanel">
+          <section class="tab-panel" id="generatePanel">
             <div class="panel-heading">
               <h2>AI 起草</h2>
               <span id="aiStatus" class="status-pill">未配置</span>
@@ -237,9 +237,12 @@
             </div>
           </section>
 
-          <section class="tab-panel" id="stylePanel">
-            <div class="panel-heading">
-              <h2>执笔人工作台</h2>
+          <section class="tab-panel active" id="stylePanel">
+            <div class="panel-heading skill-workbench-heading">
+              <div>
+                <h2>执笔人工作台</h2>
+                <p>在提示词里输入 @调用名，或在正文右键菜单中指定执笔人。</p>
+              </div>
               <div class="panel-actions">
                 <button class="ghost-icon" id="importSkillPackageBtn" type="button" title="导入执笔人包">
                   <i data-lucide="upload"></i>
@@ -247,24 +250,18 @@
                 <button class="ghost-icon" id="exportSkillPackageBtn" type="button" title="导出当前执笔人包">
                   <i data-lucide="download"></i>
                 </button>
-                <button class="ghost-icon" id="newStyleBtn" type="button" title="新建执笔人">
+                <button class="primary-action skill-create-button" id="newStyleBtn" type="button" title="生成执笔人">
                   <i data-lucide="plus"></i>
+                  生成执笔人
                 </button>
               </div>
             </div>
             <input id="importSkillPackageInput" type="file" accept=".skill.json,.json,application/json" multiple hidden />
-            <label>
-              <span>执笔人名称</span>
-              <input id="styleNameInput" type="text" placeholder="例如：通知写作、会议纪要、请示报告" />
-            </label>
-            <div class="skill-meta-grid">
-              <label>
-                <span>@ 调用名</span>
-                <input id="skillHandleInput" type="text" placeholder="@通知写作" />
-              </label>
+            <div class="skill-filter-bar" aria-label="筛选执笔人">
               <label>
                 <span>分类</span>
-                <select id="skillCategorySelect">
+                <select id="skillCategoryFilter">
+                  <option value="all">全部</option>
                   <option value="公文写作">公文写作</option>
                   <option value="文风格式">文风格式</option>
                   <option value="材料整理">材料整理</option>
@@ -272,29 +269,16 @@
                   <option value="自定义">自定义</option>
                 </select>
               </label>
+              <label class="inline-check compact-check">
+                <input id="skillEnabledOnlyInput" type="checkbox" />
+                <span>仅启用</span>
+              </label>
+              <label class="skill-search">
+                <span>搜索</span>
+                <input id="skillSearchInput" type="search" placeholder="名称、@调用名、能力描述" />
+              </label>
             </div>
-            <label>
-              <span>一句话能力</span>
-              <input id="skillDescriptionInput" type="text" placeholder="例如：生成正式、清楚、适合组织内部发布的通知" />
-            </label>
-            <label class="inline-check">
-              <input id="skillEnabledInput" type="checkbox" />
-              <span>启用执笔人（用于 @ 调用和文档生成）</span>
-            </label>
-            <label class="file-chip" id="styleDropZone">
-              <i data-lucide="paperclip"></i>
-              <span>添加或拖入示范文件</span>
-              <input id="styleFileInput" type="file" accept=".txt,.md,.text,.csv,.docx,.pptx" multiple hidden />
-            </label>
-            <button id="summarizeStyleBtn" class="primary-action" type="button">
-              <i data-lucide="scan-text"></i>
-              AI 总结/更新执笔人
-            </button>
-            <div class="two-actions">
-              <button id="saveStyleBtn" type="button">保存执笔人</button>
-              <button id="deleteStyleBtn" class="danger-text" type="button">删除执笔人</button>
-            </div>
-            <div class="style-list" id="styleList"></div>
+            <div class="style-list skill-card-grid" id="styleList" aria-label="执笔人列表"></div>
             <div class="skill-detail-menu" id="skillDetailMenu" hidden>
               <div class="detail-heading">
                 <div>
@@ -314,7 +298,7 @@
                 <button class="detail-tab" data-detail-tab="test" type="button">测试</button>
               </div>
               <section class="detail-panel active" id="trainingDetailPanel">
-                <div class="example-list" id="styleExampleList"></div>
+                <div class="example-list" id="skillDetailExampleList"></div>
               </section>
               <section class="detail-panel" id="workflowDetailPanel">
                 <label class="wide-field">
@@ -335,7 +319,13 @@
                   <span>执笔人说明.md</span>
                   <textarea id="styleSummaryInput" rows="9" placeholder="给使用者阅读和修改的执笔人说明，AI 总结后会写入这里。"></textarea>
                 </label>
-                <button id="exportSkillMdBtn" type="button">导出说明.md</button>
+                <div class="two-actions">
+                  <button id="saveSkillMdBtn" class="primary-action" type="button">
+                    <i data-lucide="save"></i>
+                    保存说明修改
+                  </button>
+                  <button id="exportSkillMdBtn" type="button">导出说明.md</button>
+                </div>
               </section>
               <section class="detail-panel" id="jsonDetailPanel">
                 <label class="wide-field">
@@ -366,7 +356,7 @@
                   <span>反馈与持续优化</span>
                   <textarea id="skillFeedbackInput" rows="4" placeholder="记录本次测试或日常使用中的问题，下一次更新执笔人时会纳入。"></textarea>
                 </label>
-                <button id="saveSkillFeedbackBtn" type="button">保存反馈</button>
+                <button id="saveSkillFeedbackBtn" type="button">反馈并重训</button>
               </section>
             </div>
           </section>
@@ -491,6 +481,122 @@
           </section>
         </aside>
       </main>
+
+      <div class="preview-overlay skill-builder-overlay" id="skillBuilderModal" hidden>
+        <div class="preview-modal skill-builder-modal" role="dialog" aria-modal="true" aria-labelledby="skillBuilderModalTitle" tabindex="-1">
+          <div class="preview-modal-head">
+            <div>
+              <h2 id="skillBuilderModalTitle">新建执笔人</h2>
+              <p id="skillBuilderModeLabel">拖入同类正式文档，生成可复用的写作规则。</p>
+            </div>
+            <button class="ghost-icon" id="closeSkillBuilderModalBtn" type="button" title="关闭">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          <div class="skill-builder-body">
+            <section class="skill-builder-section">
+              <div class="skill-builder-section-head">
+                <strong>基础信息</strong>
+                <label class="inline-check">
+                  <input id="skillEnabledInput" type="checkbox" checked />
+                  <span>启用</span>
+                </label>
+              </div>
+              <div class="skill-builder-fields">
+                <label>
+                  <span>名称</span>
+                  <input id="styleNameInput" type="text" placeholder="例如：学校通知执笔人" />
+                </label>
+                <label>
+                  <span>分类</span>
+                  <select id="skillCategorySelect">
+                    <option>公文写作</option>
+                    <option>文风格式</option>
+                    <option>材料整理</option>
+                    <option>段落改写</option>
+                    <option>自定义</option>
+                  </select>
+                </label>
+                <label class="skill-custom-category-field" id="skillCustomCategoryField" hidden>
+                  <span>自定义分类</span>
+                  <input id="skillCustomCategoryInput" type="text" placeholder="例如：校园新闻、汇报材料" />
+                </label>
+                <input id="skillHandleInput" type="hidden" />
+                <input id="skillDescriptionInput" type="hidden" />
+              </div>
+            </section>
+
+            <section class="skill-builder-section skill-training-section">
+              <div class="skill-builder-section-head">
+                <strong>训练样本</strong>
+                <span class="muted-hint">建议 3-5 篇，最多 8 篇</span>
+              </div>
+              <div class="skill-sample-workflow">
+                <div class="skill-sample-add-panel" aria-label="添加训练样本">
+                  <div class="skill-source-card is-library-source">
+                    <div class="skill-source-card-head">
+                      <span class="skill-source-icon"><i data-lucide="library"></i></span>
+                      <div>
+                        <strong>添加样本</strong>
+                        <span>优先使用左侧文档库，也可补充本地文件</span>
+                      </div>
+                    </div>
+                    <div class="skill-library-picker">
+                      <label>
+                        <span>从文档库选择</span>
+                        <select id="skillSourceDocSelect" multiple size="6" aria-label="选择已管理文档作为训练样本"></select>
+                      </label>
+                      <button id="addSourceDocsToSkillBtn" type="button">
+                        <i data-lucide="plus"></i>
+                        加入
+                      </button>
+                    </div>
+                  </div>
+                  <div class="skill-local-upload-strip">
+                    <div>
+                      <strong>本地文件</strong>
+                      <span>用于临时补充未加入文档库的材料</span>
+                    </div>
+                    <label class="drop-zone compact import-drop-zone skill-builder-drop" id="styleDropZone" tabindex="0" title="点击或拖入本地训练文档">
+                      <input id="styleFileInput" type="file" accept=".txt,.md,.doc,.docx,.pdf,.ppt,.pptx,text/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple hidden />
+                      <i data-lucide="file-up"></i>
+                      <span>点击或拖入本地文档</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="skill-sample-panel">
+                  <div class="skill-builder-section-head">
+                    <strong>已加入样本</strong>
+                    <span class="muted-hint">支持 .txt / .md / .docx / .pptx</span>
+                  </div>
+                  <div class="example-list skill-builder-example-list" id="styleExampleList"></div>
+                </div>
+              </div>
+            </section>
+
+            <details class="skill-builder-advanced">
+              <summary>高级选项</summary>
+              <label class="inline-check">
+                <input id="skillAutoTestInput" type="checkbox" checked />
+                <span>生成后自动运行测试</span>
+              </label>
+              <label class="wide-field">
+                <span>测试输入</span>
+                <textarea id="skillBuilderTestPrompt" rows="3" placeholder="可选：留空时使用系统默认测试输入"></textarea>
+              </label>
+            </details>
+          </div>
+          <div class="skill-builder-actions">
+            <button id="skillBuilderCancelBtn" type="button">取消</button>
+            <button id="deleteStyleBtn" class="danger-text" type="button">删除执笔人</button>
+            <button id="saveStyleBtn" type="button">仅保存基础信息</button>
+            <button id="summarizeStyleBtn" class="primary-action" type="button">
+              <i data-lucide="wand-sparkles"></i>
+              开始生成
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div class="preview-overlay trash-overlay" id="trashModal" hidden>
         <div class="trash-modal" role="dialog" aria-modal="true" aria-labelledby="trashModalTitle" tabindex="-1">

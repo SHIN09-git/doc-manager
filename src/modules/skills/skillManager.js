@@ -230,6 +230,11 @@ export function createSkillManager(deps) {
       versions: [],
       feedbacks: [],
       lastTest: null,
+      status: "",
+      buildProgress: null,
+      lastBuildError: "",
+      lastBuildAt: "",
+      lastBuildResult: null,
       createdAt: now(),
       updatedAt: now(),
     };
@@ -262,6 +267,7 @@ export function createSkillManager(deps) {
             version: Number(version.version || index + 1),
             createdAt: version.createdAt || now(),
             sourceExamples: Array.isArray(version.sourceExamples) ? version.sourceExamples : [],
+            analyses: Array.isArray(version.analyses) ? version.analyses : [],
             analysis: version.analysis || "",
             aggregation: version.aggregation || "",
             aggregationData: version.aggregationData || null,
@@ -280,6 +286,16 @@ export function createSkillManager(deps) {
           }))
         : [],
       lastTest: style.lastTest || null,
+      status: ["building", "failed", "ready"].includes(style.status) ? style.status : "",
+      buildProgress: style.buildProgress && typeof style.buildProgress === "object"
+        ? {
+            message: style.buildProgress.message || "",
+            progress: Math.max(0, Math.min(100, Number(style.buildProgress.progress) || 0)),
+          }
+        : null,
+      lastBuildError: style.lastBuildError || "",
+      lastBuildAt: style.lastBuildAt || "",
+      lastBuildResult: style.lastBuildResult && typeof style.lastBuildResult === "object" ? style.lastBuildResult : null,
     };
   }
 
@@ -377,9 +393,9 @@ export function createSkillManager(deps) {
   function syncEditingStyleFromInputs() {
     const draft = ui.editingStyle || createEmptyStyle();
     draft.name = els.styleNameInput.value.trim() || draft.name || "";
-    draft.handle = normalizeHandle(els.skillHandleInput.value || draft.handle || draft.name);
-    draft.category = els.skillCategorySelect.value || draft.category || "自定义";
-    draft.description = els.skillDescriptionInput.value.trim();
+    draft.handle = normalizeHandle(draft.name || els.skillHandleInput.value || draft.handle);
+    draft.category = getSelectedCategoryFromInputs(draft.category);
+    draft.description = els.skillDescriptionInput?.value.trim() || draft.description || "";
     draft.enabled = els.skillEnabledInput.checked;
     draft.analysis = els.skillAnalysisInput.value.trim();
     draft.aggregation = els.skillAggregationInput.value.trim();
@@ -397,13 +413,13 @@ export function createSkillManager(deps) {
       return null;
     }
     draft.name = name;
-    draft.handle = normalizeHandle(els.skillHandleInput.value || name);
+    draft.handle = normalizeHandle(name || els.skillHandleInput.value);
     if (!draft.handle) {
       toast("请输入 @ 调用名", "warn");
       return null;
     }
-    draft.category = els.skillCategorySelect.value || "自定义";
-    draft.description = els.skillDescriptionInput.value.trim();
+    draft.category = getSelectedCategoryFromInputs("自定义");
+    draft.description = els.skillDescriptionInput?.value.trim() || draft.description || "";
     draft.enabled = els.skillEnabledInput.checked;
     draft.analysis = els.skillAnalysisInput.value.trim();
     draft.aggregation = els.skillAggregationInput.value.trim();
@@ -461,6 +477,13 @@ export function createSkillManager(deps) {
     eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
     eventBus.emit(EVENTS.RENDER_STYLE_LIST);
     return normalized;
+  }
+
+  function getSelectedCategoryFromInputs(fallback = "自定义") {
+    if (!els.skillCategorySelect) return fallback || "自定义";
+    const selected = els.skillCategorySelect.value || fallback || "自定义";
+    if (selected !== "自定义") return selected;
+    return els.skillCustomCategoryInput?.value.trim() || "自定义";
   }
 
   function importSkillPackage(payload) {
@@ -532,6 +555,7 @@ export function createSkillManager(deps) {
           `${index + 1}. @${skill.handle} · ${skill.name}`,
           skill.category ? `分类：${skill.category}` : "",
           skill.description ? `能力：${skill.description}` : "",
+          skill.summary ? `用户可编辑说明.md：\n${String(skill.summary).slice(0, 4000)}` : "",
           `规则置信度：${skillJson.confidence || skill.qualityReport?.confidence || "low"}`,
           `程序调用执行卡 JSON：\n${JSON.stringify(payload, null, 2)}`,
         ]

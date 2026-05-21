@@ -359,6 +359,7 @@ test("routes PPT panel drops into the PPT material box", async ({ page }) => {
 
 test("drags a document card into the AI generation prompt", async ({ page }) => {
   await page.goto("/index.html");
+  await page.locator('[data-tab="generate"]').click();
 
   await dropTextFile(page, "#docDropZone", "drag-source.txt", "这是一段可用于起草的正文素材");
 
@@ -536,6 +537,119 @@ test("skill packages can be exported and imported", async ({ page }) => {
   await expect(page.locator("#styleExampleList")).toContainText("会议样本.docx");
 });
 
+test("skill cards can insert an invocation into the generation prompt", async ({ page }) => {
+  await page.goto("/index.html");
+
+  await expect(page.locator("#stylePanel")).toBeVisible();
+  await expect(page.locator('[data-tab="style"]')).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#styleList")).not.toContainText("置信度");
+  await page.locator("[data-invoke-skill]").first().click();
+
+  await expect(page.locator("#generatePanel")).toBeVisible();
+  await expect(page.locator('[data-tab="generate"]')).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#generatePrompt")).toHaveValue(/@/);
+  await expect(page.locator("#generatePrompt")).toBeFocused();
+});
+
+test("skill card edit saves markdown while retrain opens the builder", async ({ page }) => {
+  const snapshot = {
+    selectedFolderId: "all",
+    selectedDocId: "doc-a",
+    folders: [{ id: "folder-1", name: "Library", kind: "tag", color: "#0f766e" }],
+    docs: [{ id: "doc-a", title: "Source Notice", type: "notice", folderId: "folder-1", content: "source body" }],
+    styles: [
+      {
+        id: "style-1",
+        name: "Meeting Writer",
+        handle: "meeting-writer",
+        category: "公文写作",
+        summary: "# Meeting Writer\n\nOriginal summary",
+        examples: [{ name: "sample.txt", text: "formal sample body" }],
+        enabled: true,
+      },
+    ],
+    settings: {},
+  };
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, state }) => {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, state: snapshot },
+  );
+
+  await page.goto("/index.html");
+  await page.locator('[data-tab="style"]').click();
+  await expect(page.locator('[data-edit-skill="style-1"]')).toHaveCount(0);
+  await expect(page.locator('[data-retrain-skill="style-1"]')).toHaveCount(0);
+  await expect(page.locator('[data-skill-card="style-1"]')).toHaveAttribute("aria-expanded", "false");
+  await page.locator('[data-skill-card="style-1"]').click();
+  await expect(page.locator('[data-skill-card="style-1"]')).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator('[data-edit-skill="style-1"]')).toBeVisible();
+  await page.locator('[data-edit-skill="style-1"]').click();
+
+  await expect(page.locator("#skillDetailMenu")).toBeVisible();
+  await expect(page.locator("#markdownDetailPanel")).toHaveClass(/active/);
+  await expect(page.locator("#styleSummaryInput")).toBeFocused();
+
+  const updatedSummary = "# Meeting Writer\n\nUpdated summary with trailing space. ";
+  await page.locator("#styleSummaryInput").fill(updatedSummary);
+  await expect(page.locator("#saveSkillMdBtn")).toHaveAttribute("data-dirty", "true");
+  await page.locator("#saveSkillMdBtn").click();
+  await expect(page.locator("#saveSkillMdBtn")).toHaveAttribute("data-dirty", "false");
+  await expect
+    .poll(async () =>
+      page.evaluate(
+        ({ storageKey }) => JSON.parse(localStorage.getItem(storageKey)).styles.find((style) => style.id === "style-1").summary,
+        { storageKey: STORAGE_KEY },
+      ),
+    )
+    .toBe(updatedSummary);
+
+  await page.locator("#skillDetailCloseBtn").click();
+  await page.locator('[data-retrain-skill="style-1"]').click();
+
+  await expect(page.locator("#skillBuilderModal")).toBeVisible();
+  await expect(page.locator("#styleExampleList .example-item")).toHaveCount(1);
+});
+
+test("building skill cards stay expanded with progress controls", async ({ page }) => {
+  const snapshot = {
+    selectedFolderId: "all",
+    selectedDocId: "doc-a",
+    folders: [{ id: "folder-1", name: "Library", kind: "tag", color: "#0f766e" }],
+    docs: [{ id: "doc-a", title: "Source Notice", type: "notice", folderId: "folder-1", content: "source body" }],
+    styles: [
+      {
+        id: "style-building",
+        name: "Building Writer",
+        handle: "building-writer",
+        category: "公文写作",
+        status: "building",
+        buildProgress: { message: "正在分析单篇文档", progress: 45 },
+        examples: [{ name: "sample.txt", text: "sample body" }],
+        enabled: true,
+      },
+    ],
+    settings: {},
+  };
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, state }) => {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, state: snapshot },
+  );
+
+  await page.goto("/index.html");
+
+  await expect(page.locator('[data-skill-card="style-building"]')).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator('[data-skill-card="style-building"]')).toContainText("正在分析单篇文档");
+  await expect(page.locator('[data-cancel-skill-build="style-building"]')).toBeVisible();
+});
+
 test("responsive tablet layout opens tools in a drawer", async ({ page }) => {
   await page.setViewportSize({ width: 1000, height: 760 });
   await page.goto("/index.html");
@@ -605,6 +719,15 @@ test("PPT preview modal expands the generated HTML preview", async ({ page }) =>
 test("routes style panel drops into the current skill examples", async ({ page }) => {
   await page.goto("/index.html");
   await page.locator('[data-tab="style"]').click();
+  await page.locator("#newStyleBtn").click();
+  await expect(page.locator("#skillBuilderModal")).toBeVisible();
+  expect(await page.locator("#skillSourceDocSelect option").count()).toBeGreaterThan(0);
+  await page.locator("#skillSourceDocSelect option").first().evaluate((option) => {
+    option.selected = true;
+    option.parentElement.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await page.locator("#addSourceDocsToSkillBtn").click();
+  await expect(page.locator("#styleExampleList .example-item")).toHaveCount(1);
 
   await dropTextFile(page, "#styleDropZone", "style-example.txt", "示范正文");
 
