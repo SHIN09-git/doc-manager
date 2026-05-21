@@ -1,64 +1,118 @@
-# 代码与架构 Review
+# 代码评审记录
 
-日期：2026-05-21
+日期：2026-05-22
+
+范围：当前主线代码、执笔人工作台、文档管理、PPT 生成、测试与文档状态。
 
 ## 结论
 
-P1 架构拆分已完成：垃圾箱、AI 起草 / 段落改写、响应式布局和 PPT 面板已从 `app.js` 下沉到独立 controller；右上角垃圾箱入口也补齐 `aria-expanded` 状态同步。当前项目的主要风险已从“基础控制器缺失”转为“执笔人工作台、API 设置和导入导出仍集中在 `app.js`”。
+当前版本已经具备开源演示和本地使用的基础条件：
 
-## 本轮已处理
+- 文档管理、编辑、导入导出、垃圾箱和拖拽流程已形成闭环。
+- 执笔人从“训练表单”升级为“使用优先”的卡片工作台。
+- 执笔人构建链路已经拆出单篇分析、多篇聚合、草案生成、测试和反馈优化。
+- PPT 生成可以导出原生 `.pptx`，并支持多种默认风格和自动页数。
+- 单元测试与端到端测试覆盖了主要交互路径。
 
-- 新增 `src/modules/documents/trashController.js`，集中管理垃圾箱弹窗、批量恢复 / 清空、焦点回位和 `aria-expanded`。
-- 新增 `src/modules/generation/generationController.js`，集中管理 AI 新建、覆盖、插入和右键段落改写的 @执笔人运行时提示词。
-- 新增 `src/ui/layoutController.js`，集中管理响应式抽屉、移动端“文档 / 编辑 / 功能”切换和左右分栏拖拽。
-- 新增 `src/modules/ppt/pptController.js`，集中管理 PPT 素材导入、生成、JSON 编辑预览、质量报告、放大预览和 PPTX 下载。
-- `app.js` 保留依赖注入、EventBus 连接和跨模块编排，主交互逻辑进一步收敛。
+当前没有发现必须阻断发布的 P0 问题。
 
-## 当前发现
+## 已修复的重点问题
 
-### 1. `app.js` 仍保留部分跨模块复杂度
+| 问题 | 处理结果 |
+| --- | --- |
+| 执笔人模块不突出 | 右侧默认进入执笔人工作台，生成窗口降为调用后的目标页 |
+| 执笔人列表过重 | 卡片默认收缩，只显示名称和调用；点击后展开详情 |
+| 构建中卡片收缩导致进度不可见 | 构建中和失败状态自动展开并显示进度、取消、重试 |
+| 点击文档会改变排序 | 改为只高亮当前文档，排序由拖拽或菜单控制 |
+| 误删无法恢复 | 增加垃圾箱窗口，支持单个和批量恢复、清除 |
+| 导入 Word / PPTX 支持不足 | 增加 `.docx` 和 `.pptx` 内容读取，表格尽量转为 Markdown |
+| 搜索输入频繁重渲染 | 增加防抖 |
+| 大量数据 localStorage 超限风险 | IndexedDB 成为主存储，localStorage 保留兜底 |
+| AI 长耗时不可取消 | 增加 AbortController 和进度反馈 |
+| Playwright runner 不退出 | 修复静态服务与测试退出逻辑，便于 CI 稳定运行 |
 
-严重度：中
+## 测试状态
 
-`app.js` 已不再直接承载垃圾箱、生成、PPT 和布局细节，但执笔人构建 / 测试 / 反馈、API 设置、文件导入导出和若干编辑器菜单逻辑仍在入口文件内。继续扩展时，建议按业务边界继续迁移。
-
-建议优先拆出：
-- `skillWorkbenchController`：执笔人构建、测试、反馈、版本操作和包导入导出入口。
-- `apiSettingsController`：接口设置、测试连接、清空配置和状态提示。
-- `importExportController`：全局文件导入路由、工作台备份和文档导出。
-
-### 2. 控制器之间仍依赖较多 app 注入函数
-
-严重度：低
-
-新 controller 通过依赖注入保持了低破坏迁移，但 `generationController` 和 `pptController` 仍需要较多 app 侧函数。后续可以把任务取消、进度、下载和运行时提示词构造进一步沉到独立 service，减少 controller 参数数量。
-
-参考：
-- [src/modules/generation/generationController.js](G:/cc/school-doc-manager/src/modules/generation/generationController.js:8)
-- [src/modules/ppt/pptController.js](G:/cc/school-doc-manager/src/modules/ppt/pptController.js:1)
-
-### 3. 执笔人包导入仍可增加预览确认
-
-严重度：低
-
-执笔人包导入已修复对象型 `ruleJson` 保真和超长重复 `@调用名` 去重问题，但导入前仍缺少“将要导入什么”的预览确认。后续可以在导入前展示名称、调用名、规则数量、版本数量和示范摘要数量。
-
-## 当前验证
+最近一次完整验证：
 
 ```bash
-npm.cmd run check
-npm.cmd test
-npm.cmd run test:e2e
+npm run build
+npm run check
+npm test
+npm run test:e2e
 ```
 
-结果：语法检查通过，Node 单元测试 69 项通过，Playwright E2E 22 项通过且 runner 正常退出。
+结果：
 
-## 后续建议
+- 单元测试：70 项通过
+- 端到端测试：25 项通过
 
-下一轮：
-- 为执笔人包导入增加格式校验、导入前预览和更友好的失败提示。
-- 拆出 `skillWorkbenchController` 和 `apiSettingsController`，继续降低 `app.js` 体积。
+GitHub Actions 已配置基础 CI，自动运行：
 
-P2：
-- 增加 Issue 模板、PR 模板和 CHANGELOG。
-- 补一份可选后端代理方案文档，说明多人部署时如何避免 API Key 保存在浏览器。
+```bash
+npm run check
+npm test
+```
+
+## 架构观察
+
+### 1. `app.js` 仍然偏大
+
+虽然核心能力已经拆到 `src/modules/`，但 `app.js` 仍承担较多页面装配、事件绑定和旧逻辑兼容职责。
+
+建议后续拆分：
+
+- `skillWorkbenchController`
+- `skillBuilderModalController`
+- `documentPanelController`
+- `apiSettingsController`
+- `editorContextMenuController`
+
+### 2. 执笔人内部命名仍有历史包袱
+
+UI 和文档已经统一为“执笔人”，但代码中保留了 `skill/style` 命名。这对兼容旧数据和 `.skill.json` 包格式有价值，但会提高新贡献者理解成本。
+
+建议短期保留，长期通过类型注释和边界函数逐步收敛。
+
+### 3. AI 结果仍需要更强的本地预检
+
+当前已经有隐私过滤和个案排除提示，但真正的敏感信息识别仍主要依赖模型输出。
+
+建议增加更强的本地规则：
+
+- 手机号、身份证、邮箱、精确地址检测
+- 日期和人名疑似项提示
+- 导出执笔人包前的敏感字段预览
+
+### 4. 执笔人版本对比仍偏弱
+
+现在可以查看版本和回退，但差异对比不够直观。
+
+建议增加：
+
+- 强规则变化
+- 候选规则变化
+- 禁止事项变化
+- 常用表达库变化
+- 测试通过率变化
+
+### 5. 团队协作仍缺少推荐部署方案
+
+项目目前是本地优先工具。团队使用时可能需要：
+
+- 统一 AI 代理
+- 共享执笔人仓库
+- 团队模板规范
+- 备份策略
+
+这些可以先通过文档说明，再考虑实现。
+
+## 下一轮建议
+
+优先级从高到低：
+
+1. 继续拆分 `app.js` 中的执笔人工作台控制逻辑。
+2. 给执笔人包导入增加预览确认和敏感信息提示。
+3. 增加执笔人版本差异对比。
+4. 增加 API 配置连通性测试和错误诊断面板。
+5. 补充团队部署和共享执笔人的文档示例。
