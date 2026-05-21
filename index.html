@@ -42,12 +42,36 @@
             <i data-lucide="archive"></i>
             <span>备份</span>
           </button>
+          <button class="icon-button icon-button-badged" id="trashTopBtn" type="button" title="打开垃圾箱" aria-controls="trashModal" aria-expanded="false">
+            <i data-lucide="trash-2"></i>
+            <span>垃圾箱</span>
+            <small id="trashCount">0</small>
+          </button>
           <button class="icon-button" id="apiTopBtn" type="button" title="打开 AI 接口配置" aria-controls="apiPanel" aria-pressed="false">
             <i data-lucide="plug-zap"></i>
             <span>接口</span>
           </button>
+          <button class="icon-button responsive-inspector-toggle" id="responsiveInspectorToggle" type="button" title="打开右侧功能" aria-controls="workspaceInspector" aria-expanded="false">
+            <i data-lucide="panel-right-open"></i>
+            <span>功能</span>
+          </button>
         </div>
       </header>
+
+      <nav class="mobile-workspace-nav" id="mobileWorkspaceNav" aria-label="工作区切换">
+        <button class="mobile-view-tab" data-mobile-view="docs" type="button" aria-pressed="false">
+          <i data-lucide="files"></i>
+          <span>文档</span>
+        </button>
+        <button class="mobile-view-tab active" data-mobile-view="editor" type="button" aria-pressed="true">
+          <i data-lucide="file-pen-line"></i>
+          <span>编辑</span>
+        </button>
+        <button class="mobile-view-tab" data-mobile-view="tools" type="button" aria-pressed="false">
+          <i data-lucide="sparkles"></i>
+          <span>功能</span>
+        </button>
+      </nav>
 
       <main class="workspace" id="workspace">
         <aside class="sidebar" aria-label="文档管理">
@@ -159,21 +183,31 @@
           <div class="editor-feedback-region">
             <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
           </div>
-          <div class="editor-menu" id="editorMenu" hidden>
-            <button type="button" data-editor-action="copy"><i data-lucide="copy"></i><span>复制选中内容</span></button>
-            <button type="button" data-editor-action="delete"><i data-lucide="scissors"></i><span>删除选中内容</span></button>
-            <button type="button" data-editor-action="rewrite"><i data-lucide="wand-sparkles"></i><span>段落 AI 重写</span></button>
-            <button type="button" data-editor-action="format"><i data-lucide="pilcrow"></i><span>整理全文格式</span></button>
-            <div class="menu-skill-row">
-              <select id="editorSkillSelect" aria-label="选择执笔人"></select>
-              <button type="button" data-editor-action="insert-skill"><i data-lucide="at-sign"></i><span>插入</span></button>
+          <div class="editor-menu" id="editorMenu" role="menu" aria-label="正文编辑菜单" hidden>
+            <button type="button" role="menuitem" data-editor-action="copy"><i data-lucide="copy"></i><span>复制选中内容</span></button>
+            <button type="button" role="menuitem" data-editor-action="delete"><i data-lucide="scissors"></i><span>删除选中内容</span></button>
+            <button type="button" role="menuitem" data-editor-action="format"><i data-lucide="pilcrow"></i><span>整理全文格式</span></button>
+            <div class="menu-skill-row" role="none">
+              <label>
+                <span>执笔人</span>
+                <select id="editorSkillSelect" aria-label="选择执笔人"></select>
+              </label>
+              <button type="button" role="menuitem" data-editor-action="insert-skill"><i data-lucide="at-sign"></i><span>插入</span></button>
+            </div>
+            <div class="rewrite-preset-grid" role="group" aria-label="执笔人段落改写预设">
+              <button type="button" role="menuitem" data-editor-action="rewrite" data-rewrite-mode="preserve"><i data-lucide="wand-sparkles"></i><span>保留原意</span></button>
+              <button type="button" role="menuitem" data-editor-action="rewrite" data-rewrite-mode="style"><i data-lucide="pen-line"></i><span>改文风</span></button>
+              <button type="button" role="menuitem" data-editor-action="rewrite" data-rewrite-mode="expand"><i data-lucide="stretch-horizontal"></i><span>扩写</span></button>
+              <button type="button" role="menuitem" data-editor-action="rewrite" data-rewrite-mode="shorten"><i data-lucide="minimize-2"></i><span>缩写</span></button>
             </div>
           </div>
         </section>
 
         <div class="workspace-resizer workspace-resizer-right" id="rightWorkspaceResizer" role="separator" aria-orientation="vertical" aria-label="调整右侧功能栏宽度" tabindex="0"></div>
 
-        <aside class="inspector" aria-label="AI 与执笔人">
+        <button class="responsive-backdrop" id="responsiveBackdrop" type="button" aria-label="关闭功能面板"></button>
+
+        <aside class="inspector" id="workspaceInspector" aria-label="AI 与执笔人">
           <div class="tabs" role="tablist" aria-label="右侧功能">
             <button class="tab active" data-tab="generate" type="button" role="tab" aria-controls="generatePanel" aria-selected="true">生成</button>
             <button class="tab" data-tab="style" type="button" role="tab" aria-controls="stylePanel" aria-selected="false">执笔人</button>
@@ -207,11 +241,18 @@
             <div class="panel-heading">
               <h2>执笔人工作台</h2>
               <div class="panel-actions">
+                <button class="ghost-icon" id="importSkillPackageBtn" type="button" title="导入执笔人包">
+                  <i data-lucide="upload"></i>
+                </button>
+                <button class="ghost-icon" id="exportSkillPackageBtn" type="button" title="导出当前执笔人包">
+                  <i data-lucide="download"></i>
+                </button>
                 <button class="ghost-icon" id="newStyleBtn" type="button" title="新建执笔人">
                   <i data-lucide="plus"></i>
                 </button>
               </div>
             </div>
+            <input id="importSkillPackageInput" type="file" accept=".skill.json,.json,application/json" multiple hidden />
             <label>
               <span>执笔人名称</span>
               <input id="styleNameInput" type="text" placeholder="例如：通知写作、会议纪要、请示报告" />
@@ -398,12 +439,12 @@
           </section>
 
           <div class="preview-overlay" id="pptPreviewOverlay" hidden>
-            <div class="preview-modal" role="dialog" aria-modal="true" aria-labelledby="pptPreviewModalTitle">
+            <div class="preview-modal" role="dialog" aria-modal="true" aria-labelledby="pptPreviewModalTitle" tabindex="-1">
               <div class="preview-modal-head">
                 <h2 id="pptPreviewModalTitle">PPT HTML 预览</h2>
                 <button id="closePptPreviewBtn" type="button">关闭</button>
               </div>
-              <iframe id="pptPreviewModalFrame" class="ppt-preview-modal-frame" title="PPT 放大预览" sandbox="allow-same-origin"></iframe>
+              <iframe id="pptPreviewModalFrame" class="ppt-preview-modal-frame" title="PPT 放大预览" sandbox="allow-same-origin" tabindex="-1"></iframe>
             </div>
           </div>
 
@@ -450,6 +491,29 @@
           </section>
         </aside>
       </main>
+
+      <div class="preview-overlay trash-overlay" id="trashModal" hidden>
+        <div class="trash-modal" role="dialog" aria-modal="true" aria-labelledby="trashModalTitle" tabindex="-1">
+          <div class="preview-modal-head">
+            <div>
+              <h2 id="trashModalTitle">垃圾箱</h2>
+              <p id="trashModalCount">0 份文档</p>
+            </div>
+            <button id="closeTrashModalBtn" type="button">关闭</button>
+          </div>
+          <div class="trash-toolbar" aria-label="垃圾箱批量操作">
+            <button id="restoreAllTrashBtn" type="button">
+              <i data-lucide="rotate-ccw"></i>
+              全部恢复
+            </button>
+            <button id="clearTrashBtn" class="danger-text" type="button">
+              <i data-lucide="trash-2"></i>
+              清空垃圾箱
+            </button>
+          </div>
+          <div class="trash-list" id="trashModalList"></div>
+        </div>
+      </div>
     </div>
   </body>
 </html>

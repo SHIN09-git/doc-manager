@@ -12,6 +12,7 @@ export function createAiClient({ getSettings, notify = () => {} }) {
     if (!settings.baseUrl || !settings.model) {
       throw new Error("请先在“接口”中配置 Base URL 和模型。");
     }
+    throwIfAborted(options.signal);
 
     const endpointPath = normalizeEndpointPath(settings.endpointPath);
     const url = `${settings.baseUrl.replace(/\/+$/, "")}${endpointPath}`;
@@ -21,7 +22,16 @@ export function createAiClient({ getSettings, notify = () => {} }) {
     }
 
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs || AI_REQUEST_TIMEOUT_MS);
+    let timedOut = false;
+    const timerHost = getTimerHost();
+    const abortFromExternal = () => controller.abort();
+    if (options.signal) {
+      options.signal.addEventListener("abort", abortFromExternal, { once: true });
+    }
+    const timeout = timerHost.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, options.timeoutMs || AI_REQUEST_TIMEOUT_MS);
     let response;
     try {
       response = await fetch(url, {
@@ -36,6 +46,9 @@ export function createAiClient({ getSettings, notify = () => {} }) {
       });
     } catch (error) {
       if (error.name === "AbortError") {
+        if (options.signal?.aborted && !timedOut) {
+          throw createAbortError("已取消本次 AI 操作");
+        }
         const timeoutError = new Error("AI 请求超时");
         timeoutError.code = "timeout";
         timeoutError.retryable = true;
@@ -46,7 +59,10 @@ export function createAiClient({ getSettings, notify = () => {} }) {
       networkError.retryable = true;
       throw networkError;
     } finally {
-      window.clearTimeout(timeout);
+      timerHost.clearTimeout(timeout);
+      if (options.signal) {
+        options.signal.removeEventListener("abort", abortFromExternal);
+      }
     }
 
     if (!response.ok) {
@@ -74,9 +90,13 @@ export function createAiClient({ getSettings, notify = () => {} }) {
   async function callAiWithRetry(messages, options = {}, maxRetries = AI_MAX_RETRIES) {
     let lastError = null;
     for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+      throwIfAborted(options.signal);
       try {
         return await callAi(messages, options);
       } catch (error) {
+        if (isAbortError(error) || options.signal?.aborted) {
+          throw createAbortError("已取消本次 AI 操作");
+        }
         lastError = error;
         const friendly = friendlyAiErrorMessage(error);
         const shouldRetry = attempt < maxRetries - 1 && shouldRetryAiError(error);
@@ -85,17 +105,21 @@ export function createAiClient({ getSettings, notify = () => {} }) {
         }
         const delayMs = getRetryDelayMs(error, attempt);
         notify(`${friendly}，${Math.round(delayMs / 1000)} 秒后重试（${attempt + 2}/${maxRetries}）`, "warn");
-        await sleep(delayMs);
+        await sleep(delayMs, options.signal);
       }
     }
     throw new Error(friendlyAiErrorMessage(lastError));
   }
 
   async function callAiJsonWithRepair(messages, label, options = {}) {
-    const first = await callAiWithRetry(messages, { temperature: options.temperature ?? 0.15 });
+    const first = await callAiWithRetry(messages, {
+      ...options,
+      temperature: options.temperature ?? 0.15,
+    });
     const parsed = parseLooseJson(first);
     if (parsed.ok) return parsed.value;
 
+    throwIfAborted(options.signal);
     const repairMessages = [
       ...messages,
       { role: "assistant", content: first.slice(0, 12000) },
@@ -104,7 +128,7 @@ export function createAiClient({ getSettings, notify = () => {} }) {
         content: `上一次“${label}”不是有效 JSON。请修复为严格 JSON：不加 Markdown、不加解释、不要尾随逗号、字符串必须用双引号。`,
       },
     ];
-    const second = await callAiWithRetry(repairMessages, { temperature: 0 });
+    const second = await callAiWithRetry(repairMessages, { ...options, temperature: 0 });
     const repaired = parseLooseJson(second);
     if (repaired.ok) return repaired.value;
     throw new Error(`${label} 解析失败，请重试或检查模型输出格式。`);
@@ -115,6 +139,7 @@ export function createAiClient({ getSettings, notify = () => {} }) {
     callAiWithRetry,
     callAiJsonWithRepair,
     friendlyAiErrorMessage,
+    isAbortError,
     sleep,
   };
 }
@@ -126,6 +151,7 @@ export function friendlyAiErrorMessage(error) {
   if (status === 404) return "AI 接口地址或模型不存在，请检查 Base URL、Endpoint Path 和模型名称";
   if (status === 429) return "请求过于频繁或额度不足";
   if (status >= 500) return "AI 服务暂时不可用";
+  if (isAbortError(error)) return "已取消本次操作";
   if (error?.code === "timeout" || /timeout|超时|AbortError/i.test(message)) return "AI 请求超时";
   if (/Failed to fetch|无法连接|NetworkError|Load failed/i.test(message)) {
     return "AI 接口无法连接，请检查网络、Base URL 或跨域设置";
@@ -135,6 +161,7 @@ export function friendlyAiErrorMessage(error) {
 }
 
 function shouldRetryAiError(error) {
+  if (isAbortError(error)) return false;
   if (error?.retryable) return true;
   const message = String(error?.message || "");
   return /timeout|超时|无法连接|Failed to fetch|NetworkError|Load failed/i.test(message);
@@ -150,6 +177,40 @@ function getRetryDelayMs(error, attempt) {
   return AI_RETRY_BASE_DELAY_MS * (attempt + 1);
 }
 
-export function sleep(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
+export function sleep(ms, signal = null) {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timerHost = getTimerHost();
+    const timeout = timerHost.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      timerHost.clearTimeout(timeout);
+      reject(createAbortError());
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+export function isAbortError(error) {
+  return error?.name === "AbortError" || error?.code === "aborted" || /已取消|cancelled|canceled/i.test(error?.message || "");
+}
+
+export function createAbortError(message = "已取消本次操作") {
+  const error = new Error(message);
+  error.name = "AbortError";
+  error.code = "aborted";
+  error.retryable = false;
+  return error;
+}
+
+export function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+}
+
+function getTimerHost() {
+  return typeof window !== "undefined" ? window : globalThis;
 }

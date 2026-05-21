@@ -28,9 +28,18 @@ export function createDocumentManager(deps) {
     return state.docs.find((doc) => doc.id === ui.selectedDocId) || null;
   }
 
+  function isDeleted(doc) {
+    return Boolean(doc?.deletedAt);
+  }
+
+  function getSelectableDocuments() {
+    return state.docs.filter((doc) => !isDeleted(doc));
+  }
+
   function selectFirstDocumentIfNeeded() {
-    if (!ui.selectedDocId || !state.docs.some((doc) => doc.id === ui.selectedDocId)) {
-      ui.selectedDocId = state.docs[0]?.id || null;
+    const docs = getSelectableDocuments();
+    if (!ui.selectedDocId || !docs.some((doc) => doc.id === ui.selectedDocId)) {
+      ui.selectedDocId = docs[0]?.id || null;
     }
   }
 
@@ -68,11 +77,13 @@ export function createDocumentManager(deps) {
 
   function duplicateDocument(docId) {
     const source = state.docs.find((doc) => doc.id === docId);
-    if (!source) return null;
+    if (!source || isDeleted(source)) return null;
     const copy = {
       ...clone(source),
       id: createId(),
       title: `${source.title || "未命名文档"} 副本`,
+      deletedAt: "",
+      deletedFromFolderId: "",
       createdAt: now(),
       updatedAt: now(),
     };
@@ -89,18 +100,113 @@ export function createDocumentManager(deps) {
     return current ? duplicateDocument(current.id) : null;
   }
 
+  function moveDocument(sourceId, targetId, placement = "before") {
+    if (!sourceId || !targetId || sourceId === targetId) return false;
+    const source = state.docs.find((doc) => doc.id === sourceId);
+    const target = state.docs.find((doc) => doc.id === targetId);
+    if (!source || !target || isDeleted(source) || isDeleted(target)) return false;
+    saveEditor(false);
+    const sourceIndex = state.docs.findIndex((doc) => doc.id === sourceId);
+    state.docs.splice(sourceIndex, 1);
+    const targetIndex = state.docs.findIndex((doc) => doc.id === targetId);
+    const insertIndex = placement === "after" ? targetIndex + 1 : targetIndex;
+    state.docs.splice(insertIndex, 0, source);
+    persist();
+    eventBus.emit(EVENTS.RENDER_DOC_LIST);
+    toast(`已调整文档顺序：${source.title || "未命名文档"}`);
+    return true;
+  }
+
+  function moveDocumentToTop(docId) {
+    const doc = state.docs.find((item) => item.id === docId);
+    if (!doc || isDeleted(doc)) return false;
+    const firstActive = state.docs.find((item) => !isDeleted(item));
+    if (!firstActive || firstActive.id === doc.id) return false;
+    return moveDocument(doc.id, firstActive.id, "before");
+  }
+
+  function moveDocumentToBottom(docId) {
+    const doc = state.docs.find((item) => item.id === docId);
+    if (!doc || isDeleted(doc)) return false;
+    const activeDocs = state.docs.filter((item) => !isDeleted(item));
+    const lastActive = activeDocs.at(-1);
+    if (!lastActive || lastActive.id === doc.id) return false;
+    return moveDocument(doc.id, lastActive.id, "after");
+  }
+
   function deleteCurrentDocument(confirmDelete = (message) => window.confirm(message)) {
     const current = getCurrentDoc();
-    if (!current) return false;
-    const ok = confirmDelete(`删除“${current.title || "未命名文档"}”？`);
+    if (!current || isDeleted(current)) return false;
+    const ok = confirmDelete(`将“${current.title || "未命名文档"}”移入垃圾箱？`);
     if (!ok) return false;
     const oldLocation = getDocumentLocation(current);
-    state.docs = state.docs.filter((doc) => doc.id !== current.id);
-    ui.selectedDocId = state.docs[0]?.id || null;
+    current.deletedAt = now();
+    current.deletedFromFolderId = current.folderId || "";
+    current.updatedAt = now();
+    ui.selectedDocId = getSelectableDocuments()[0]?.id || null;
     persist();
     eventBus.emit(EVENTS.RENDER_ALL);
-    toast(`已从 ${oldLocation} 删除文档`, "warn");
+    toast(`已将文档移入垃圾箱：${oldLocation}`, "warn");
     return true;
+  }
+
+  function restoreDocument(docId) {
+    const doc = state.docs.find((item) => item.id === docId);
+    if (!doc || !isDeleted(doc)) return null;
+    doc.deletedAt = "";
+    doc.deletedFromFolderId = "";
+    doc.updatedAt = now();
+    ui.selectedDocId = doc.id;
+    persist();
+    eventBus.emit(EVENTS.RENDER_ALL);
+    toast(`已从垃圾箱恢复：${getDocumentLocation(doc)}`);
+    return doc;
+  }
+
+  function restoreAllDocumentsFromTrash() {
+    const trashedDocs = state.docs.filter((item) => isDeleted(item));
+    if (trashedDocs.length === 0) return 0;
+    trashedDocs.forEach((doc) => {
+      doc.deletedAt = "";
+      doc.deletedFromFolderId = "";
+      doc.updatedAt = now();
+    });
+    ui.selectedDocId = trashedDocs[0].id;
+    persist();
+    eventBus.emit(EVENTS.RENDER_ALL);
+    toast(`已从垃圾箱恢复 ${trashedDocs.length} 份文档`);
+    return trashedDocs.length;
+  }
+
+  function permanentlyDeleteDocument(docId, confirmDelete = (message) => window.confirm(message)) {
+    const doc = state.docs.find((item) => item.id === docId);
+    if (!doc || !isDeleted(doc)) return false;
+    const ok = confirmDelete(`永久删除“${doc.title || "未命名文档"}”？此操作无法恢复。`);
+    if (!ok) return false;
+    state.docs = state.docs.filter((item) => item.id !== doc.id);
+    if (ui.selectedDocId === doc.id) {
+      ui.selectedDocId = getSelectableDocuments()[0]?.id || null;
+    }
+    persist();
+    eventBus.emit(EVENTS.RENDER_ALL);
+    toast(`已永久删除文档：${doc.title || "未命名文档"}`, "warn");
+    return true;
+  }
+
+  function clearTrashDocuments(confirmDelete = (message) => window.confirm(message)) {
+    const trashedDocs = state.docs.filter((item) => isDeleted(item));
+    if (trashedDocs.length === 0) return 0;
+    const ok = confirmDelete(`永久清空垃圾箱中的 ${trashedDocs.length} 份文档？此操作无法恢复。`);
+    if (!ok) return 0;
+    const trashIds = new Set(trashedDocs.map((doc) => doc.id));
+    state.docs = state.docs.filter((doc) => !trashIds.has(doc.id));
+    if (ui.selectedDocId && trashIds.has(ui.selectedDocId)) {
+      ui.selectedDocId = getSelectableDocuments()[0]?.id || null;
+    }
+    persist();
+    eventBus.emit(EVENTS.RENDER_ALL);
+    toast(`已清空垃圾箱：${trashedDocs.length} 份文档`, "warn");
+    return trashedDocs.length;
   }
 
   async function importDocumentFiles(files) {
@@ -185,7 +291,14 @@ export function createDocumentManager(deps) {
     createDocument,
     duplicateCurrentDocument,
     duplicateDocument,
+    moveDocument,
+    moveDocumentToTop,
+    moveDocumentToBottom,
     deleteCurrentDocument,
+    restoreDocument,
+    restoreAllDocumentsFromTrash,
+    permanentlyDeleteDocument,
+    clearTrashDocuments,
     getCurrentDoc,
     selectFirstDocumentIfNeeded,
     importDocumentFiles,

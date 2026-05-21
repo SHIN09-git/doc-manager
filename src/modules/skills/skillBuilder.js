@@ -16,28 +16,35 @@ export function createSkillBuilder(deps) {
     normalizeSkillJsonText,
   } = deps;
 
-  async function buildSkillWithAiChain(style, progress = null) {
+  async function buildSkillWithAiChain(style, progress = null, options = {}) {
     const examples = (style.examples || []).slice(0, 8);
     const analyses = [];
+    const hasFeedback = (style.feedbacks || []).length > 0;
+    const totalStages = hasFeedback ? 5 : 4;
     for (const [index, example] of examples.entries()) {
+      throwIfAborted(options.signal);
       const baseProgress = 8 + Math.round((index / Math.max(examples.length, 1)) * 36);
-      progress?.update(`正在分析样本文档 ${index + 1}/${examples.length}：${example.name}`, baseProgress);
-      const analysis = await analyzeSingleDocument(style, example, index);
+      progress?.update(`步骤 1/${totalStages}：正在分析样本文档 ${index + 1}/${examples.length}：${example.name}`, baseProgress);
+      const analysis = await analyzeSingleDocument(style, example, index, options);
       example.analysis = analysis;
       example.analyzedAt = now();
       analyses.push(analysis);
     }
 
-    progress?.update("正在聚合多篇文档规则", 52);
-    const aggregationData = await aggregateDocumentAnalyses(style, analyses);
-    progress?.update("正在生成执笔人草案", 66);
-    let draft = await generateSkillDraft(style, aggregationData);
-    if ((style.feedbacks || []).length > 0) {
-      progress?.update("正在吸收用户反馈优化执笔人", 74);
-      draft = await optimizeSkillWithFeedback(style, draft, aggregationData);
+    throwIfAborted(options.signal);
+    progress?.update(`步骤 2/${totalStages}：正在聚合多篇文档规则`, 52);
+    const aggregationData = await aggregateDocumentAnalyses(style, analyses, options);
+    throwIfAborted(options.signal);
+    progress?.update(`步骤 3/${totalStages}：正在生成执笔人草案`, 66);
+    let draft = await generateSkillDraft(style, aggregationData, options);
+    if (hasFeedback) {
+      throwIfAborted(options.signal);
+      progress?.update(`步骤 4/${totalStages}：正在吸收用户反馈优化执笔人`, 74);
+      draft = await optimizeSkillWithFeedback(style, draft, aggregationData, options);
     }
-    progress?.update("正在生成测试文档并自检", 82);
-    const test = await testSkillOnGeneration(style, draft.skillJson, draft.exampleInput);
+    throwIfAborted(options.signal);
+    progress?.update(`步骤 ${totalStages}/${totalStages}：正在生成测试文档并自检`, 82);
+    const test = await testSkillOnGeneration(style, draft.skillJson, draft.exampleInput, options);
     const qualityReport = normalizeSkillQualityReport(style, aggregationData, draft.qualityReport, test.report);
 
     return {
@@ -53,7 +60,7 @@ export function createSkillBuilder(deps) {
     };
   }
 
-  async function analyzeSingleDocument(style, example, index) {
+  async function analyzeSingleDocument(style, example, index, options = {}) {
     const prompt = [
       "你是多文档执笔人构建系统的“单篇文档分析器”。请只分析这一篇样本文档，不能把单篇现象写成强规则。",
       "请识别结构、文风、句式、格式、变量槽位、候选规则、隐私/敏感信息、个案信息、禁止复用内容。",
@@ -65,11 +72,12 @@ export function createSkillBuilder(deps) {
       `样本文件名：${example.name}`,
       `样本文本：\n${String(example.text || "").slice(0, 12000)}`,
     ].join("\n\n");
-    const result = await callAiJsonWithRepair(buildMessages(prompt), "单篇文档分析 JSON");
+    throwIfAborted(options.signal);
+    const result = await callAiJsonWithRepair(buildMessages(prompt), "单篇文档分析 JSON", { signal: options.signal });
     return normalizeSingleDocumentAnalysis(result, example, index);
   }
 
-  async function aggregateDocumentAnalyses(style, analyses) {
+  async function aggregateDocumentAnalyses(style, analyses, options = {}) {
     const prompt = [
       "你是多文档执笔人构建系统的“多篇聚合器”。请横向比较多篇单篇分析，提炼共同点、差异点和冲突点。",
       "核心原则：单篇文档只能产生候选规则；只有至少 2 篇样本文档共同验证，才可以成为 strong_rules。若样本总数少于 3，overall_confidence 不能高于 medium。",
@@ -79,25 +87,29 @@ export function createSkillBuilder(deps) {
       `执笔人名称：${style.name}`,
       `单篇分析：\n${JSON.stringify(analyses, null, 2)}`,
     ].join("\n\n");
-    const result = await callAiJsonWithRepair(buildMessages(prompt), "多篇聚合 JSON");
+    throwIfAborted(options.signal);
+    const result = await callAiJsonWithRepair(buildMessages(prompt), "多篇聚合 JSON", { signal: options.signal });
     return normalizeAggregationData(result, analyses.length);
   }
 
-  async function generateSkillDraft(style, aggregationData) {
+  async function generateSkillDraft(style, aggregationData, options = {}) {
     const prompt = [
       "你是多文档执笔人构建系统的“执笔人草案生成器”。请根据多篇聚合结果生成可复用、可编辑、可测试的文本生成执笔人。",
+      "请采用类似 Codex Skill 的设计原则：触发条件要清楚，正文规则要精简，只写模型无法稳定自行推断的关键程序知识；可变内容放入输入字段和变量槽位；可验证流程写成步骤和自检清单。",
       "生成 skill_json 字段时，strong_rules 必须来自聚合结果 strong_rules；candidate_rules 只能放入 recommended 或 optional，不得伪装成必须规则。",
-      "skill_json 是程序调用的执笔人规则 JSON，要能被后续文档生成模块调用，用来控制文种结构、行文风格、格式规范、常用表达和审稿标准。",
+      "skill_json 是程序调用的执笔人执行卡 JSON，要能被后续文档生成模块调用，用来控制文种结构、行文风格、格式规范、常用表达和审稿标准；不要把样本文档原文、隐私信息或个案事实写入 JSON。",
+      "markdown 是给文员看的简短说明，控制在 1200 字以内，重点写适用范围、输入字段、必守规则、禁忌和自检，不要显化完整提示词。",
       "只输出 JSON，不要 Markdown。",
-      "JSON 结构：{\n  \"markdown\":\"# 执笔人名称\\n...\",\n  \"skill_json\": {\n    \"name\":\"...\",\n    \"handle\":\"...\",\n    \"version\":\"...\",\n    \"enabled\": true,\n    \"category\":\"...\",\n    \"description\":\"...\",\n    \"applicable_scope\":\"...\",\n    \"confidence\":\"low|medium|high\",\n    \"source_documents\": [],\n    \"user_input_fields\": [],\n    \"document_structure_template\": [],\n    \"style_rules\": {\"must\": [], \"recommended\": [], \"optional\": []},\n    \"format_rules\": [],\n    \"common_expression_library\": [],\n    \"scene_variations\": [],\n    \"variable_slots\": [],\n    \"forbidden\": [],\n    \"privacy_filters\": [],\n    \"case_specific_exclusions\": [],\n    \"generation_steps\": [],\n    \"self_checklist\": [],\n    \"review_standards\": [],\n    \"quality_controls\": {\"rule_confidence\":\"...\", \"conflict_resolution\": [], \"single_document_rule_policy\":\"...\"},\n    \"example_input\": {},\n    \"example_output\": \"...\"\n  },\n  \"quality_report\": {\"confidence\":\"...\", \"strong_rule_count\":0, \"candidate_rule_count\":0, \"conflicts\":[], \"excluded_case_specific_items\":[], \"privacy_filter_notes\":[]},\n  \"example_input\": {}\n}",
+      "JSON 结构：{\n  \"markdown\":\"# 执笔人名称\\n...\",\n  \"skill_json\": {\n    \"name\":\"...\",\n    \"handle\":\"...\",\n    \"version\":\"...\",\n    \"enabled\": true,\n    \"category\":\"...\",\n    \"description\":\"...\",\n    \"trigger_description\":\"何时应该调用这个执笔人\",\n    \"default_prompt\":\"@handle 起草...\",\n    \"concise_instruction\":\"一句话概括执行方式\",\n    \"applicable_scope\":\"...\",\n    \"confidence\":\"low|medium|high\",\n    \"source_documents\": [],\n    \"input_contract\": {\"required_fields\": [], \"optional_fields\": [], \"missing_fact_policy\":\"事实缺失时如何处理\"},\n    \"user_input_fields\": [],\n    \"document_structure_template\": [],\n    \"style_rules\": {\"must\": [], \"recommended\": [], \"optional\": []},\n    \"format_rules\": [],\n    \"common_expression_library\": [],\n    \"scene_variations\": [],\n    \"variable_slots\": [],\n    \"forbidden\": [],\n    \"privacy_filters\": [],\n    \"case_specific_exclusions\": [],\n    \"execution_workflow\": [],\n    \"generation_steps\": [],\n    \"validation_checklist\": [],\n    \"self_checklist\": [],\n    \"review_standards\": [],\n    \"activation_examples\": [],\n    \"quality_controls\": {\"rule_confidence\":\"...\", \"conflict_resolution\": [], \"single_document_rule_policy\":\"...\", \"candidate_rule_policy\":\"...\", \"privacy_filter\": true},\n    \"example_input\": {},\n    \"example_output\": \"...\"\n  },\n  \"quality_report\": {\"confidence\":\"...\", \"strong_rule_count\":0, \"candidate_rule_count\":0, \"conflicts\":[], \"excluded_case_specific_items\":[], \"privacy_filter_notes\":[]},\n  \"example_input\": {}\n}",
       `执笔人基本信息：${JSON.stringify(pickSkillMetadata(style), null, 2)}`,
       `聚合结果：\n${JSON.stringify(aggregationData, null, 2)}`,
     ].join("\n\n");
-    const result = await callAiJsonWithRepair(buildMessages(prompt), "执笔人草案 JSON");
+    throwIfAborted(options.signal);
+    const result = await callAiJsonWithRepair(buildMessages(prompt), "执笔人草案 JSON", { signal: options.signal });
     return normalizeSkillDraftOutput(result, style, aggregationData);
   }
 
-  async function optimizeSkillWithFeedback(style, draft, aggregationData) {
+  async function optimizeSkillWithFeedback(style, draft, aggregationData, options = {}) {
     const feedbacks = (style.feedbacks || []).map((feedback, index) => `${index + 1}. ${feedback.text}`).join("\n");
     const prompt = [
       "你是多文档执笔人构建系统的“反馈优化器”。请在不破坏强规则证据链的前提下，根据用户反馈优化执笔人。",
@@ -107,11 +119,12 @@ export function createSkillBuilder(deps) {
       `聚合结果：\n${JSON.stringify(aggregationData, null, 2)}`,
       `当前草案：\n${JSON.stringify(draft, null, 2)}`,
     ].join("\n\n");
-    const result = await callAiJsonWithRepair(buildMessages(prompt), "反馈优化执笔人 JSON");
+    throwIfAborted(options.signal);
+    const result = await callAiJsonWithRepair(buildMessages(prompt), "反馈优化执笔人 JSON", { signal: options.signal });
     return normalizeSkillDraftOutput(result, style, aggregationData);
   }
 
-  async function testSkillOnGeneration(style, skillJson, exampleInput = null) {
+  async function testSkillOnGeneration(style, skillJson, exampleInput = null, options = {}) {
     const testInput = exampleInput && Object.keys(exampleInput).length > 0
       ? exampleInput
       : {
@@ -127,7 +140,8 @@ export function createSkillBuilder(deps) {
       `执笔人规则 JSON：\n${JSON.stringify(skillJson, null, 2)}`,
       `测试输入：\n${JSON.stringify(testInput, null, 2)}`,
     ].join("\n\n");
-    const result = await callAiJsonWithRepair(buildMessages(prompt), "执笔人生成测试 JSON");
+    throwIfAborted(options.signal);
+    const result = await callAiJsonWithRepair(buildMessages(prompt), "执笔人生成测试 JSON", { signal: options.signal });
     return {
       document: result.test_document_markdown || result.document || "",
       report: result.check_report || result.report || {},
@@ -162,6 +176,15 @@ export function createSkillBuilder(deps) {
       { role: "system", content: getSystemPrompt() || DEFAULT_SYSTEM_PROMPT },
       { role: "user", content: prompt },
     ];
+  }
+
+  function throwIfAborted(signal) {
+    if (signal?.aborted) {
+      const error = new Error("已取消本次执笔人构建");
+      error.name = "AbortError";
+      error.code = "aborted";
+      throw error;
+    }
   }
 
   return {

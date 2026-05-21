@@ -24041,6 +24041,7 @@ ${formatListItems(items)}`;
       if (!settings.baseUrl || !settings.model) {
         throw new Error("\u8BF7\u5148\u5728\u201C\u63A5\u53E3\u201D\u4E2D\u914D\u7F6E Base URL \u548C\u6A21\u578B\u3002");
       }
+      throwIfAborted(options.signal);
       const endpointPath = normalizeEndpointPath(settings.endpointPath);
       const url = `${settings.baseUrl.replace(/\/+$/, "")}${endpointPath}`;
       const headers = { "Content-Type": "application/json" };
@@ -24048,7 +24049,16 @@ ${formatListItems(items)}`;
         headers.Authorization = `Bearer ${settings.apiKey}`;
       }
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs || AI_REQUEST_TIMEOUT_MS);
+      let timedOut = false;
+      const timerHost = getTimerHost();
+      const abortFromExternal = () => controller.abort();
+      if (options.signal) {
+        options.signal.addEventListener("abort", abortFromExternal, { once: true });
+      }
+      const timeout = timerHost.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, options.timeoutMs || AI_REQUEST_TIMEOUT_MS);
       let response;
       try {
         response = await fetch(url, {
@@ -24063,6 +24073,9 @@ ${formatListItems(items)}`;
         });
       } catch (error) {
         if (error.name === "AbortError") {
+          if (options.signal?.aborted && !timedOut) {
+            throw createAbortError("\u5DF2\u53D6\u6D88\u672C\u6B21 AI \u64CD\u4F5C");
+          }
           const timeoutError = new Error("AI \u8BF7\u6C42\u8D85\u65F6");
           timeoutError.code = "timeout";
           timeoutError.retryable = true;
@@ -24073,7 +24086,10 @@ ${formatListItems(items)}`;
         networkError.retryable = true;
         throw networkError;
       } finally {
-        window.clearTimeout(timeout);
+        timerHost.clearTimeout(timeout);
+        if (options.signal) {
+          options.signal.removeEventListener("abort", abortFromExternal);
+        }
       }
       if (!response.ok) {
         const text = await response.text().catch(() => "");
@@ -24094,9 +24110,13 @@ ${formatListItems(items)}`;
     async function callAiWithRetry2(messages, options = {}, maxRetries = AI_MAX_RETRIES) {
       let lastError = null;
       for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+        throwIfAborted(options.signal);
         try {
           return await callAi(messages, options);
         } catch (error) {
+          if (isAbortError(error) || options.signal?.aborted) {
+            throw createAbortError("\u5DF2\u53D6\u6D88\u672C\u6B21 AI \u64CD\u4F5C");
+          }
           lastError = error;
           const friendly = friendlyAiErrorMessage(error);
           const shouldRetry = attempt < maxRetries - 1 && shouldRetryAiError(error);
@@ -24105,15 +24125,19 @@ ${formatListItems(items)}`;
           }
           const delayMs = getRetryDelayMs(error, attempt);
           notify(`${friendly}\uFF0C${Math.round(delayMs / 1e3)} \u79D2\u540E\u91CD\u8BD5\uFF08${attempt + 2}/${maxRetries}\uFF09`, "warn");
-          await sleep(delayMs);
+          await sleep(delayMs, options.signal);
         }
       }
       throw new Error(friendlyAiErrorMessage(lastError));
     }
     async function callAiJsonWithRepair2(messages, label, options = {}) {
-      const first2 = await callAiWithRetry2(messages, { temperature: options.temperature ?? 0.15 });
+      const first2 = await callAiWithRetry2(messages, {
+        ...options,
+        temperature: options.temperature ?? 0.15
+      });
       const parsed = parseLooseJson(first2);
       if (parsed.ok) return parsed.value;
+      throwIfAborted(options.signal);
       const repairMessages = [
         ...messages,
         { role: "assistant", content: first2.slice(0, 12e3) },
@@ -24122,7 +24146,7 @@ ${formatListItems(items)}`;
           content: `\u4E0A\u4E00\u6B21\u201C${label}\u201D\u4E0D\u662F\u6709\u6548 JSON\u3002\u8BF7\u4FEE\u590D\u4E3A\u4E25\u683C JSON\uFF1A\u4E0D\u52A0 Markdown\u3001\u4E0D\u52A0\u89E3\u91CA\u3001\u4E0D\u8981\u5C3E\u968F\u9017\u53F7\u3001\u5B57\u7B26\u4E32\u5FC5\u987B\u7528\u53CC\u5F15\u53F7\u3002`
         }
       ];
-      const second = await callAiWithRetry2(repairMessages, { temperature: 0 });
+      const second = await callAiWithRetry2(repairMessages, { ...options, temperature: 0 });
       const repaired = parseLooseJson(second);
       if (repaired.ok) return repaired.value;
       throw new Error(`${label} \u89E3\u6790\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5\u6216\u68C0\u67E5\u6A21\u578B\u8F93\u51FA\u683C\u5F0F\u3002`);
@@ -24132,6 +24156,7 @@ ${formatListItems(items)}`;
       callAiWithRetry: callAiWithRetry2,
       callAiJsonWithRepair: callAiJsonWithRepair2,
       friendlyAiErrorMessage,
+      isAbortError,
       sleep
     };
   }
@@ -24142,6 +24167,7 @@ ${formatListItems(items)}`;
     if (status === 404) return "AI \u63A5\u53E3\u5730\u5740\u6216\u6A21\u578B\u4E0D\u5B58\u5728\uFF0C\u8BF7\u68C0\u67E5 Base URL\u3001Endpoint Path \u548C\u6A21\u578B\u540D\u79F0";
     if (status === 429) return "\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\u6216\u989D\u5EA6\u4E0D\u8DB3";
     if (status >= 500) return "AI \u670D\u52A1\u6682\u65F6\u4E0D\u53EF\u7528";
+    if (isAbortError(error)) return "\u5DF2\u53D6\u6D88\u672C\u6B21\u64CD\u4F5C";
     if (error?.code === "timeout" || /timeout|超时|AbortError/i.test(message)) return "AI \u8BF7\u6C42\u8D85\u65F6";
     if (/Failed to fetch|无法连接|NetworkError|Load failed/i.test(message)) {
       return "AI \u63A5\u53E3\u65E0\u6CD5\u8FDE\u63A5\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u3001Base URL \u6216\u8DE8\u57DF\u8BBE\u7F6E";
@@ -24150,6 +24176,7 @@ ${formatListItems(items)}`;
     return message || "AI \u8C03\u7528\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5";
   }
   function shouldRetryAiError(error) {
+    if (isAbortError(error)) return false;
     if (error?.retryable) return true;
     const message = String(error?.message || "");
     return /timeout|超时|无法连接|Failed to fetch|NetworkError|Load failed/i.test(message);
@@ -24162,8 +24189,38 @@ ${formatListItems(items)}`;
     if (retryAfter > 0) return retryAfter * 1e3;
     return AI_RETRY_BASE_DELAY_MS * (attempt + 1);
   }
-  function sleep(ms) {
-    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  function sleep(ms, signal = null) {
+    throwIfAborted(signal);
+    return new Promise((resolve, reject2) => {
+      const timerHost = getTimerHost();
+      const timeout = timerHost.setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      function onAbort() {
+        timerHost.clearTimeout(timeout);
+        reject2(createAbortError());
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+  function isAbortError(error) {
+    return error?.name === "AbortError" || error?.code === "aborted" || /已取消|cancelled|canceled/i.test(error?.message || "");
+  }
+  function createAbortError(message = "\u5DF2\u53D6\u6D88\u672C\u6B21\u64CD\u4F5C") {
+    const error = new Error(message);
+    error.name = "AbortError";
+    error.code = "aborted";
+    error.retryable = false;
+    return error;
+  }
+  function throwIfAborted(signal) {
+    if (signal?.aborted) {
+      throw createAbortError();
+    }
+  }
+  function getTimerHost() {
+    return typeof window !== "undefined" ? window : globalThis;
   }
 
   // src/modules/documents/documentEditor.js
@@ -24185,9 +24242,10 @@ ${formatListItems(items)}`;
       toast: toast2
     } = deps;
     function queueEditorSave2() {
-      if (!getCurrentDoc2()) {
+      const doc = getCurrentDoc2();
+      if (!doc || doc.deletedAt) {
         window.clearTimeout(ui2.saveTimer);
-        showSaveStatus2("");
+        showSaveStatus2(doc?.deletedAt ? "\u5728\u5783\u573E\u7BB1\u4E2D" : "");
         return;
       }
       showSaveStatus2("\u4FDD\u5B58\u4E2D");
@@ -24198,6 +24256,10 @@ ${formatListItems(items)}`;
       const doc = getCurrentDoc2();
       if (!doc) {
         showSaveStatus2("");
+        return;
+      }
+      if (doc.deletedAt) {
+        showSaveStatus2("\u5728\u5783\u573E\u7BB1\u4E2D", { title: "\u8BF7\u5148\u6062\u590D\u6587\u6863\u518D\u7F16\u8F91\u6216\u4FDD\u5B58" });
         return;
       }
       doc.title = els2.titleInput.value.trim() || "\u672A\u547D\u540D\u6587\u6863";
@@ -24677,9 +24739,16 @@ ${notes.join("\n")}`);
     function getCurrentDoc2() {
       return state2.docs.find((doc) => doc.id === ui2.selectedDocId) || null;
     }
+    function isDeleted(doc) {
+      return Boolean(doc?.deletedAt);
+    }
+    function getSelectableDocuments() {
+      return state2.docs.filter((doc) => !isDeleted(doc));
+    }
     function selectFirstDocumentIfNeeded2() {
-      if (!ui2.selectedDocId || !state2.docs.some((doc) => doc.id === ui2.selectedDocId)) {
-        ui2.selectedDocId = state2.docs[0]?.id || null;
+      const docs = getSelectableDocuments();
+      if (!ui2.selectedDocId || !docs.some((doc) => doc.id === ui2.selectedDocId)) {
+        ui2.selectedDocId = docs[0]?.id || null;
       }
     }
     function resolveTargetFolder(seed = {}) {
@@ -24709,11 +24778,13 @@ ${notes.join("\n")}`);
     }
     function duplicateDocument2(docId) {
       const source = state2.docs.find((doc) => doc.id === docId);
-      if (!source) return null;
+      if (!source || isDeleted(source)) return null;
       const copy = {
         ...clone(source),
         id: createId(),
         title: `${source.title || "\u672A\u547D\u540D\u6587\u6863"} \u526F\u672C`,
+        deletedAt: "",
+        deletedFromFolderId: "",
         createdAt: now(),
         updatedAt: now()
       };
@@ -24728,18 +24799,106 @@ ${notes.join("\n")}`);
       const current = getCurrentDoc2();
       return current ? duplicateDocument2(current.id) : null;
     }
+    function moveDocument2(sourceId, targetId, placement = "before") {
+      if (!sourceId || !targetId || sourceId === targetId) return false;
+      const source = state2.docs.find((doc) => doc.id === sourceId);
+      const target = state2.docs.find((doc) => doc.id === targetId);
+      if (!source || !target || isDeleted(source) || isDeleted(target)) return false;
+      saveEditor2(false);
+      const sourceIndex = state2.docs.findIndex((doc) => doc.id === sourceId);
+      state2.docs.splice(sourceIndex, 1);
+      const targetIndex = state2.docs.findIndex((doc) => doc.id === targetId);
+      const insertIndex = placement === "after" ? targetIndex + 1 : targetIndex;
+      state2.docs.splice(insertIndex, 0, source);
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_DOC_LIST);
+      toast2(`\u5DF2\u8C03\u6574\u6587\u6863\u987A\u5E8F\uFF1A${source.title || "\u672A\u547D\u540D\u6587\u6863"}`);
+      return true;
+    }
+    function moveDocumentToTop2(docId) {
+      const doc = state2.docs.find((item) => item.id === docId);
+      if (!doc || isDeleted(doc)) return false;
+      const firstActive = state2.docs.find((item) => !isDeleted(item));
+      if (!firstActive || firstActive.id === doc.id) return false;
+      return moveDocument2(doc.id, firstActive.id, "before");
+    }
+    function moveDocumentToBottom2(docId) {
+      const doc = state2.docs.find((item) => item.id === docId);
+      if (!doc || isDeleted(doc)) return false;
+      const activeDocs = state2.docs.filter((item) => !isDeleted(item));
+      const lastActive = activeDocs.at(-1);
+      if (!lastActive || lastActive.id === doc.id) return false;
+      return moveDocument2(doc.id, lastActive.id, "after");
+    }
     function deleteCurrentDocument2(confirmDelete = (message) => window.confirm(message)) {
       const current = getCurrentDoc2();
-      if (!current) return false;
-      const ok = confirmDelete(`\u5220\u9664\u201C${current.title || "\u672A\u547D\u540D\u6587\u6863"}\u201D\uFF1F`);
+      if (!current || isDeleted(current)) return false;
+      const ok = confirmDelete(`\u5C06\u201C${current.title || "\u672A\u547D\u540D\u6587\u6863"}\u201D\u79FB\u5165\u5783\u573E\u7BB1\uFF1F`);
       if (!ok) return false;
       const oldLocation = getDocumentLocation2(current);
-      state2.docs = state2.docs.filter((doc) => doc.id !== current.id);
-      ui2.selectedDocId = state2.docs[0]?.id || null;
+      current.deletedAt = now();
+      current.deletedFromFolderId = current.folderId || "";
+      current.updatedAt = now();
+      ui2.selectedDocId = getSelectableDocuments()[0]?.id || null;
       persist2();
       eventBus2.emit(EVENTS.RENDER_ALL);
-      toast2(`\u5DF2\u4ECE ${oldLocation} \u5220\u9664\u6587\u6863`, "warn");
+      toast2(`\u5DF2\u5C06\u6587\u6863\u79FB\u5165\u5783\u573E\u7BB1\uFF1A${oldLocation}`, "warn");
       return true;
+    }
+    function restoreDocument2(docId) {
+      const doc = state2.docs.find((item) => item.id === docId);
+      if (!doc || !isDeleted(doc)) return null;
+      doc.deletedAt = "";
+      doc.deletedFromFolderId = "";
+      doc.updatedAt = now();
+      ui2.selectedDocId = doc.id;
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_ALL);
+      toast2(`\u5DF2\u4ECE\u5783\u573E\u7BB1\u6062\u590D\uFF1A${getDocumentLocation2(doc)}`);
+      return doc;
+    }
+    function restoreAllDocumentsFromTrash() {
+      const trashedDocs = state2.docs.filter((item) => isDeleted(item));
+      if (trashedDocs.length === 0) return 0;
+      trashedDocs.forEach((doc) => {
+        doc.deletedAt = "";
+        doc.deletedFromFolderId = "";
+        doc.updatedAt = now();
+      });
+      ui2.selectedDocId = trashedDocs[0].id;
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_ALL);
+      toast2(`\u5DF2\u4ECE\u5783\u573E\u7BB1\u6062\u590D ${trashedDocs.length} \u4EFD\u6587\u6863`);
+      return trashedDocs.length;
+    }
+    function permanentlyDeleteDocument2(docId, confirmDelete = (message) => window.confirm(message)) {
+      const doc = state2.docs.find((item) => item.id === docId);
+      if (!doc || !isDeleted(doc)) return false;
+      const ok = confirmDelete(`\u6C38\u4E45\u5220\u9664\u201C${doc.title || "\u672A\u547D\u540D\u6587\u6863"}\u201D\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u6062\u590D\u3002`);
+      if (!ok) return false;
+      state2.docs = state2.docs.filter((item) => item.id !== doc.id);
+      if (ui2.selectedDocId === doc.id) {
+        ui2.selectedDocId = getSelectableDocuments()[0]?.id || null;
+      }
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_ALL);
+      toast2(`\u5DF2\u6C38\u4E45\u5220\u9664\u6587\u6863\uFF1A${doc.title || "\u672A\u547D\u540D\u6587\u6863"}`, "warn");
+      return true;
+    }
+    function clearTrashDocuments2(confirmDelete = (message) => window.confirm(message)) {
+      const trashedDocs = state2.docs.filter((item) => isDeleted(item));
+      if (trashedDocs.length === 0) return 0;
+      const ok = confirmDelete(`\u6C38\u4E45\u6E05\u7A7A\u5783\u573E\u7BB1\u4E2D\u7684 ${trashedDocs.length} \u4EFD\u6587\u6863\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u6062\u590D\u3002`);
+      if (!ok) return 0;
+      const trashIds = new Set(trashedDocs.map((doc) => doc.id));
+      state2.docs = state2.docs.filter((doc) => !trashIds.has(doc.id));
+      if (ui2.selectedDocId && trashIds.has(ui2.selectedDocId)) {
+        ui2.selectedDocId = getSelectableDocuments()[0]?.id || null;
+      }
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_ALL);
+      toast2(`\u5DF2\u6E05\u7A7A\u5783\u573E\u7BB1\uFF1A${trashedDocs.length} \u4EFD\u6587\u6863`, "warn");
+      return trashedDocs.length;
     }
     async function importDocumentFiles2(files) {
       if (!files || files.length === 0) return 0;
@@ -24819,7 +24978,14 @@ ${notes.join("\n")}`);
       createDocument: createDocument2,
       duplicateCurrentDocument,
       duplicateDocument: duplicateDocument2,
+      moveDocument: moveDocument2,
+      moveDocumentToTop: moveDocumentToTop2,
+      moveDocumentToBottom: moveDocumentToBottom2,
       deleteCurrentDocument: deleteCurrentDocument2,
+      restoreDocument: restoreDocument2,
+      restoreAllDocumentsFromTrash,
+      permanentlyDeleteDocument: permanentlyDeleteDocument2,
+      clearTrashDocuments: clearTrashDocuments2,
       getCurrentDoc: getCurrentDoc2,
       selectFirstDocumentIfNeeded: selectFirstDocumentIfNeeded2,
       importDocumentFiles: importDocumentFiles2,
@@ -24839,36 +25005,55 @@ ${notes.join("\n")}`);
       getDocumentLocation: getDocumentLocation2,
       onSelectDocument,
       onCopyDocument,
-      onDeleteDocument
+      onMoveDocument,
+      onMoveDocumentToTop,
+      onMoveDocumentToBottom,
+      onDeleteDocument,
+      onRestoreDocument,
+      onRestoreAllTrash,
+      onPermanentlyDeleteDocument,
+      onClearTrash
     } = deps;
+    let draggedDocId = null;
     function getVisibleDocuments() {
       const query = els2.searchInput.value.trim().toLowerCase();
-      const docs = state2.docs.filter((doc) => ui2.selectedFolderId === "all" || doc.folderId === ui2.selectedFolderId).filter((doc) => {
+      return state2.docs.filter((doc) => !doc.deletedAt).filter((doc) => ui2.selectedFolderId === "all" || doc.folderId === ui2.selectedFolderId).filter((doc) => {
         if (!query) return true;
         return `${doc.title}
 ${doc.content}`.toLowerCase().includes(query);
       });
-      const selectedIndex = docs.findIndex((doc) => doc.id === ui2.selectedDocId);
-      if (selectedIndex <= 0) return docs;
-      const selected = docs[selectedIndex];
-      return [selected, ...docs.slice(0, selectedIndex), ...docs.slice(selectedIndex + 1)];
     }
     function renderDocList2() {
       const docs = getVisibleDocuments();
+      const trashCount = state2.docs.filter((doc) => doc.deletedAt).length;
       els2.docCount.textContent = String(docs.length);
+      if (els2.trashCount) els2.trashCount.textContent = String(trashCount);
+      els2.trashTopBtn?.classList.toggle("has-trash", trashCount > 0);
+      els2.docList.setAttribute("role", "listbox");
+      els2.docList.setAttribute("aria-label", "\u6587\u6863\u5217\u8868");
       if (docs.length === 0) {
-        els2.docList.innerHTML = '<div class="empty-state">\u6CA1\u6709\u5339\u914D\u7684\u6587\u6863</div>';
+        els2.docList.innerHTML = `<div class="empty-state">\u6CA1\u6709\u5339\u914D\u7684\u6587\u6863</div>`;
+        renderTrashModal2();
         return;
       }
       els2.docList.innerHTML = docs.map((doc) => {
         const type = getType2(doc.type).name;
         const folder = state2.folders.find((item) => item.id === doc.folderId);
-        return `<article class="doc-item ${doc.id === ui2.selectedDocId ? "active" : ""}" data-doc-id="${doc.id}" draggable="true">
+        const active = doc.id === ui2.selectedDocId;
+        const actions = `<button class="tiny-button" type="button" title="\u590D\u5236" data-copy-doc="${doc.id}"><i data-lucide="copy"></i></button>
+              <details class="doc-menu" data-doc-menu>
+                <summary class="tiny-button" title="\u66F4\u591A\u64CD\u4F5C" aria-label="\u66F4\u591A\u64CD\u4F5C"><i data-lucide="more-horizontal"></i></summary>
+                <div class="doc-menu-panel" role="menu">
+                  <button type="button" role="menuitem" data-move-doc-top="${doc.id}"><i data-lucide="arrow-up-to-line"></i><span>\u7F6E\u9876</span></button>
+                  <button type="button" role="menuitem" data-move-doc-bottom="${doc.id}"><i data-lucide="arrow-down-to-line"></i><span>\u7F6E\u5E95</span></button>
+                </div>
+              </details>
+              <button class="tiny-button danger-text" type="button" title="\u79FB\u5165\u5783\u573E\u7BB1" data-delete-doc="${doc.id}"><i data-lucide="trash-2"></i></button>`;
+        return `<article class="doc-item ${active ? "active" : ""}" id="doc-option-${doc.id}" data-doc-id="${doc.id}" draggable="true" role="option" aria-selected="${String(active)}" tabindex="${active || !ui2.selectedDocId && docs.indexOf(doc) === 0 ? "0" : "-1"}">
           <div class="doc-title-row">
             <div class="doc-title">${escapeHtml(doc.title || "\u672A\u547D\u540D\u6587\u6863")}</div>
             <span class="doc-actions">
-              <button class="tiny-button" type="button" title="\u590D\u5236" data-copy-doc="${doc.id}"><i data-lucide="copy"></i></button>
-              <button class="tiny-button danger-text" type="button" title="\u5220\u9664" data-delete-doc="${doc.id}"><i data-lucide="trash-2"></i></button>
+              ${actions}
             </span>
           </div>
           <div class="doc-meta">
@@ -24881,44 +25066,427 @@ ${doc.content}`.toLowerCase().includes(query);
       }).join("");
       els2.docList.querySelectorAll(".doc-item").forEach((item) => {
         item.addEventListener("click", (event) => {
-          if (event.target.closest("[data-copy-doc], [data-delete-doc]")) return;
+          if (isDocActionTarget(event.target)) return;
           onSelectDocument(item.dataset.docId);
         });
+        item.addEventListener("keydown", (event) => handleDocItemKeydown(event, item));
         item.addEventListener("dragstart", (event) => {
           const doc = state2.docs.find((entry) => entry.id === item.dataset.docId);
-          if (!doc || !event.dataTransfer) return;
-          event.dataTransfer.effectAllowed = "copy";
+          if (!doc || doc.deletedAt || !event.dataTransfer) return;
+          draggedDocId = doc.id;
+          event.dataTransfer.effectAllowed = "copyMove";
           event.dataTransfer.setData("application/x-mowen-doc-id", doc.id);
           event.dataTransfer.setData("text/plain", doc.title || "\u672A\u547D\u540D\u6587\u6863");
         });
+        item.addEventListener("dragover", (event) => {
+          if (!draggedDocId || draggedDocId === item.dataset.docId) return;
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+          markDragTarget(item, getDropPlacement(event, item));
+        });
+        item.addEventListener("dragleave", () => {
+          item.classList.remove("drag-before", "drag-after");
+        });
+        item.addEventListener("drop", (event) => {
+          const sourceId = event.dataTransfer?.getData("application/x-mowen-doc-id") || draggedDocId;
+          if (!sourceId || sourceId === item.dataset.docId) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const placement = getDropPlacement(event, item);
+          clearDocDragState();
+          onMoveDocument(sourceId, item.dataset.docId, placement);
+        });
+        item.addEventListener("dragend", clearDocDragState);
       });
       els2.docList.querySelectorAll("[data-copy-doc]").forEach((button) => {
         button.addEventListener("click", () => onCopyDocument(button.dataset.copyDoc));
       });
+      els2.docList.querySelectorAll("[data-doc-menu]").forEach((menu) => {
+        menu.addEventListener("toggle", () => {
+          menu.closest(".doc-item")?.classList.toggle("menu-open", menu.open);
+          if (!menu.open) return;
+          els2.docList.querySelectorAll("[data-doc-menu][open]").forEach((otherMenu) => {
+            if (otherMenu !== menu) otherMenu.removeAttribute("open");
+          });
+        });
+      });
+      els2.docList.querySelectorAll("[data-move-doc-top]").forEach((button) => {
+        button.addEventListener("click", () => onMoveDocumentToTop(button.dataset.moveDocTop));
+      });
+      els2.docList.querySelectorAll("[data-move-doc-bottom]").forEach((button) => {
+        button.addEventListener("click", () => onMoveDocumentToBottom(button.dataset.moveDocBottom));
+      });
       els2.docList.querySelectorAll("[data-delete-doc]").forEach((button) => {
         button.addEventListener("click", () => onDeleteDocument(button.dataset.deleteDoc));
       });
+      renderTrashModal2();
       if (window.lucide) window.lucide.createIcons();
+    }
+    function renderTrashModal2() {
+      const trashDocs = state2.docs.filter((doc) => doc.deletedAt);
+      if (els2.trashModalCount) {
+        els2.trashModalCount.textContent = `${trashDocs.length} \u4EFD\u6587\u6863`;
+      }
+      if (els2.restoreAllTrashBtn) els2.restoreAllTrashBtn.disabled = trashDocs.length === 0;
+      if (els2.clearTrashBtn) els2.clearTrashBtn.disabled = trashDocs.length === 0;
+      if (!els2.trashModalList) return;
+      if (trashDocs.length === 0) {
+        els2.trashModalList.innerHTML = `<div class="empty-state">\u5783\u573E\u7BB1\u4E3A\u7A7A</div>`;
+        return;
+      }
+      els2.trashModalList.innerHTML = trashDocs.map((doc) => {
+        const folder = state2.folders.find((item) => item.id === doc.folderId);
+        const type = getType2(doc.type).name;
+        return `<article class="trash-item" data-trash-doc-id="${doc.id}">
+          <div class="trash-item-main">
+            <strong>${escapeHtml(doc.title || "\u672A\u547D\u540D\u6587\u6863")}</strong>
+            <span>${escapeHtml(type)} \xB7 ${escapeHtml(folder?.name || "\u672A\u5F52\u6863")} \xB7 \u5220\u9664\u4E8E ${formatTime(doc.deletedAt)}</span>
+            <p>${escapeHtml(String(doc.content || "").replace(/\s+/g, " ").slice(0, 120) || "\u7A7A\u767D\u6587\u6863")}</p>
+          </div>
+          <div class="trash-item-actions">
+            <button type="button" data-restore-doc="${doc.id}"><i data-lucide="rotate-ccw"></i><span>\u6062\u590D</span></button>
+            <button type="button" class="danger-text" data-permanent-delete-doc="${doc.id}"><i data-lucide="trash-2"></i><span>\u6E05\u9664</span></button>
+          </div>
+        </article>`;
+      }).join("");
+      els2.trashModalList.querySelectorAll("[data-restore-doc]").forEach((button) => {
+        button.addEventListener("click", () => onRestoreDocument(button.dataset.restoreDoc));
+      });
+      els2.trashModalList.querySelectorAll("[data-permanent-delete-doc]").forEach((button) => {
+        button.addEventListener("click", () => onPermanentlyDeleteDocument(button.dataset.permanentDeleteDoc));
+      });
+      if (window.lucide) window.lucide.createIcons();
+    }
+    function isDocActionTarget(target) {
+      return Boolean(
+        target.closest(
+          "[data-copy-doc], [data-delete-doc], [data-restore-doc], [data-permanent-delete-doc], [data-doc-menu], [data-move-doc-top], [data-move-doc-bottom]"
+        )
+      );
+    }
+    function getDropPlacement(event, item) {
+      const rect = item.getBoundingClientRect();
+      return event.clientY > rect.top + rect.height / 2 ? "after" : "before";
+    }
+    function markDragTarget(item, placement) {
+      els2.docList.querySelectorAll(".doc-item.drag-before, .doc-item.drag-after").forEach((entry) => {
+        if (entry !== item) entry.classList.remove("drag-before", "drag-after");
+      });
+      item.classList.toggle("drag-before", placement === "before");
+      item.classList.toggle("drag-after", placement === "after");
+    }
+    function clearDocDragState() {
+      draggedDocId = null;
+      els2.docList.querySelectorAll(".doc-item.drag-before, .doc-item.drag-after").forEach((entry) => {
+        entry.classList.remove("drag-before", "drag-after");
+      });
+    }
+    function handleDocItemKeydown(event, item) {
+      if (isDocActionTarget(event.target)) return;
+      const items = Array.from(els2.docList.querySelectorAll(".doc-item"));
+      const currentIndex = items.indexOf(item);
+      if (currentIndex < 0) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        onSelectDocument(item.dataset.docId);
+        return;
+      }
+      const keyMap = {
+        ArrowDown: Math.min(currentIndex + 1, items.length - 1),
+        ArrowRight: Math.min(currentIndex + 1, items.length - 1),
+        ArrowUp: Math.max(currentIndex - 1, 0),
+        ArrowLeft: Math.max(currentIndex - 1, 0),
+        Home: 0,
+        End: items.length - 1
+      };
+      if (!(event.key in keyMap)) return;
+      event.preventDefault();
+      focusDocItem(items[keyMap[event.key]]);
+    }
+    function focusDocItem(item) {
+      if (!item) return;
+      els2.docList.querySelectorAll(".doc-item").forEach((entry) => {
+        entry.tabIndex = entry === item ? 0 : -1;
+      });
+      item.focus();
     }
     function renderEditor2() {
       const doc = getCurrentDoc2();
       if (!doc) {
         els2.titleInput.value = "";
         els2.contentEditor.value = "";
+        [els2.titleInput, els2.typeSelect, els2.folderSelect, els2.styleSelect, els2.contentEditor].forEach((input) => {
+          input.disabled = true;
+        });
+        els2.saveDocBtn.disabled = true;
+        els2.undoEditBtn.disabled = true;
+        els2.saveState.textContent = "\u8BF7\u65B0\u5EFA\u6216\u5BFC\u5165\u6587\u6863";
+        els2.saveState.title = "\u5F53\u524D\u6CA1\u6709\u53EF\u7F16\u8F91\u7684\u6587\u6863";
+        els2.saveState.classList.add("visible");
         return;
       }
+      const trashed = Boolean(doc.deletedAt);
       els2.titleInput.value = doc.title || "";
       els2.typeSelect.value = doc.type || "custom";
       els2.folderSelect.value = doc.folderId || state2.folders[0]?.id || "";
       els2.styleSelect.value = doc.styleId || "";
       els2.contentEditor.value = doc.content || "";
-      els2.saveState.textContent = "\u5DF2\u4FDD\u5B58";
-      els2.saveState.title = `\u4FDD\u5B58\u4F4D\u7F6E\uFF1A${getDocumentLocation2(doc)}`;
+      [els2.titleInput, els2.typeSelect, els2.folderSelect, els2.styleSelect, els2.contentEditor].forEach((input) => {
+        input.disabled = trashed;
+      });
+      els2.saveDocBtn.disabled = trashed;
+      els2.undoEditBtn.disabled = trashed;
+      els2.saveState.textContent = trashed ? "\u5728\u5783\u573E\u7BB1\u4E2D" : "\u5DF2\u4FDD\u5B58";
+      els2.saveState.title = trashed ? "\u8BF7\u5148\u6062\u590D\u6587\u6863\u518D\u7F16\u8F91\u6216\u4FDD\u5B58" : `\u4FDD\u5B58\u4F4D\u7F6E\uFF1A${getDocumentLocation2(doc)}`;
+      els2.saveState.classList.toggle("visible", trashed);
     }
     return {
       getVisibleDocuments,
       renderDocList: renderDocList2,
+      renderTrashModal: renderTrashModal2,
       renderEditor: renderEditor2
+    };
+  }
+
+  // src/modules/documents/trashController.js
+  function createTrashController({
+    els: els2,
+    ui: ui2,
+    renderTrashModal: renderTrashModal2,
+    restoreAllTrashDocuments: restoreAllTrashDocuments2,
+    clearTrashDocuments: clearTrashDocuments2,
+    getFocusableElements: getFocusableElements2
+  }) {
+    function bindEvents2() {
+      setTrashExpanded(false);
+      els2.trashTopBtn?.addEventListener("click", openTrashModal);
+      els2.closeTrashModalBtn?.addEventListener("click", closeTrashModal);
+      els2.restoreAllTrashBtn?.addEventListener("click", restoreAllTrashDocuments2);
+      els2.clearTrashBtn?.addEventListener("click", clearTrashDocuments2);
+      els2.trashModal?.addEventListener("keydown", handleTrashModalKeydown);
+      els2.trashModal?.addEventListener("mousedown", (event) => {
+        if (event.target === els2.trashModal) closeTrashModal();
+      });
+    }
+    function openTrashModal() {
+      if (!els2.trashModal) return;
+      ui2.trashModalReturnFocus = document.activeElement;
+      renderTrashModal2();
+      els2.trashModal.hidden = false;
+      document.body.classList.add("modal-open");
+      setTrashExpanded(true);
+      window.setTimeout(() => {
+        const target = els2.closeTrashModalBtn || els2.trashModal.querySelector(".trash-modal");
+        target?.focus?.();
+      }, 0);
+    }
+    function closeTrashModal() {
+      if (!els2.trashModal || els2.trashModal.hidden) return;
+      els2.trashModal.hidden = true;
+      document.body.classList.remove("modal-open");
+      setTrashExpanded(false);
+      const returnTarget = ui2.trashModalReturnFocus?.isConnected ? ui2.trashModalReturnFocus : els2.trashTopBtn;
+      ui2.trashModalReturnFocus = null;
+      returnTarget?.focus?.();
+    }
+    function handleTrashModalKeydown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeTrashModal();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = getFocusableElements2(els2.trashModal);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        els2.trashModal.querySelector(".trash-modal")?.focus();
+        return;
+      }
+      const first2 = focusable[0];
+      const last2 = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first2) {
+        event.preventDefault();
+        last2.focus();
+      } else if (!event.shiftKey && document.activeElement === last2) {
+        event.preventDefault();
+        first2.focus();
+      }
+    }
+    function setTrashExpanded(expanded) {
+      els2.trashTopBtn?.setAttribute("aria-expanded", String(expanded));
+    }
+    return {
+      bindEvents: bindEvents2,
+      openTrashModal,
+      closeTrashModal,
+      handleTrashModalKeydown
+    };
+  }
+
+  // src/modules/generation/generationController.js
+  var EDITOR_REWRITE_PRESETS = {
+    preserve: "\u4FDD\u7559\u539F\u6BB5\u843D\u7684\u4E8B\u5B9E\u3001\u610F\u601D\u548C\u4FE1\u606F\u987A\u5E8F\uFF0C\u53EA\u63D0\u5347\u8868\u8FBE\u7684\u89C4\u8303\u6027\u3001\u6E05\u6670\u5EA6\u548C\u6B63\u5F0F\u7A0B\u5EA6\u3002",
+    style: "\u4FDD\u7559\u4E8B\u5B9E\u548C\u903B\u8F91\uFF0C\u628A\u6BB5\u843D\u6539\u5199\u4E3A\u6240\u9009\u6267\u7B14\u4EBA\u7684\u7ED3\u6784\u3001\u8BED\u6C14\u3001\u53E5\u5F0F\u548C\u683C\u5F0F\u4E60\u60EF\u3002",
+    expand: "\u5728\u4E0D\u7F16\u9020\u4E8B\u5B9E\u7684\u524D\u63D0\u4E0B\u9002\u5EA6\u6269\u5199\uFF0C\u4F7F\u80CC\u666F\u3001\u8981\u6C42\u3001\u8854\u63A5\u548C\u6267\u884C\u53E3\u5F84\u66F4\u5B8C\u6574\uFF1B\u7F3A\u5931\u4E8B\u5B9E\u7528\u53EF\u66FF\u6362\u5360\u4F4D\u7B26\u3002",
+    shorten: "\u538B\u7F29\u4E3A\u66F4\u77ED\u3001\u66F4\u5229\u843D\u7684\u6B63\u5F0F\u8868\u8FBE\uFF0C\u4FDD\u7559\u5173\u952E\u4FE1\u606F\u3001\u8D23\u4EFB\u5BF9\u8C61\u3001\u65F6\u95F4\u5730\u70B9\u548C\u529E\u7406\u8981\u6C42\u3002"
+  };
+  function createGenerationController({
+    els: els2,
+    ui: ui2,
+    state: state2,
+    defaultSystemPrompt,
+    toast: toast2,
+    cancelActiveTask: cancelActiveTask2,
+    withCancelableTask: withCancelableTask2,
+    throwIfTaskAborted: throwIfTaskAborted2,
+    getCurrentDoc: getCurrentDoc2,
+    getType: getType2,
+    resolveInvokedSkills: resolveInvokedSkills2,
+    formatSkillPrompt: formatSkillPrompt2,
+    callAiWithRetry: callAiWithRetry2,
+    createDocument: createDocument2,
+    deriveGeneratedTitle: deriveGeneratedTitle2,
+    recordEditorUndoPoint: recordEditorUndoPoint2,
+    saveEditor: saveEditor2,
+    getDocumentLocation: getDocumentLocation2,
+    getSelectionOrLine: getSelectionOrLine2
+  }) {
+    function bindEvents2() {
+      els2.generateDocBtn?.addEventListener("click", () => generateDocument("new"));
+      els2.overwriteDraftBtn?.addEventListener("click", () => generateDocument("overwrite"));
+      els2.insertDraftBtn?.addEventListener("click", () => generateDocument("insert"));
+    }
+    async function generateDocument(mode = "new") {
+      if (cancelActiveTask2("document-generation")) return;
+      const userPrompt = els2.generatePrompt.value.trim();
+      const docType = els2.typeSelect.value || getCurrentDoc2()?.type || "notice";
+      const currentDoc = getCurrentDoc2();
+      if (!userPrompt) {
+        toast2("\u8BF7\u8F93\u5165\u8D77\u8349\u63D0\u793A\u8BCD", "warn");
+        return;
+      }
+      if (mode === "overwrite" && !currentDoc) {
+        toast2("\u8BF7\u5148\u9009\u62E9\u8981\u8986\u76D6\u7684\u5F53\u524D\u6587\u6863", "warn");
+        return;
+      }
+      const button = mode === "insert" ? els2.insertDraftBtn : mode === "overwrite" ? els2.overwriteDraftBtn : els2.generateDocBtn;
+      await withCancelableTask2({
+        key: "document-generation",
+        button,
+        busyText: "\u751F\u6210\u4E2D",
+        progressMessage: "AI \u6B63\u5728\u751F\u6210\u6587\u6863",
+        cancelToast: "\u5DF2\u53D6\u6D88\u672C\u6B21\u6587\u6863\u751F\u6210"
+      }, async ({ progress, signal }) => {
+        progress.update("\u6B65\u9AA4 1/3\uFF1A\u6B63\u5728\u6574\u7406\u63D0\u793A\u8BCD", 18);
+        const type = getType2(docType);
+        const invokedSkills = resolveInvokedSkills2(userPrompt, els2.styleSelect.value);
+        const prompt = [
+          "\u8BF7\u6839\u636E\u7528\u6237\u63D0\u793A\u8BCD\u64B0\u5199\u4E00\u4EFD\u4E2D\u6587\u6B63\u5F0F\u6587\u6863\u3002",
+          `\u5F53\u524D\u6587\u6863\u7C7B\u578B\u53C2\u8003\uFF1A${type.name}`,
+          `\u5E38\u89C1\u7ED3\u6784\u53C2\u8003\uFF1A${type.structure}`,
+          formatSkillPrompt2(invokedSkills),
+          `\u7528\u6237\u63D0\u793A\u8BCD\uFF1A
+${userPrompt}`,
+          "\u8F93\u51FA\u8981\u6C42\uFF1A\u4E25\u683C\u6267\u884C\u88AB @ \u8C03\u7528\u7684\u6267\u7B14\u4EBA\u89C4\u5219\uFF1B\u76F4\u63A5\u7ED9\u51FA\u5B8C\u6574\u6587\u6863\u5185\u5BB9\uFF0C\u4E0D\u8981\u89E3\u91CA\u5199\u4F5C\u8FC7\u7A0B\uFF1B\u6807\u9898\u7F6E\u4E8E\u9996\u884C\uFF1B\u4E8B\u5B9E\u4E0D\u660E\u5904\u4F7F\u7528\u53EF\u66FF\u6362\u5360\u4F4D\u7B26\uFF0C\u4E0D\u8981\u7F16\u9020\u3002"
+        ].filter(Boolean).join("\n\n");
+        throwIfTaskAborted2(signal);
+        progress.update("\u6B65\u9AA4 2/3\uFF1A\u6B63\u5728\u8BF7\u6C42 AI \u751F\u6210\u6B63\u6587", 42);
+        const content = await callAiWithRetry2([
+          { role: "system", content: state2.settings.systemPrompt || defaultSystemPrompt },
+          { role: "user", content: prompt }
+        ], { signal });
+        throwIfTaskAborted2(signal);
+        progress.update("\u6B65\u9AA4 3/3\uFF1A\u6B63\u5728\u5199\u5165\u6587\u6863", 82);
+        if (mode === "insert") {
+          const current = getCurrentDoc2() || createDocument2({ title: deriveGeneratedTitle2(content, userPrompt), type: docType });
+          const separator = els2.contentEditor.value.trim() ? "\n\n" : "";
+          recordEditorUndoPoint2();
+          els2.contentEditor.value = `${els2.contentEditor.value}${separator}${content}`;
+          saveEditor2(true);
+          ui2.generatedDraft = content;
+          toast2("\u5DF2\u63D2\u5165\u5230\u5F53\u524D\u6587\u6863\u3002");
+          return current;
+        }
+        if (mode === "overwrite") {
+          const title2 = deriveGeneratedTitle2(content, userPrompt);
+          recordEditorUndoPoint2();
+          els2.titleInput.value = title2;
+          els2.typeSelect.value = docType;
+          if (invokedSkills[0]?.id) els2.styleSelect.value = invokedSkills[0].id;
+          els2.contentEditor.value = content;
+          saveEditor2(true);
+          ui2.generatedDraft = content;
+          toast2(`\u5DF2\u8986\u76D6\u5F53\u524D\u6587\u6863\uFF1A${getDocumentLocation2(getCurrentDoc2())}`);
+          return getCurrentDoc2();
+        }
+        const title = deriveGeneratedTitle2(content, userPrompt);
+        const newDoc = createDocument2({
+          title,
+          type: docType,
+          styleId: invokedSkills[0]?.id || "",
+          content
+        });
+        ui2.generatedDraft = content;
+        toast2(`\u5DF2\u751F\u6210\u65B0\u6587\u6863\u5230\uFF1A${getDocumentLocation2(newDoc)}`);
+        return null;
+      });
+    }
+    async function rewriteSelection(options = {}) {
+      const {
+        triggerButton = null,
+        mode = "preserve",
+        skillId = ""
+      } = options;
+      if (cancelActiveTask2("paragraph-rewrite")) return;
+      const selection = getSelectionOrLine2();
+      if (!selection.text.trim()) {
+        toast2("\u8BF7\u9009\u4E2D\u6216\u5B9A\u4F4D\u5230\u9700\u8981\u91CD\u5199\u7684\u6BB5\u843D", "warn");
+        return;
+      }
+      const doc = getCurrentDoc2();
+      const type = getType2(doc?.type || "custom");
+      const preset = EDITOR_REWRITE_PRESETS[mode] || EDITOR_REWRITE_PRESETS.preserve;
+      const invokedSkills = resolveInvokedSkills2(selection.text, skillId || els2.styleSelect.value);
+      const skillLabel = invokedSkills[0] ? `@${invokedSkills[0].handle}` : "\u901A\u7528\u89C4\u5219";
+      const runner = async ({ progress, signal }) => {
+        progress.update("\u6B65\u9AA4 1/3\uFF1A\u6B63\u5728\u6574\u7406\u6BB5\u843D\u548C\u6267\u7B14\u4EBA\u89C4\u5219", 20);
+        const prompt = [
+          "\u8BF7\u6539\u5199\u4E0B\u9762\u8FD9\u6BB5\u6B63\u5F0F\u6587\u6863\u5185\u5BB9\u3002",
+          `\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`,
+          `\u6539\u5199\u9884\u8BBE\uFF1A${preset}`,
+          formatSkillPrompt2(invokedSkills),
+          "\u786C\u6027\u8981\u6C42\uFF1A\u4FDD\u7559\u539F\u6BB5\u843D\u4E8B\u5B9E\u4FE1\u606F\uFF0C\u4E0D\u65B0\u589E\u672A\u63D0\u4F9B\u7684\u4EBA\u540D\u3001\u65F6\u95F4\u3001\u5730\u70B9\u3001\u6D3B\u52A8\u540D\u79F0\u3001\u6570\u5B57\u548C\u843D\u6B3E\uFF1B\u4E8B\u5B9E\u7F3A\u5931\u5904\u4F7F\u7528\u53EF\u66FF\u6362\u5360\u4F4D\u7B26\uFF1B\u53EA\u8F93\u51FA\u6539\u5199\u540E\u7684\u6BB5\u843D\uFF0C\u4E0D\u89E3\u91CA\u8FC7\u7A0B\u3002",
+          `\u539F\u6BB5\u843D\uFF1A
+${selection.text}`
+        ].filter(Boolean).join("\n\n");
+        throwIfTaskAborted2(signal);
+        progress.update(`\u6B65\u9AA4 2/3\uFF1A\u6B63\u5728\u6309 ${skillLabel} \u6539\u5199`, 45);
+        const rewritten = await callAiWithRetry2([
+          { role: "system", content: state2.settings.systemPrompt || defaultSystemPrompt },
+          { role: "user", content: prompt }
+        ], { signal });
+        throwIfTaskAborted2(signal);
+        progress.update("\u6B65\u9AA4 3/3\uFF1A\u6B63\u5728\u66FF\u6362\u9009\u4E2D\u6BB5\u843D", 85);
+        const content = els2.contentEditor.value;
+        recordEditorUndoPoint2();
+        els2.contentEditor.value = content.slice(0, selection.start) + rewritten + content.slice(selection.end);
+        els2.contentEditor.focus();
+        els2.contentEditor.setSelectionRange(selection.start, selection.start + rewritten.length);
+        saveEditor2(true);
+        toast2(`\u6BB5\u843D\u5DF2\u6309 ${skillLabel} \u6539\u5199`);
+      };
+      await withCancelableTask2({
+        key: "paragraph-rewrite",
+        button: triggerButton,
+        busyText: "\u6539\u5199\u4E2D",
+        progressMessage: "AI \u6B63\u5728\u6539\u5199\u9009\u4E2D\u6BB5\u843D",
+        cancelToast: "\u5DF2\u53D6\u6D88\u672C\u6B21\u6BB5\u843D\u6539\u5199"
+      }, runner);
+    }
+    return {
+      bindEvents: bindEvents2,
+      generateDocument,
+      rewriteSelection
     };
   }
 
@@ -25838,6 +26406,314 @@ ${content}`
   }
   function escapeHtml2(value) {
     return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+
+  // src/modules/ppt/pptController.js
+  function createPptController({
+    els: els2,
+    ui: ui2,
+    state: state2,
+    defaultSystemPrompt,
+    toast: toast2,
+    cancelActiveTask: cancelActiveTask2,
+    withCancelableTask: withCancelableTask2,
+    withLoading: withLoading2,
+    withProgress: withProgress2,
+    throwIfTaskAborted: throwIfTaskAborted2,
+    setupFileDrop: setupFileDrop2,
+    getCurrentDoc: getCurrentDoc2,
+    resolveInvokedSkills: resolveInvokedSkills2,
+    formatSkillPrompt: formatSkillPrompt2,
+    callAiJsonWithRepair: callAiJsonWithRepair2,
+    buildGuizangPptPrompt: buildGuizangPptPrompt2,
+    normalizePptSpec: normalizePptSpec2,
+    parseGuizangPptSpec: parseGuizangPptSpec2,
+    renderPptSpecPreview: renderPptSpecPreview2,
+    inspectPptSpec: inspectPptSpec2,
+    formatPptQualityReport: formatPptQualityReport2,
+    createPptxBlob: createPptxBlob2,
+    sanitizeFileName: sanitizeFileName2,
+    getDownloadLocation: getDownloadLocation2,
+    downloadBlob: downloadBlob2,
+    filterImportableFilesBySize: filterImportableFilesBySize2,
+    confirmLargeImport: confirmLargeImport2,
+    canImportFile: canImportFile2,
+    readImportFileText: readImportFileText2,
+    buildUnsupportedFileMessage: buildUnsupportedFileMessage2,
+    getFocusableElements: getFocusableElements2,
+    savePptStyleAsSkill: savePptStyleAsSkill2,
+    pptStyleOptions,
+    escapeHtml: escapeHtml3
+  }) {
+    function bindEvents2() {
+      setupFileDrop2(els2.pptPanel, importPptPromptFiles);
+      setupFileDrop2(els2.pptPromptInput, importPptPromptFiles);
+      setupFileDrop2(els2.pptDropZone, importPptPromptFiles);
+      els2.generatePptBtn?.addEventListener("click", generatePptDeck);
+      els2.downloadPptBtn?.addEventListener("click", downloadPptDeck);
+      els2.savePptStyleBtn?.addEventListener("click", savePptStyleAsSkill2);
+      els2.pptStyleSelect?.addEventListener("change", updatePptStyleControls);
+      els2.pptSlideCountSelect?.addEventListener("input", () => {
+        if (ui2.pptDeckSpec) renderPptQualityReport(ui2.pptDeckSpec);
+      });
+      els2.pptAutoSlideCountInput?.addEventListener("change", () => {
+        updatePptSlideCountControls();
+        if (ui2.pptDeckSpec) renderPptQualityReport(ui2.pptDeckSpec);
+      });
+      els2.pptOutput?.addEventListener("input", handlePptOutputInput);
+      els2.openPptPreviewBtn?.addEventListener("click", openPptPreviewModal);
+      els2.closePptPreviewBtn?.addEventListener("click", closePptPreviewModal);
+      els2.pptPreviewOverlay?.addEventListener("click", (event) => {
+        if (event.target === els2.pptPreviewOverlay) closePptPreviewModal();
+      });
+      els2.pptPreviewOverlay?.addEventListener("keydown", handlePptPreviewModalKeydown);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && els2.pptPreviewOverlay && !els2.pptPreviewOverlay.hidden) {
+          closePptPreviewModal();
+        }
+      });
+      updatePptStyleControls();
+      updatePptSlideCountControls();
+    }
+    function hydratePptStyleSelect() {
+      if (!els2.pptStyleSelect) return;
+      const current = els2.pptStyleSelect.value || "magazine";
+      const groups = [...new Set(pptStyleOptions.map((option) => option.group))];
+      els2.pptStyleSelect.innerHTML = groups.map((group2) => {
+        const options = pptStyleOptions.filter((option) => option.group === group2).map(
+          (option) => `<option value="${option.id}" title="${escapeHtml3(option.description)}">${escapeHtml3(option.name)}</option>`
+        ).join("");
+        return `<optgroup label="${escapeHtml3(group2)}">${options}</optgroup>`;
+      }).join("");
+      els2.pptStyleSelect.value = pptStyleOptions.some((option) => option.id === current) ? current : "magazine";
+      updatePptStyleControls();
+    }
+    async function generatePptDeck() {
+      if (cancelActiveTask2("ppt-generation")) return;
+      const currentDoc = getCurrentDoc2();
+      const title = els2.pptTitleInput.value.trim() || els2.titleInput.value.trim() || currentDoc?.title || "\u6F14\u793A\u7A3F";
+      const pptOptions = getPptOptions();
+      const material = els2.pptPromptInput.value.trim() || [els2.titleInput.value.trim(), els2.contentEditor.value.trim()].filter(Boolean).join("\n\n");
+      if (!material) {
+        toast2("\u8BF7\u8F93\u5165 PPT \u5185\u5BB9\u8981\u6C42\uFF0C\u6216\u5148\u6253\u5F00\u4E00\u7BC7\u53EF\u4F5C\u4E3A\u7D20\u6750\u7684\u6587\u6863", "warn");
+        return;
+      }
+      await withCancelableTask2({
+        key: "ppt-generation",
+        button: els2.generatePptBtn,
+        busyText: "\u751F\u6210\u4E2D",
+        progressMessage: "AI \u6B63\u5728\u751F\u6210\u539F\u751F PPTX \u8349\u7A3F",
+        cancelToast: "\u5DF2\u53D6\u6D88\u672C\u6B21 PPT \u751F\u6210"
+      }, async ({ progress, signal }) => {
+        progress.update("\u6B65\u9AA4 1/3\uFF1A\u6B63\u5728\u6574\u7406\u5F52\u85CF PPTX \u63D0\u793A\u8BCD", 20);
+        const invokedSkills = resolveInvokedSkills2(material, "");
+        const prompt = buildGuizangPptPrompt2({
+          title,
+          ...pptOptions,
+          content: material,
+          skillPrompt: formatSkillPrompt2(invokedSkills)
+        });
+        throwIfTaskAborted2(signal);
+        progress.update("\u6B65\u9AA4 2/3\uFF1A\u6B63\u5728\u8BF7\u6C42 AI \u751F\u6210\u5E7B\u706F\u7247\u7ED3\u6784", 44);
+        const output = await callAiJsonWithRepair2([
+          { role: "system", content: state2.settings.systemPrompt || defaultSystemPrompt },
+          { role: "user", content: prompt }
+        ], "PPT \u7ED3\u6784 JSON", { signal });
+        throwIfTaskAborted2(signal);
+        progress.update("\u6B65\u9AA4 3/3\uFF1A\u6B63\u5728\u6E32\u67D3\u7ED3\u6784\u9884\u89C8", 74);
+        const spec = normalizePptSpec2(output, {
+          title,
+          ...pptOptions,
+          content: material
+        });
+        ui2.pptDeckSpec = spec;
+        ui2.pptDraft = JSON.stringify(spec, null, 2);
+        els2.pptOutput.value = ui2.pptDraft;
+        renderPptPreview(spec);
+        renderPptQualityReport(spec);
+        toast2(`\u5DF2\u751F\u6210 PPTX \u8349\u7A3F\uFF0C\u70B9\u51FB\u201C\u4E0B\u8F7D PPTX\u201D\u4FDD\u5B58\u5230\uFF1A${getDownloadLocation2(`${sanitizeFileName2(title)}.pptx`)}`);
+      });
+    }
+    async function importPptPromptFiles(files) {
+      if (!files || files.length === 0) return;
+      const { accepted: importFiles, skipped: sizeSkipped } = await filterImportableFilesBySize2(files, {
+        confirm: confirmLargeImport2,
+        notify: toast2
+      });
+      if (importFiles.length === 0) return;
+      let importedCount = 0;
+      const skippedFiles = [];
+      const sections = [];
+      await withProgress2(`\u6B63\u5728\u5BFC\u5165 ${importFiles.length} \u4E2A PPT \u7D20\u6750`, async (progress) => {
+        for (const [index, file] of importFiles.entries()) {
+          progress.update(`\u6B63\u5728\u8BFB\u53D6 ${file.name}`, Math.round(index / importFiles.length * 78) + 10);
+          if (!canImportFile2(file.name)) {
+            skippedFiles.push(file.name);
+            continue;
+          }
+          try {
+            const text = await readImportFileText2(file);
+            sections.push(`# ${file.name}
+
+${text}`);
+            importedCount += 1;
+          } catch (error) {
+            skippedFiles.push(file.name);
+            console.warn("\u5BFC\u5165 PPT \u7D20\u6750\u5931\u8D25", file.name, error);
+          }
+        }
+        progress.update("\u6B63\u5728\u5199\u5165 PPT \u5185\u5BB9\u533A", 92);
+      });
+      if (importedCount === 0 && skippedFiles.length > 0) {
+        toast2(`\u672A\u6DFB\u52A0 PPT \u7D20\u6750\uFF1A${buildUnsupportedFileMessage2(skippedFiles[0])}`, "warn");
+        return;
+      }
+      const existing = els2.pptPromptInput.value.trim();
+      const addition = sections.join("\n\n---\n\n");
+      els2.pptPromptInput.value = [existing, addition].filter(Boolean).join("\n\n---\n\n");
+      els2.pptPromptInput.focus();
+      const skippedCount = skippedFiles.length + sizeSkipped.length;
+      toast2(`\u5DF2\u6DFB\u52A0 ${importedCount} \u4EFD\u7D20\u6750\u5230 PPT \u5185\u5BB9\u533A${skippedCount ? `\uFF0C\u5DF2\u8DF3\u8FC7 ${skippedCount} \u4E2A\u6682\u4E0D\u652F\u6301\u3001\u8FC7\u5927\u6216\u8BFB\u53D6\u5931\u8D25\u7684\u6587\u4EF6` : ""}`);
+    }
+    async function downloadPptDeck() {
+      const jsonText = els2.pptOutput.value.trim() || ui2.pptDraft;
+      if (!jsonText && !ui2.pptDeckSpec) {
+        toast2("\u8BF7\u5148\u751F\u6210 PPTX \u8349\u7A3F", "warn");
+        return;
+      }
+      await withLoading2(els2.downloadPptBtn, "\u6253\u5305\u4E2D", async () => withProgress2("\u6B63\u5728\u6253\u5305\u539F\u751F PPTX", async (progress) => {
+        progress.update("\u6B63\u5728\u8BFB\u53D6\u5E7B\u706F\u7247\u7ED3\u6784", 28);
+        const spec = jsonText ? parseGuizangPptSpec2(jsonText, {
+          title: els2.pptTitleInput.value.trim(),
+          ...getPptOptions()
+        }) : ui2.pptDeckSpec;
+        const qualityReport = renderPptQualityReport(spec);
+        if (qualityReport?.errors?.length) {
+          toast2("PPTX \u7ED3\u6784\u81EA\u68C0\u53D1\u73B0\u9700\u8981\u5904\u7406\u7684\u95EE\u9898\uFF0C\u4ECD\u5C06\u6309\u5F53\u524D\u7ED3\u6784\u5BFC\u51FA\u3002", "warn");
+        }
+        progress.update("\u6B63\u5728\u751F\u6210 PowerPoint \u6587\u4EF6", 68);
+        const fileName = `${sanitizeFileName2(spec.title || els2.pptTitleInput.value || "\u6F14\u793A\u7A3F")}.pptx`;
+        const blob = await createPptxBlob2(spec);
+        downloadBlob2(fileName, blob, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        progress.update("\u5DF2\u5B8C\u6210", 100);
+        toast2(`\u5DF2\u5BFC\u51FA\u539F\u751F PPTX \u5230\uFF1A${getDownloadLocation2(fileName)}`);
+      }));
+    }
+    function handlePptOutputInput() {
+      ui2.pptDraft = els2.pptOutput.value;
+      try {
+        ui2.pptDeckSpec = parseGuizangPptSpec2(ui2.pptDraft, {
+          title: els2.pptTitleInput.value.trim(),
+          ...getPptOptions()
+        });
+        renderPptPreview(ui2.pptDeckSpec);
+        renderPptQualityReport(ui2.pptDeckSpec);
+      } catch {
+      }
+    }
+    function renderPptPreview(spec) {
+      const html = spec ? renderPptSpecPreview2(spec) : "";
+      if (els2.pptPreview) els2.pptPreview.srcdoc = html;
+      if (els2.pptPreviewModalFrame) els2.pptPreviewModalFrame.srcdoc = html;
+    }
+    function openPptPreviewModal() {
+      if (!ui2.pptDeckSpec) {
+        toast2("\u8BF7\u5148\u751F\u6210\u6216\u7C98\u8D34\u4E00\u4EFD\u53EF\u8BC6\u522B\u7684 PPT \u7ED3\u6784\uFF0C\u518D\u6253\u5F00\u653E\u5927\u9884\u89C8\u3002", "warn");
+        return;
+      }
+      ui2.pptPreviewReturnFocus = document.activeElement;
+      renderPptPreview(ui2.pptDeckSpec);
+      els2.pptPreviewOverlay.hidden = false;
+      document.body.classList.add("modal-open");
+      window.setTimeout(() => {
+        const target = els2.closePptPreviewBtn || els2.pptPreviewOverlay.querySelector(".preview-modal");
+        target?.focus?.();
+      }, 0);
+    }
+    function closePptPreviewModal() {
+      if (!els2.pptPreviewOverlay || els2.pptPreviewOverlay.hidden) return;
+      els2.pptPreviewOverlay.hidden = true;
+      document.body.classList.remove("modal-open");
+      const returnTarget = ui2.pptPreviewReturnFocus?.isConnected ? ui2.pptPreviewReturnFocus : els2.openPptPreviewBtn;
+      ui2.pptPreviewReturnFocus = null;
+      returnTarget?.focus?.();
+    }
+    function handlePptPreviewModalKeydown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePptPreviewModal();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = getFocusableElements2(els2.pptPreviewOverlay);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        els2.pptPreviewOverlay.querySelector(".preview-modal")?.focus();
+        return;
+      }
+      const first2 = focusable[0];
+      const last2 = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first2) {
+        event.preventDefault();
+        last2.focus();
+      } else if (!event.shiftKey && document.activeElement === last2) {
+        event.preventDefault();
+        first2.focus();
+      }
+    }
+    function getPptOptions() {
+      const autoSlideCount = Boolean(els2.pptAutoSlideCountInput?.checked);
+      const slideCount = autoSlideCount ? null : normalizePptSlideCount(els2.pptSlideCountSelect.value);
+      return {
+        style: els2.pptStyleSelect.value || "magazine",
+        styleDescription: els2.pptCustomStyleInput.value.trim(),
+        autoSlideCount,
+        slideCount
+      };
+    }
+    function normalizePptSlideCount(value) {
+      const count = Number.parseInt(value, 10);
+      const normalized = Number.isFinite(count) ? Math.min(Math.max(count, 1), 40) : 12;
+      if (els2.pptSlideCountSelect && String(els2.pptSlideCountSelect.value) !== String(normalized)) {
+        els2.pptSlideCountSelect.value = String(normalized);
+      }
+      return normalized;
+    }
+    function updatePptSlideCountControls() {
+      const autoSlideCount = Boolean(els2.pptAutoSlideCountInput?.checked);
+      els2.pptSlideCountSelect.disabled = autoSlideCount;
+      els2.pptSlideCountSelect.title = autoSlideCount ? "\u5DF2\u542F\u7528\u81EA\u52A8\u9875\u6570\uFF0CAI \u4F1A\u6839\u636E\u7D20\u6750\u4FE1\u606F\u91CF\u81EA\u884C\u51B3\u5B9A\u9875\u6570" : "\u624B\u52A8\u6307\u5B9A PPT \u9875\u6570";
+    }
+    function updatePptStyleControls() {
+      const isCustom = els2.pptStyleSelect.value === "custom";
+      els2.pptCustomStyleField.classList.toggle("active", isCustom);
+      els2.pptCustomStyleInput.placeholder = isCustom ? "\u63CF\u8FF0\u4F60\u5E0C\u671B\u590D\u7528\u7684 PPT \u98CE\u683C\u3001\u7248\u5F0F\u8282\u594F\u3001\u989C\u8272\u503E\u5411\u3001\u9002\u7528\u573A\u666F\u548C\u7981\u5FCC\u3002" : "\u53EF\u9009\uFF1A\u8865\u5145\u672C\u6B21 PPT \u7684\u98CE\u683C\u8981\u6C42\uFF0C\u4E5F\u53EF\u4EE5\u9009\u62E9\u201C\u81EA\u5B9A\u4E49\u98CE\u683C\u201D\u540E\u4FDD\u5B58\u4E3A PPT \u6267\u7B14\u4EBA\u3002";
+    }
+    function renderPptQualityReport(spec) {
+      if (!els2.pptQualityReport || !spec) return null;
+      const report = inspectPptSpec2(spec, getPptOptions());
+      els2.pptQualityReport.textContent = formatPptQualityReport2(report);
+      if (els2.pptQualityStatus) {
+        els2.pptQualityStatus.textContent = report.errors.length ? "\u9700\u5904\u7406" : report.warnings.length ? "\u6709\u63D0\u793A" : "\u901A\u8FC7";
+        els2.pptQualityStatus.classList.toggle("ready", !report.errors.length);
+        els2.pptQualityStatus.classList.toggle("error", report.errors.length > 0);
+      }
+      return report;
+    }
+    return {
+      bindEvents: bindEvents2,
+      hydratePptStyleSelect,
+      importPptPromptFiles,
+      renderPptPreview,
+      renderPptQualityReport,
+      updatePptStyleControls,
+      updatePptSlideCountControls,
+      getPptOptions,
+      generatePptDeck,
+      downloadPptDeck,
+      openPptPreviewModal,
+      closePptPreviewModal
+    };
   }
 
   // node_modules/pptxgenjs/dist/pptxgen.es.js
@@ -31810,6 +32686,17 @@ ${String(ex)}`);
   }
   function normalizeSkillDraftOutput(result2, style, aggregationData) {
     const skillJson = result2.skill_json || result2.skillJson || {};
+    const styleRules = normalizeStyleRules(skillJson.style_rules, aggregationData);
+    const commonExpressionLibrary = coerceArray(
+      skillJson.common_expression_library || skillJson.reusable_expressions || aggregationData.common_expressions
+    );
+    const selfChecklist = coerceArray(skillJson.self_checklist || skillJson.validation_checklist);
+    const reviewStandards = coerceArray(skillJson.review_standards || aggregationData.review_standards);
+    const forbidden = uniqueList([
+      ...coerceArray(skillJson.forbidden),
+      ...coerceArray(aggregationData.case_specific_exclusions),
+      ...coerceArray(aggregationData.must_not_promote)
+    ]);
     const normalizedSkillJson = {
       ...skillJson,
       name: skillJson.name || style.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
@@ -31819,22 +32706,31 @@ ${String(ex)}`);
       description: skillJson.description || style.description || "",
       confidence: skillJson.confidence || aggregationData.overall_confidence || "low",
       source_documents: skillJson.source_documents || (style.examples || []).map((example) => example.name),
-      style_rules: normalizeStyleRules(skillJson.style_rules, aggregationData),
+      trigger_description: skillJson.trigger_description || `\u5F53\u7528\u6237\u9700\u8981\u751F\u6210\u201C${skillJson.name || style.name || "\u8BE5\u7C7B\u6587\u6863"}\u201D\u540C\u7C7B\u6587\u672C\uFF0C\u6216\u5728\u63D0\u793A\u8BCD\u4E2D\u4F7F\u7528 @${normalizeHandle(skillJson.handle || style.handle || style.name)} \u65F6\u8C03\u7528\u3002`,
+      default_prompt: skillJson.default_prompt || `\u4F7F\u7528 @${normalizeHandle(skillJson.handle || style.handle || style.name)} \u8D77\u8349\u4E00\u7BC7\u540C\u7C7B\u6B63\u5F0F\u6587\u672C\u3002`,
+      concise_instruction: skillJson.concise_instruction || buildConciseInstruction(skillJson, styleRules, aggregationData),
+      input_contract: normalizeInputContract(skillJson),
+      user_input_fields: coerceArray(skillJson.user_input_fields || skillJson.required_user_inputs),
+      style_rules: styleRules,
       format_rules: coerceArray(skillJson.format_rules || aggregationData.common_format),
-      common_expression_library: coerceArray(skillJson.common_expression_library || aggregationData.common_expressions),
+      common_expression_library: commonExpressionLibrary,
       variable_slots: coerceArray(skillJson.variable_slots),
-      forbidden: [
-        ...coerceArray(skillJson.forbidden),
-        ...coerceArray(aggregationData.case_specific_exclusions),
-        ...coerceArray(aggregationData.must_not_promote)
-      ],
+      forbidden,
       privacy_filters: coerceArray(skillJson.privacy_filters || aggregationData.privacy_findings),
       case_specific_exclusions: coerceArray(skillJson.case_specific_exclusions || aggregationData.case_specific_exclusions),
-      review_standards: coerceArray(skillJson.review_standards || aggregationData.review_standards),
+      execution_workflow: normalizeExecutionWorkflow(skillJson, styleRules),
+      generation_steps: coerceArray(skillJson.generation_steps || skillJson.execution_workflow),
+      self_checklist: selfChecklist,
+      validation_checklist: coerceArray(
+        skillJson.validation_checklist || (selfChecklist.length ? selfChecklist : reviewStandards)
+      ),
+      review_standards: reviewStandards,
+      activation_examples: coerceArray(skillJson.activation_examples).length ? coerceArray(skillJson.activation_examples) : [`@${normalizeHandle(skillJson.handle || style.handle || style.name)} \u8BF7\u6839\u636E\u4EE5\u4E0B\u4E8B\u9879\u8D77\u8349\u6587\u6863\uFF1A...`],
       quality_controls: {
         ...skillJson.quality_controls || {},
         rule_confidence: skillJson.confidence || aggregationData.overall_confidence || "low",
         single_document_rule_policy: "\u5355\u7BC7\u6837\u672C\u53EA\u4EA7\u751F\u5019\u9009\u89C4\u5219\uFF1B\u81F3\u5C11 2 \u7BC7\u5171\u540C\u9A8C\u8BC1\u540E\u624D\u80FD\u6210\u4E3A\u5F3A\u89C4\u5219",
+        candidate_rule_policy: "\u5019\u9009\u89C4\u5219\u53EA\u80FD\u8FDB\u5165 recommended \u6216 optional\uFF0C\u4E0D\u5F97\u8986\u76D6\u7528\u6237\u4E8B\u5B9E\u6216\u4F2A\u88C5\u6210\u5FC5\u987B\u89C4\u5219",
         exclude_case_specific_info: true,
         privacy_filter: true
       }
@@ -31886,14 +32782,24 @@ ${String(ex)}`);
     };
   }
   function buildSkillMarkdownFromJson(skillJson, aggregationData) {
-    return [
+    const lines = [
       `# ${skillJson.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA"}`,
       "",
       `@\u8C03\u7528\u540D\uFF1A@${skillJson.handle || ""}`,
-      `\u7F6E\u4FE1\u5EA6\uFF1A${skillJson.confidence || aggregationData.overall_confidence || "low"}`,
+      `\u7F6E\u4FE1\u5EA6\uFF1A${skillJson.confidence || aggregationData.overall_confidence || "low"}`
+    ];
+    if (skillJson.trigger_description) lines.push(`\u89E6\u53D1\uFF1A${skillJson.trigger_description}`);
+    return [
+      ...lines,
       "",
       "## \u9002\u7528\u8303\u56F4",
       skillJson.applicable_scope || "\u5F85\u8865\u5145",
+      "",
+      "## \u8F93\u5165\u5B57\u6BB5",
+      formatListItems(skillJson.input_contract?.required_fields || skillJson.user_input_fields || []),
+      "",
+      "## \u6267\u884C\u6D41\u7A0B",
+      formatListItems(skillJson.execution_workflow || skillJson.generation_steps || []),
       "",
       "## \u5FC5\u987B\u9075\u5B88",
       formatListItems(skillJson.style_rules?.must || []),
@@ -31905,8 +32811,51 @@ ${String(ex)}`);
       formatListItems(skillJson.forbidden || []),
       "",
       "## \u81EA\u68C0\u6E05\u5355",
-      formatListItems(skillJson.self_checklist || [])
+      formatListItems(skillJson.validation_checklist || skillJson.self_checklist || [])
     ].join("\n");
+  }
+  function normalizeInputContract(skillJson) {
+    const defaultPolicy = "\u4E8B\u5B9E\u7F3A\u5931\u65F6\u4F7F\u7528\u53EF\u66FF\u6362\u5360\u4F4D\u7B26\uFF0C\u4E0D\u7F16\u9020\u5177\u4F53\u4EBA\u540D\u3001\u65F6\u95F4\u3001\u5730\u70B9\u3001\u6D3B\u52A8\u540D\u79F0\u548C\u843D\u6B3E\u3002";
+    const inputContract = skillJson.input_contract;
+    const fallbackFields = coerceArray(skillJson.user_input_fields || skillJson.required_user_inputs);
+    if (Array.isArray(inputContract)) {
+      return {
+        required_fields: inputContract,
+        optional_fields: [],
+        missing_fact_policy: defaultPolicy
+      };
+    }
+    return {
+      ...inputContract && typeof inputContract === "object" ? inputContract : {},
+      required_fields: coerceArray(inputContract?.required_fields || inputContract?.fields || fallbackFields),
+      optional_fields: coerceArray(inputContract?.optional_fields),
+      missing_fact_policy: inputContract?.missing_fact_policy || defaultPolicy
+    };
+  }
+  function normalizeExecutionWorkflow(skillJson, styleRules) {
+    const workflow = coerceArray(skillJson.execution_workflow || skillJson.generation_steps);
+    if (workflow.length) return workflow;
+    return [
+      "\u8BFB\u53D6\u7528\u6237\u4EFB\u52A1\u548C\u8F93\u5165\u5B57\u6BB5\uFF0C\u8BC6\u522B\u6587\u79CD\u3001\u573A\u666F\u3001\u5BF9\u8C61\u3001\u65F6\u95F4\u3001\u5730\u70B9\u3001\u4E8B\u9879\u548C\u843D\u6B3E\u3002",
+      "\u6309 document_structure_template \u7EC4\u7EC7\u6807\u9898\u3001\u5F00\u5934\u3001\u6B63\u6587\u6BB5\u843D\u548C\u7ED3\u5C3E\u3002",
+      "\u4F18\u5148\u6267\u884C style_rules.must\uFF0C\u5C06 recommended \u4F5C\u4E3A\u53EF\u9009\u589E\u5F3A\uFF0C\u4E0D\u8986\u76D6\u7528\u6237\u4E8B\u5B9E\u3002",
+      "\u4F7F\u7528 common_expression_library \u65F6\u66FF\u6362\u53D8\u91CF\u69FD\u4F4D\uFF0C\u4E8B\u5B9E\u7F3A\u5931\u5904\u4FDD\u7559\u5360\u4F4D\u7B26\u3002",
+      "\u6309 validation_checklist \u81EA\u68C0\u683C\u5F0F\u3001\u6587\u98CE\u3001\u7981\u5FCC\u548C\u9690\u79C1\u98CE\u9669\u3002"
+    ].filter((step, index) => index !== 2 || coerceArray(styleRules?.must).length || coerceArray(styleRules?.recommended).length);
+  }
+  function buildConciseInstruction(skillJson, styleRules, aggregationData) {
+    const must = coerceArray(styleRules.must).slice(0, 3).join("\uFF1B");
+    const scope = skillJson.applicable_scope || aggregationData.common_structure?.[0] || "\u540C\u7C7B\u6B63\u5F0F\u6587\u672C";
+    return [`\u7528\u4E8E\u751F\u6210${scope}\u3002`, must ? `\u5FC5\u987B\u9075\u5B88\uFF1A${must}\u3002` : "", "\u4E0D\u5F97\u590D\u7528\u6837\u672C\u4E2D\u7684\u4E2A\u6848\u4FE1\u606F\u6216\u9690\u79C1\u4FE1\u606F\u3002"].filter(Boolean).join("");
+  }
+  function uniqueList(items) {
+    const seen = /* @__PURE__ */ new Set();
+    return coerceArray(items).filter((item) => {
+      const key = typeof item === "string" ? item : JSON.stringify(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   // src/modules/skills/skillBuilder.js
@@ -31916,27 +32865,34 @@ ${String(ex)}`);
       getSystemPrompt = () => DEFAULT_SYSTEM_PROMPT,
       normalizeSkillJsonText: normalizeSkillJsonText2
     } = deps;
-    async function buildSkillWithAiChain(style, progress = null) {
+    async function buildSkillWithAiChain(style, progress = null, options = {}) {
       const examples = (style.examples || []).slice(0, 8);
       const analyses = [];
+      const hasFeedback = (style.feedbacks || []).length > 0;
+      const totalStages = hasFeedback ? 5 : 4;
       for (const [index, example] of examples.entries()) {
+        throwIfAborted2(options.signal);
         const baseProgress = 8 + Math.round(index / Math.max(examples.length, 1) * 36);
-        progress?.update(`\u6B63\u5728\u5206\u6790\u6837\u672C\u6587\u6863 ${index + 1}/${examples.length}\uFF1A${example.name}`, baseProgress);
-        const analysis = await analyzeSingleDocument(style, example, index);
+        progress?.update(`\u6B65\u9AA4 1/${totalStages}\uFF1A\u6B63\u5728\u5206\u6790\u6837\u672C\u6587\u6863 ${index + 1}/${examples.length}\uFF1A${example.name}`, baseProgress);
+        const analysis = await analyzeSingleDocument(style, example, index, options);
         example.analysis = analysis;
         example.analyzedAt = now();
         analyses.push(analysis);
       }
-      progress?.update("\u6B63\u5728\u805A\u5408\u591A\u7BC7\u6587\u6863\u89C4\u5219", 52);
-      const aggregationData = await aggregateDocumentAnalyses(style, analyses);
-      progress?.update("\u6B63\u5728\u751F\u6210\u6267\u7B14\u4EBA\u8349\u6848", 66);
-      let draft = await generateSkillDraft(style, aggregationData);
-      if ((style.feedbacks || []).length > 0) {
-        progress?.update("\u6B63\u5728\u5438\u6536\u7528\u6237\u53CD\u9988\u4F18\u5316\u6267\u7B14\u4EBA", 74);
-        draft = await optimizeSkillWithFeedback(style, draft, aggregationData);
+      throwIfAborted2(options.signal);
+      progress?.update(`\u6B65\u9AA4 2/${totalStages}\uFF1A\u6B63\u5728\u805A\u5408\u591A\u7BC7\u6587\u6863\u89C4\u5219`, 52);
+      const aggregationData = await aggregateDocumentAnalyses(style, analyses, options);
+      throwIfAborted2(options.signal);
+      progress?.update(`\u6B65\u9AA4 3/${totalStages}\uFF1A\u6B63\u5728\u751F\u6210\u6267\u7B14\u4EBA\u8349\u6848`, 66);
+      let draft = await generateSkillDraft(style, aggregationData, options);
+      if (hasFeedback) {
+        throwIfAborted2(options.signal);
+        progress?.update(`\u6B65\u9AA4 4/${totalStages}\uFF1A\u6B63\u5728\u5438\u6536\u7528\u6237\u53CD\u9988\u4F18\u5316\u6267\u7B14\u4EBA`, 74);
+        draft = await optimizeSkillWithFeedback(style, draft, aggregationData, options);
       }
-      progress?.update("\u6B63\u5728\u751F\u6210\u6D4B\u8BD5\u6587\u6863\u5E76\u81EA\u68C0", 82);
-      const test = await testSkillOnGeneration(style, draft.skillJson, draft.exampleInput);
+      throwIfAborted2(options.signal);
+      progress?.update(`\u6B65\u9AA4 ${totalStages}/${totalStages}\uFF1A\u6B63\u5728\u751F\u6210\u6D4B\u8BD5\u6587\u6863\u5E76\u81EA\u68C0`, 82);
+      const test = await testSkillOnGeneration(style, draft.skillJson, draft.exampleInput, options);
       const qualityReport = normalizeSkillQualityReport(style, aggregationData, draft.qualityReport, test.report);
       return {
         analyses,
@@ -31950,7 +32906,7 @@ ${String(ex)}`);
         testReport: JSON.stringify(test.report, null, 2)
       };
     }
-    async function analyzeSingleDocument(style, example, index) {
+    async function analyzeSingleDocument(style, example, index, options = {}) {
       const prompt = [
         "\u4F60\u662F\u591A\u6587\u6863\u6267\u7B14\u4EBA\u6784\u5EFA\u7CFB\u7EDF\u7684\u201C\u5355\u7BC7\u6587\u6863\u5206\u6790\u5668\u201D\u3002\u8BF7\u53EA\u5206\u6790\u8FD9\u4E00\u7BC7\u6837\u672C\u6587\u6863\uFF0C\u4E0D\u80FD\u628A\u5355\u7BC7\u73B0\u8C61\u5199\u6210\u5F3A\u89C4\u5219\u3002",
         "\u8BF7\u8BC6\u522B\u7ED3\u6784\u3001\u6587\u98CE\u3001\u53E5\u5F0F\u3001\u683C\u5F0F\u3001\u53D8\u91CF\u69FD\u4F4D\u3001\u5019\u9009\u89C4\u5219\u3001\u9690\u79C1/\u654F\u611F\u4FE1\u606F\u3001\u4E2A\u6848\u4FE1\u606F\u3001\u7981\u6B62\u590D\u7528\u5185\u5BB9\u3002",
@@ -31963,10 +32919,11 @@ ${String(ex)}`);
         `\u6837\u672C\u6587\u672C\uFF1A
 ${String(example.text || "").slice(0, 12e3)}`
       ].join("\n\n");
-      const result2 = await callAiJsonWithRepair2(buildMessages(prompt), "\u5355\u7BC7\u6587\u6863\u5206\u6790 JSON");
+      throwIfAborted2(options.signal);
+      const result2 = await callAiJsonWithRepair2(buildMessages(prompt), "\u5355\u7BC7\u6587\u6863\u5206\u6790 JSON", { signal: options.signal });
       return normalizeSingleDocumentAnalysis(result2, example, index);
     }
-    async function aggregateDocumentAnalyses(style, analyses) {
+    async function aggregateDocumentAnalyses(style, analyses, options = {}) {
       const prompt = [
         "\u4F60\u662F\u591A\u6587\u6863\u6267\u7B14\u4EBA\u6784\u5EFA\u7CFB\u7EDF\u7684\u201C\u591A\u7BC7\u805A\u5408\u5668\u201D\u3002\u8BF7\u6A2A\u5411\u6BD4\u8F83\u591A\u7BC7\u5355\u7BC7\u5206\u6790\uFF0C\u63D0\u70BC\u5171\u540C\u70B9\u3001\u5DEE\u5F02\u70B9\u548C\u51B2\u7A81\u70B9\u3002",
         "\u6838\u5FC3\u539F\u5219\uFF1A\u5355\u7BC7\u6587\u6863\u53EA\u80FD\u4EA7\u751F\u5019\u9009\u89C4\u5219\uFF1B\u53EA\u6709\u81F3\u5C11 2 \u7BC7\u6837\u672C\u6587\u6863\u5171\u540C\u9A8C\u8BC1\uFF0C\u624D\u53EF\u4EE5\u6210\u4E3A strong_rules\u3002\u82E5\u6837\u672C\u603B\u6570\u5C11\u4E8E 3\uFF0Coverall_confidence \u4E0D\u80FD\u9AD8\u4E8E medium\u3002",
@@ -31977,24 +32934,28 @@ ${String(example.text || "").slice(0, 12e3)}`
         `\u5355\u7BC7\u5206\u6790\uFF1A
 ${JSON.stringify(analyses, null, 2)}`
       ].join("\n\n");
-      const result2 = await callAiJsonWithRepair2(buildMessages(prompt), "\u591A\u7BC7\u805A\u5408 JSON");
+      throwIfAborted2(options.signal);
+      const result2 = await callAiJsonWithRepair2(buildMessages(prompt), "\u591A\u7BC7\u805A\u5408 JSON", { signal: options.signal });
       return normalizeAggregationData(result2, analyses.length);
     }
-    async function generateSkillDraft(style, aggregationData) {
+    async function generateSkillDraft(style, aggregationData, options = {}) {
       const prompt = [
         "\u4F60\u662F\u591A\u6587\u6863\u6267\u7B14\u4EBA\u6784\u5EFA\u7CFB\u7EDF\u7684\u201C\u6267\u7B14\u4EBA\u8349\u6848\u751F\u6210\u5668\u201D\u3002\u8BF7\u6839\u636E\u591A\u7BC7\u805A\u5408\u7ED3\u679C\u751F\u6210\u53EF\u590D\u7528\u3001\u53EF\u7F16\u8F91\u3001\u53EF\u6D4B\u8BD5\u7684\u6587\u672C\u751F\u6210\u6267\u7B14\u4EBA\u3002",
+        "\u8BF7\u91C7\u7528\u7C7B\u4F3C Codex Skill \u7684\u8BBE\u8BA1\u539F\u5219\uFF1A\u89E6\u53D1\u6761\u4EF6\u8981\u6E05\u695A\uFF0C\u6B63\u6587\u89C4\u5219\u8981\u7CBE\u7B80\uFF0C\u53EA\u5199\u6A21\u578B\u65E0\u6CD5\u7A33\u5B9A\u81EA\u884C\u63A8\u65AD\u7684\u5173\u952E\u7A0B\u5E8F\u77E5\u8BC6\uFF1B\u53EF\u53D8\u5185\u5BB9\u653E\u5165\u8F93\u5165\u5B57\u6BB5\u548C\u53D8\u91CF\u69FD\u4F4D\uFF1B\u53EF\u9A8C\u8BC1\u6D41\u7A0B\u5199\u6210\u6B65\u9AA4\u548C\u81EA\u68C0\u6E05\u5355\u3002",
         "\u751F\u6210 skill_json \u5B57\u6BB5\u65F6\uFF0Cstrong_rules \u5FC5\u987B\u6765\u81EA\u805A\u5408\u7ED3\u679C strong_rules\uFF1Bcandidate_rules \u53EA\u80FD\u653E\u5165 recommended \u6216 optional\uFF0C\u4E0D\u5F97\u4F2A\u88C5\u6210\u5FC5\u987B\u89C4\u5219\u3002",
-        "skill_json \u662F\u7A0B\u5E8F\u8C03\u7528\u7684\u6267\u7B14\u4EBA\u89C4\u5219 JSON\uFF0C\u8981\u80FD\u88AB\u540E\u7EED\u6587\u6863\u751F\u6210\u6A21\u5757\u8C03\u7528\uFF0C\u7528\u6765\u63A7\u5236\u6587\u79CD\u7ED3\u6784\u3001\u884C\u6587\u98CE\u683C\u3001\u683C\u5F0F\u89C4\u8303\u3001\u5E38\u7528\u8868\u8FBE\u548C\u5BA1\u7A3F\u6807\u51C6\u3002",
+        "skill_json \u662F\u7A0B\u5E8F\u8C03\u7528\u7684\u6267\u7B14\u4EBA\u6267\u884C\u5361 JSON\uFF0C\u8981\u80FD\u88AB\u540E\u7EED\u6587\u6863\u751F\u6210\u6A21\u5757\u8C03\u7528\uFF0C\u7528\u6765\u63A7\u5236\u6587\u79CD\u7ED3\u6784\u3001\u884C\u6587\u98CE\u683C\u3001\u683C\u5F0F\u89C4\u8303\u3001\u5E38\u7528\u8868\u8FBE\u548C\u5BA1\u7A3F\u6807\u51C6\uFF1B\u4E0D\u8981\u628A\u6837\u672C\u6587\u6863\u539F\u6587\u3001\u9690\u79C1\u4FE1\u606F\u6216\u4E2A\u6848\u4E8B\u5B9E\u5199\u5165 JSON\u3002",
+        "markdown \u662F\u7ED9\u6587\u5458\u770B\u7684\u7B80\u77ED\u8BF4\u660E\uFF0C\u63A7\u5236\u5728 1200 \u5B57\u4EE5\u5185\uFF0C\u91CD\u70B9\u5199\u9002\u7528\u8303\u56F4\u3001\u8F93\u5165\u5B57\u6BB5\u3001\u5FC5\u5B88\u89C4\u5219\u3001\u7981\u5FCC\u548C\u81EA\u68C0\uFF0C\u4E0D\u8981\u663E\u5316\u5B8C\u6574\u63D0\u793A\u8BCD\u3002",
         "\u53EA\u8F93\u51FA JSON\uFF0C\u4E0D\u8981 Markdown\u3002",
-        'JSON \u7ED3\u6784\uFF1A{\n  "markdown":"# \u6267\u7B14\u4EBA\u540D\u79F0\\n...",\n  "skill_json": {\n    "name":"...",\n    "handle":"...",\n    "version":"...",\n    "enabled": true,\n    "category":"...",\n    "description":"...",\n    "applicable_scope":"...",\n    "confidence":"low|medium|high",\n    "source_documents": [],\n    "user_input_fields": [],\n    "document_structure_template": [],\n    "style_rules": {"must": [], "recommended": [], "optional": []},\n    "format_rules": [],\n    "common_expression_library": [],\n    "scene_variations": [],\n    "variable_slots": [],\n    "forbidden": [],\n    "privacy_filters": [],\n    "case_specific_exclusions": [],\n    "generation_steps": [],\n    "self_checklist": [],\n    "review_standards": [],\n    "quality_controls": {"rule_confidence":"...", "conflict_resolution": [], "single_document_rule_policy":"..."},\n    "example_input": {},\n    "example_output": "..."\n  },\n  "quality_report": {"confidence":"...", "strong_rule_count":0, "candidate_rule_count":0, "conflicts":[], "excluded_case_specific_items":[], "privacy_filter_notes":[]},\n  "example_input": {}\n}',
+        'JSON \u7ED3\u6784\uFF1A{\n  "markdown":"# \u6267\u7B14\u4EBA\u540D\u79F0\\n...",\n  "skill_json": {\n    "name":"...",\n    "handle":"...",\n    "version":"...",\n    "enabled": true,\n    "category":"...",\n    "description":"...",\n    "trigger_description":"\u4F55\u65F6\u5E94\u8BE5\u8C03\u7528\u8FD9\u4E2A\u6267\u7B14\u4EBA",\n    "default_prompt":"@handle \u8D77\u8349...",\n    "concise_instruction":"\u4E00\u53E5\u8BDD\u6982\u62EC\u6267\u884C\u65B9\u5F0F",\n    "applicable_scope":"...",\n    "confidence":"low|medium|high",\n    "source_documents": [],\n    "input_contract": {"required_fields": [], "optional_fields": [], "missing_fact_policy":"\u4E8B\u5B9E\u7F3A\u5931\u65F6\u5982\u4F55\u5904\u7406"},\n    "user_input_fields": [],\n    "document_structure_template": [],\n    "style_rules": {"must": [], "recommended": [], "optional": []},\n    "format_rules": [],\n    "common_expression_library": [],\n    "scene_variations": [],\n    "variable_slots": [],\n    "forbidden": [],\n    "privacy_filters": [],\n    "case_specific_exclusions": [],\n    "execution_workflow": [],\n    "generation_steps": [],\n    "validation_checklist": [],\n    "self_checklist": [],\n    "review_standards": [],\n    "activation_examples": [],\n    "quality_controls": {"rule_confidence":"...", "conflict_resolution": [], "single_document_rule_policy":"...", "candidate_rule_policy":"...", "privacy_filter": true},\n    "example_input": {},\n    "example_output": "..."\n  },\n  "quality_report": {"confidence":"...", "strong_rule_count":0, "candidate_rule_count":0, "conflicts":[], "excluded_case_specific_items":[], "privacy_filter_notes":[]},\n  "example_input": {}\n}',
         `\u6267\u7B14\u4EBA\u57FA\u672C\u4FE1\u606F\uFF1A${JSON.stringify(pickSkillMetadata(style), null, 2)}`,
         `\u805A\u5408\u7ED3\u679C\uFF1A
 ${JSON.stringify(aggregationData, null, 2)}`
       ].join("\n\n");
-      const result2 = await callAiJsonWithRepair2(buildMessages(prompt), "\u6267\u7B14\u4EBA\u8349\u6848 JSON");
+      throwIfAborted2(options.signal);
+      const result2 = await callAiJsonWithRepair2(buildMessages(prompt), "\u6267\u7B14\u4EBA\u8349\u6848 JSON", { signal: options.signal });
       return normalizeSkillDraftOutput(result2, style, aggregationData);
     }
-    async function optimizeSkillWithFeedback(style, draft, aggregationData) {
+    async function optimizeSkillWithFeedback(style, draft, aggregationData, options = {}) {
       const feedbacks = (style.feedbacks || []).map((feedback, index) => `${index + 1}. ${feedback.text}`).join("\n");
       const prompt = [
         "\u4F60\u662F\u591A\u6587\u6863\u6267\u7B14\u4EBA\u6784\u5EFA\u7CFB\u7EDF\u7684\u201C\u53CD\u9988\u4F18\u5316\u5668\u201D\u3002\u8BF7\u5728\u4E0D\u7834\u574F\u5F3A\u89C4\u5219\u8BC1\u636E\u94FE\u7684\u524D\u63D0\u4E0B\uFF0C\u6839\u636E\u7528\u6237\u53CD\u9988\u4F18\u5316\u6267\u7B14\u4EBA\u3002",
@@ -32007,10 +32968,11 @@ ${JSON.stringify(aggregationData, null, 2)}`,
         `\u5F53\u524D\u8349\u6848\uFF1A
 ${JSON.stringify(draft, null, 2)}`
       ].join("\n\n");
-      const result2 = await callAiJsonWithRepair2(buildMessages(prompt), "\u53CD\u9988\u4F18\u5316\u6267\u7B14\u4EBA JSON");
+      throwIfAborted2(options.signal);
+      const result2 = await callAiJsonWithRepair2(buildMessages(prompt), "\u53CD\u9988\u4F18\u5316\u6267\u7B14\u4EBA JSON", { signal: options.signal });
       return normalizeSkillDraftOutput(result2, style, aggregationData);
     }
-    async function testSkillOnGeneration(style, skillJson, exampleInput = null) {
+    async function testSkillOnGeneration(style, skillJson, exampleInput = null, options = {}) {
       const testInput = exampleInput && Object.keys(exampleInput).length > 0 ? exampleInput : {
         \u4E3B\u9898: `${style.name || "\u8BE5\u7C7B\u6587\u6863"}\u6D4B\u8BD5\u751F\u6210`,
         \u4F7F\u7528\u573A\u666F: "\u7EC4\u7EC7\u5185\u90E8\u6B63\u5F0F\u6587\u6863\u8D77\u8349",
@@ -32026,7 +32988,8 @@ ${JSON.stringify(skillJson, null, 2)}`,
         `\u6D4B\u8BD5\u8F93\u5165\uFF1A
 ${JSON.stringify(testInput, null, 2)}`
       ].join("\n\n");
-      const result2 = await callAiJsonWithRepair2(buildMessages(prompt), "\u6267\u7B14\u4EBA\u751F\u6210\u6D4B\u8BD5 JSON");
+      throwIfAborted2(options.signal);
+      const result2 = await callAiJsonWithRepair2(buildMessages(prompt), "\u6267\u7B14\u4EBA\u751F\u6210\u6D4B\u8BD5 JSON", { signal: options.signal });
       return {
         document: result2.test_document_markdown || result2.document || "",
         report: result2.check_report || result2.report || {}
@@ -32060,6 +33023,14 @@ ${JSON.stringify(testInput, null, 2)}`
         { role: "user", content: prompt }
       ];
     }
+    function throwIfAborted2(signal) {
+      if (signal?.aborted) {
+        const error = new Error("\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6784\u5EFA");
+        error.name = "AbortError";
+        error.code = "aborted";
+        throw error;
+      }
+    }
     return {
       buildSkillWithAiChain,
       analyzeSingleDocument,
@@ -32073,6 +33044,189 @@ ${JSON.stringify(testInput, null, 2)}`
   }
 
   // src/modules/skills/skillManager.js
+  var DEFAULT_MISSING_FACT_POLICY = "\u4E8B\u5B9E\u7F3A\u5931\u65F6\u4F7F\u7528\u53EF\u66FF\u6362\u5360\u4F4D\u7B26\uFF0C\u4E0D\u7F16\u9020\u5177\u4F53\u4EBA\u540D\u3001\u65F6\u95F4\u3001\u5730\u70B9\u3001\u6D3B\u52A8\u540D\u79F0\u548C\u843D\u6B3E\u3002";
+  var SKILL_PACKAGE_SCHEMA = "mowen-nibi-workbench.skill-package.v1";
+  function buildSkillRuntimePayload(skillJson, skill = {}, fallbackConfidence = "low") {
+    const handle = normalizeHandle(skillJson.handle || skill.handle || skillJson.name || skill.name);
+    const mustRules = coerceArray(skillJson.style_rules?.must);
+    const recommendedRules = coerceArray(skillJson.style_rules?.recommended);
+    const optionalRules = coerceArray(skillJson.style_rules?.optional);
+    return {
+      name: skillJson.name || skill.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
+      handle,
+      description: skillJson.description || skill.description || "",
+      trigger_description: skillJson.trigger_description || (handle ? `\u5F53\u7528\u6237\u901A\u8FC7 @${handle} \u8C03\u7528\uFF0C\u6216\u4EFB\u52A1\u5339\u914D\u8BE5\u6587\u79CD/\u573A\u666F\u65F6\u4F7F\u7528\u3002` : "\u5F53\u4EFB\u52A1\u5339\u914D\u8BE5\u6587\u79CD/\u573A\u666F\u65F6\u4F7F\u7528\u3002"),
+      concise_instruction: skillJson.concise_instruction || skillJson.description || "",
+      applicable_scope: skillJson.applicable_scope || "",
+      confidence: skillJson.confidence || fallbackConfidence,
+      input_contract: normalizeSkillInputContract(skillJson),
+      document_structure_template: coerceArray(skillJson.document_structure_template),
+      style_rules: {
+        must: mustRules,
+        recommended: recommendedRules,
+        optional: optionalRules
+      },
+      format_rules: coerceArray(skillJson.format_rules),
+      common_expression_library: coerceArray(skillJson.common_expression_library || skillJson.reusable_expressions),
+      scene_variations: coerceArray(skillJson.scene_variations),
+      variable_slots: coerceArray(skillJson.variable_slots),
+      forbidden: coerceArray(skillJson.forbidden),
+      privacy_filters: coerceArray(skillJson.privacy_filters),
+      case_specific_exclusions: coerceArray(skillJson.case_specific_exclusions),
+      execution_workflow: coerceArray(skillJson.execution_workflow || skillJson.generation_steps),
+      validation_checklist: coerceArray(skillJson.validation_checklist || skillJson.self_checklist || skillJson.review_standards),
+      quality_controls: {
+        ...skillJson.quality_controls || {},
+        single_document_rule_policy: "\u5355\u7BC7\u6837\u672C\u53EA\u4F5C\u4E3A\u5019\u9009\u89C4\u5219\uFF1B\u751F\u6210\u65F6\u4E0D\u5F97\u628A\u4E2A\u6848\u4FE1\u606F\u5F53\u6210\u901A\u7528\u89C4\u5219",
+        candidate_rule_policy: "recommended/optional \u53EA\u80FD\u8F85\u52A9\u5199\u4F5C\uFF0C\u4E0D\u80FD\u8986\u76D6\u7528\u6237\u63D0\u4F9B\u7684\u4E8B\u5B9E",
+        privacy_filter: true
+      }
+    };
+  }
+  function createSkillPackage(skill = {}) {
+    const name = String(skill.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA").trim();
+    const handle = normalizeHandle(skill.handle || name);
+    const ruleJson = parseRuleJsonForPackage(skill.skillJson, skill);
+    return {
+      schema: SKILL_PACKAGE_SCHEMA,
+      version: 1,
+      exportedAt: now(),
+      skill: {
+        name,
+        handle,
+        category: skill.category || "\u81EA\u5B9A\u4E49",
+        description: skill.description || "",
+        enabled: skill.enabled !== false,
+        summaryMd: skill.summary || "",
+        ruleJson,
+        qualityReport: skill.qualityReport || null,
+        buildArtifacts: {
+          analysis: skill.analysis || "",
+          aggregation: skill.aggregation || "",
+          aggregationData: skill.aggregationData || null,
+          analyses: Array.isArray(skill.analyses) ? skill.analyses : []
+        },
+        sourceDocuments: summarizeSkillSourceDocuments(skill),
+        versions: summarizeSkillVersions(skill.versions)
+      }
+    };
+  }
+  function parseImportedSkillPackage(payload = {}) {
+    const source = payload.schema === SKILL_PACKAGE_SCHEMA ? payload.skill || {} : payload;
+    const ruleJson = source.ruleJson || source.skillJson || source.rule || source;
+    const ruleObject = parseRuleJsonForPackage(ruleJson, source);
+    const ruleJsonText = JSON.stringify(ruleObject || {}, null, 2);
+    const name = source.name || ruleObject?.name || payload.name || "\u5BFC\u5165\u6267\u7B14\u4EBA";
+    const handle = normalizeHandle(source.handle || ruleObject?.handle || name);
+    const artifacts = source.buildArtifacts || {};
+    return {
+      id: null,
+      name,
+      handle,
+      category: source.category || ruleObject?.category || "\u81EA\u5B9A\u4E49",
+      description: source.description || ruleObject?.description || "",
+      enabled: source.enabled !== false,
+      analysis: artifacts.analysis || source.analysis || "",
+      aggregation: artifacts.aggregation || source.aggregation || "",
+      summary: source.summaryMd || source.summary || source.markdown || "",
+      skillJson: ruleJsonText,
+      examples: normalizeImportedSourceDocuments(source.sourceDocuments),
+      analyses: Array.isArray(artifacts.analyses) ? artifacts.analyses : [],
+      aggregationData: artifacts.aggregationData || source.aggregationData || null,
+      qualityReport: source.qualityReport || null,
+      versions: normalizeImportedVersions(source.versions),
+      feedbacks: [],
+      lastTest: null,
+      createdAt: now(),
+      updatedAt: now()
+    };
+  }
+  function parseRuleJsonForPackage(value, skill) {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return clone(value);
+    }
+    const raw = String(value || "").trim();
+    if (raw) {
+      try {
+        return JSON.parse(extractJsonObject(raw) || raw);
+      } catch {
+        return { raw };
+      }
+    }
+    return {
+      name: skill.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
+      handle: normalizeHandle(skill.handle || skill.name),
+      category: skill.category || "\u81EA\u5B9A\u4E49",
+      description: skill.description || ""
+    };
+  }
+  function summarizeSkillSourceDocuments(skill = {}) {
+    const versionSources = (skill.versions || []).flatMap((version) => version.sourceExamples || []).filter(Boolean);
+    const examples = Array.isArray(skill.examples) ? skill.examples : [];
+    const sources = versionSources.length ? versionSources : examples;
+    return sources.map((source) => ({
+      name: source.name || "\u672A\u547D\u540D\u793A\u8303",
+      length: Number(source.length || source.text?.length || 0),
+      addedAt: source.addedAt || source.createdAt || ""
+    }));
+  }
+  function summarizeSkillVersions(versions = []) {
+    return (Array.isArray(versions) ? versions : []).map((version, index) => ({
+      version: Number(version.version || index + 1),
+      createdAt: version.createdAt || "",
+      sourceExamples: (version.sourceExamples || []).map((source) => ({
+        name: source.name || "\u672A\u547D\u540D\u793A\u8303",
+        length: Number(source.length || 0)
+      })),
+      summary: version.summary || "",
+      skillJson: version.skillJson || "",
+      qualityReport: version.qualityReport || null
+    }));
+  }
+  function normalizeImportedVersions(versions = []) {
+    return (Array.isArray(versions) ? versions : []).map((version, index) => ({
+      id: createId(),
+      version: Number(version.version || index + 1),
+      createdAt: version.createdAt || now(),
+      sourceExamples: Array.isArray(version.sourceExamples) ? version.sourceExamples : [],
+      analyses: Array.isArray(version.analyses) ? version.analyses : [],
+      analysis: version.analysis || "",
+      aggregation: version.aggregation || "",
+      aggregationData: version.aggregationData || null,
+      summary: version.summary || "",
+      skillJson: version.skillJson || "",
+      qualityReport: version.qualityReport || null,
+      testDoc: version.testDoc || "",
+      testReport: version.testReport || ""
+    }));
+  }
+  function normalizeImportedSourceDocuments(sourceDocuments = []) {
+    return (Array.isArray(sourceDocuments) ? sourceDocuments : []).map((source) => ({
+      id: createId(),
+      name: source.name || "\u5BFC\u5165\u793A\u8303\u6458\u8981",
+      text: `\uFF08\u5BFC\u5165\u5305\u4EC5\u5305\u542B\u793A\u8303\u6458\u8981\uFF0C\u4E0D\u5305\u542B\u539F\u59CB\u5168\u6587\u3002\u539F\u6587\u957F\u5EA6\uFF1A${Number(source.length || 0)} \u5B57\u7B26\uFF09`,
+      addedAt: source.addedAt || now(),
+      importedSummary: true,
+      originalLength: Number(source.length || 0)
+    }));
+  }
+  function normalizeSkillInputContract(skillJson) {
+    const inputContract = skillJson.input_contract;
+    const fallbackFields = coerceArray(skillJson.user_input_fields || skillJson.required_user_inputs);
+    if (Array.isArray(inputContract)) {
+      return {
+        required_fields: inputContract,
+        optional_fields: [],
+        missing_fact_policy: DEFAULT_MISSING_FACT_POLICY
+      };
+    }
+    return {
+      ...inputContract && typeof inputContract === "object" ? inputContract : {},
+      required_fields: coerceArray(inputContract?.required_fields || inputContract?.fields || fallbackFields),
+      optional_fields: coerceArray(inputContract?.optional_fields),
+      missing_fact_policy: inputContract?.missing_fact_policy || DEFAULT_MISSING_FACT_POLICY
+    };
+  }
   function createSkillManager(deps) {
     const {
       state: state2,
@@ -32158,20 +33312,36 @@ ${JSON.stringify(testInput, null, 2)}`
           enabled: style.enabled !== false,
           category: style.category || "\u81EA\u5B9A\u4E49",
           description: style.description || "",
+          trigger_description: handle ? `\u5F53\u7528\u6237\u901A\u8FC7 @${handle} \u8C03\u7528\uFF0C\u6216\u4EFB\u52A1\u5339\u914D\u8BE5\u6587\u79CD/\u573A\u666F\u65F6\u4F7F\u7528\u3002` : "",
+          default_prompt: handle ? `@${handle} \u8BF7\u6839\u636E\u4EE5\u4E0B\u4E8B\u9879\u8D77\u8349\u4E00\u7BC7\u540C\u7C7B\u6B63\u5F0F\u6587\u672C\uFF1A` : "",
+          concise_instruction: "",
           applicable_scope: "",
           confidence: "low",
           source_documents: [],
+          input_contract: {
+            required_fields: [],
+            optional_fields: [],
+            missing_fact_policy: DEFAULT_MISSING_FACT_POLICY
+          },
+          user_input_fields: [],
           required_user_inputs: [],
           document_structure_template: [],
           style_rules: { must: [], recommended: [], optional: [] },
+          common_expression_library: [],
           reusable_expressions: [],
           variable_slots: [],
           scene_variations: [],
           forbidden: [],
+          privacy_filters: [],
+          case_specific_exclusions: [],
+          execution_workflow: [],
           generation_steps: [],
+          validation_checklist: [],
           self_checklist: [],
+          activation_examples: handle ? [`@${handle} \u8BF7\u6839\u636E\u4EE5\u4E0B\u4E8B\u9879\u8D77\u8349\u6587\u6863\uFF1A...`] : [],
           quality_controls: {
             promote_to_strong_rule: "\u4EC5\u5F53\u591A\u7BC7\u6837\u672C\u6587\u6863\u5171\u540C\u9A8C\u8BC1\u65F6\u624D\u63D0\u5347\u4E3A\u5F3A\u89C4\u5219",
+            candidate_rule_policy: "\u5019\u9009\u89C4\u5219\u53EA\u80FD\u8F85\u52A9\u5199\u4F5C\uFF0C\u4E0D\u80FD\u8986\u76D6\u7528\u6237\u4E8B\u5B9E",
             exclude_case_specific_info: true,
             privacy_filter: true
           },
@@ -32207,6 +33377,17 @@ ${JSON.stringify(testInput, null, 2)}`
       } catch {
         return JSON.parse(synthesizeSkillJson(style));
       }
+    }
+    function createUniqueSkillHandle(value, currentId = null) {
+      const base = normalizeHandle(value) || "imported";
+      let handle = base;
+      let index = 2;
+      while (state2.styles.some((style) => style.id !== currentId && style.handle === handle)) {
+        const suffix = `-${index}`;
+        handle = normalizeHandle(`${base.slice(0, Math.max(1, 24 - suffix.length))}${suffix}`);
+        index += 1;
+      }
+      return handle;
     }
     function syncEditingStyleFromInputs2() {
       const draft = ui2.editingStyle || createEmptyStyle2();
@@ -32291,6 +33472,23 @@ ${JSON.stringify(testInput, null, 2)}`
       eventBus2.emit(EVENTS.RENDER_STYLE_LIST);
       return normalized;
     }
+    function importSkillPackage(payload) {
+      const draft = parseImportedSkillPackage(payload);
+      draft.id = createId();
+      draft.createdAt = now();
+      draft.updatedAt = now();
+      draft.handle = createUniqueSkillHandle(draft.handle || draft.name);
+      draft.skillJson = normalizeSkillJsonText2(draft.skillJson, draft);
+      const normalized = normalizeSkill2(clone(draft));
+      state2.styles.push(normalized);
+      ui2.editingStyle = clone(normalized);
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_STYLE_SELECT);
+      eventBus2.emit(EVENTS.RENDER_STYLE_EDITOR);
+      eventBus2.emit(EVENTS.RENDER_STYLE_LIST);
+      toast2(`\u5DF2\u5BFC\u5165 @${normalized.handle} \u5230\uFF1A${getSkillLocation2(normalized)}`);
+      return normalized;
+    }
     function deleteStyle2(confirmDelete = (message) => window.confirm(message)) {
       const draft = ui2.editingStyle;
       if (!draft?.id || !state2.styles.some((style) => style.id === draft.id)) {
@@ -32335,29 +33533,13 @@ ${JSON.stringify(testInput, null, 2)}`
         "\u6267\u884C\u539F\u5219\uFF1A\u5FC5\u987B\u4F18\u5148\u9075\u5B88 style_rules.must\uFF1Brecommended \u4EC5\u5728\u7528\u6237\u4EFB\u52A1\u5339\u914D\u65F6\u4F7F\u7528\uFF1Boptional \u4E0D\u5F97\u538B\u8FC7\u7528\u6237\u4E8B\u5B9E\u3002\u7981\u6B62\u590D\u7528 case_specific_exclusions\u3001privacy_filters \u548C forbidden \u4E2D\u7684\u5185\u5BB9\u3002\u4E8B\u5B9E\u7F3A\u5931\u65F6\u4F7F\u7528\u53EF\u66FF\u6362\u5360\u4F4D\u7B26\uFF0C\u4E0D\u80FD\u7F16\u9020\u3002",
         ...enabledSkills.map((skill, index) => {
           const skillJson = parseSkillJsonObject2(skill.skillJson, skill);
-          const strongRules = coerceArray(skillJson.style_rules?.must);
-          const recommendedRules = coerceArray(skillJson.style_rules?.recommended);
-          const forbidden = coerceArray(skillJson.forbidden);
-          const payload = {
-            ...skillJson,
-            style_rules: {
-              must: strongRules,
-              recommended: recommendedRules,
-              optional: coerceArray(skillJson.style_rules?.optional)
-            },
-            forbidden,
-            quality_controls: {
-              ...skillJson.quality_controls || {},
-              single_document_rule_policy: "\u5355\u7BC7\u6837\u672C\u53EA\u4F5C\u4E3A\u5019\u9009\u89C4\u5219\uFF1B\u751F\u6210\u65F6\u4E0D\u5F97\u628A\u4E2A\u6848\u4FE1\u606F\u5F53\u6210\u901A\u7528\u89C4\u5219",
-              privacy_filter: true
-            }
-          };
+          const payload = buildSkillRuntimePayload(skillJson, skill, skill.qualityReport?.confidence || "low");
           return [
             `${index + 1}. @${skill.handle} \xB7 ${skill.name}`,
             skill.category ? `\u5206\u7C7B\uFF1A${skill.category}` : "",
             skill.description ? `\u80FD\u529B\uFF1A${skill.description}` : "",
             `\u89C4\u5219\u7F6E\u4FE1\u5EA6\uFF1A${skillJson.confidence || skill.qualityReport?.confidence || "low"}`,
-            `\u7A0B\u5E8F\u8C03\u7528\u89C4\u5219 JSON\uFF1A
+            `\u7A0B\u5E8F\u8C03\u7528\u6267\u884C\u5361 JSON\uFF1A
 ${JSON.stringify(payload, null, 2)}`
           ].filter(Boolean).join("\n");
         })
@@ -32370,9 +33552,11 @@ ${JSON.stringify(payload, null, 2)}`
       synthesizeSkillJson,
       normalizeSkillJsonText: normalizeSkillJsonText2,
       parseSkillJsonObject: parseSkillJsonObject2,
+      createSkillPackage,
       syncEditingStyleFromInputs: syncEditingStyleFromInputs2,
       saveStyle: saveStyle2,
       commitSkillToState: commitSkillToState2,
+      importSkillPackage,
       deleteStyle: deleteStyle2,
       resolveInvokedSkills: resolveInvokedSkills2,
       buildSkillPromptForDocumentGeneration: buildSkillPromptForDocumentGeneration2
@@ -32397,7 +33581,10 @@ ${JSON.stringify(payload, null, 2)}`
         '<option value="">\u65E0\u9ED8\u8BA4\u6267\u7B14\u4EBA</option>',
         ...enabledStyles.map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)} \xB7 ${escapeHtml(style.name)}</option>`)
       ].join("");
-      els2.editorSkillSelect.innerHTML = enabledStyles.map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)}</option>`).join("");
+      els2.editorSkillSelect.innerHTML = [
+        '<option value="">\u4E0D\u6307\u5B9A\u6267\u7B14\u4EBA</option>',
+        ...enabledStyles.map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)}</option>`)
+      ].join("");
     }
     function renderStyleEditor2() {
       if (!ui2.editingStyle) {
@@ -32647,7 +33834,7 @@ ${JSON.stringify(payload, null, 2)}`
       progressBar.querySelector(".progress-percent").textContent = `${Math.round(safeProgress)}%`;
       progressBar.querySelector(".progress-fill").style.width = `${safeProgress}%`;
     }
-    function showProgress(message, progress = 0) {
+    function showProgress(message, progress = 0, options = {}) {
       closeProgress(getCurrent());
       const progressBar = document.createElement("div");
       progressBar.className = "progress-bar";
@@ -32656,27 +33843,48 @@ ${JSON.stringify(payload, null, 2)}`
       progressBar.innerHTML = `
       <div class="progress-row">
         <div class="progress-message"></div>
-        <div class="progress-percent"></div>
+        <div class="progress-actions">
+          <button class="progress-cancel" type="button" hidden>\u53D6\u6D88</button>
+          <div class="progress-percent"></div>
+        </div>
       </div>
       <div class="progress-track">
         <div class="progress-fill"></div>
       </div>
     `;
+      const cancelButton = progressBar.querySelector(".progress-cancel");
+      if (typeof options.onCancel === "function") {
+        cancelButton.hidden = false;
+        cancelButton.addEventListener("click", () => {
+          cancelButton.disabled = true;
+          cancelButton.textContent = "\u6B63\u5728\u53D6\u6D88";
+          options.onCancel();
+        });
+      }
       const host = document.querySelector(".editor-feedback-region") || document.body;
       host.appendChild(progressBar);
       setCurrent(progressBar);
       updateProgress(progressBar, message, progress);
       return progressBar;
     }
-    async function withProgress2(message, task, initialProgress = 8) {
-      const progress = showProgress(message, initialProgress);
+    async function withProgress2(message, task, initialProgress = 8, options = {}) {
+      const progress = showProgress(message, initialProgress, options);
+      const controls = {
+        update: (nextMessage, nextProgress) => updateProgress(progress, nextMessage, nextProgress),
+        signal: options.signal || null,
+        cancel: options.onCancel || null
+      };
+      let completed = false;
       try {
-        return await task({
-          update: (nextMessage, nextProgress) => updateProgress(progress, nextMessage, nextProgress)
-        });
+        const result2 = await task(controls);
+        completed = true;
+        return result2;
+      } catch (error) {
+        updateProgress(progress, options.signal?.aborted ? "\u5DF2\u53D6\u6D88\u672C\u6B21\u64CD\u4F5C" : "\u64CD\u4F5C\u672A\u5B8C\u6210", 100);
+        throw error;
       } finally {
-        updateProgress(progress, "\u5B8C\u6210\u6536\u5C3E", 100);
-        window.setTimeout(() => closeProgress(progress), 250);
+        if (completed) updateProgress(progress, "\u5B8C\u6210\u6536\u5C3E", 100);
+        window.setTimeout(() => closeProgress(progress), completed ? 250 : 650);
       }
     }
     return {
@@ -32709,6 +33917,185 @@ ${JSON.stringify(payload, null, 2)}`
       item.classList.add("leaving");
       window.setTimeout(() => item.remove(), 180);
     }, 3600);
+  }
+
+  // src/ui/layoutController.js
+  var WORKSPACE_LAYOUT_KEY = "mowen-nibi-workbench:workspace-layout";
+  var DEFAULT_WORKSPACE_LAYOUT = { sidebar: 284, inspector: 360 };
+  function createLayoutController({ els: els2, ui: ui2 }) {
+    function bindEvents2() {
+      els2.responsiveInspectorToggle?.addEventListener("click", toggleResponsiveTools);
+      els2.responsiveBackdrop?.addEventListener("click", closeResponsiveInspector);
+      els2.mobileWorkspaceNav?.addEventListener("click", handleMobileWorkspaceNav);
+    }
+    function restoreWorkspaceLayout() {
+      const layout = readWorkspaceLayout();
+      applyWorkspaceLayout(layout);
+    }
+    function setupWorkspaceResizers() {
+      setupWorkspaceResizer(els2.leftWorkspaceResizer, "left");
+      setupWorkspaceResizer(els2.rightWorkspaceResizer, "right");
+    }
+    function setupResponsiveWorkspace() {
+      setMobileView(ui2.mobileView || "editor", { focus: false });
+      syncResponsiveWorkspace();
+      window.addEventListener("resize", syncResponsiveWorkspace);
+    }
+    function syncResponsiveWorkspace() {
+      document.body.classList.toggle("is-mobile-workspace", isMobileWorkspace());
+      if (!isResponsiveWorkspace() || isMobileWorkspace()) closeResponsiveInspector();
+      updateResponsiveControls();
+    }
+    function handleMobileWorkspaceNav(event) {
+      const button = event.target.closest("[data-mobile-view]");
+      if (!button) return;
+      setMobileView(button.dataset.mobileView, { focus: true });
+    }
+    function setMobileView(view, options = {}) {
+      const nextView = ["docs", "editor", "tools"].includes(view) ? view : "editor";
+      ui2.mobileView = nextView;
+      document.body.dataset.mobileView = nextView;
+      updateResponsiveControls();
+      if (!options.focus || !isMobileWorkspace()) return;
+      const focusTarget = {
+        docs: els2.searchInput,
+        editor: els2.titleInput,
+        tools: document.querySelector(".tab.active")
+      }[nextView];
+      window.setTimeout(() => focusTarget?.focus?.(), 0);
+    }
+    function toggleResponsiveTools() {
+      if (isMobileWorkspace()) {
+        setMobileView("tools", { focus: true });
+        return;
+      }
+      if (!isResponsiveWorkspace()) return;
+      if (document.body.classList.contains("inspector-open")) {
+        closeResponsiveInspector();
+      } else {
+        openResponsiveInspector();
+      }
+    }
+    function openResponsiveTools() {
+      if (isMobileWorkspace()) {
+        setMobileView("tools", { focus: true });
+        return;
+      }
+      if (isResponsiveWorkspace()) openResponsiveInspector();
+    }
+    function openResponsiveInspector() {
+      document.body.classList.add("inspector-open");
+      updateResponsiveControls();
+      window.setTimeout(() => document.querySelector(".tab.active")?.focus?.(), 0);
+    }
+    function closeResponsiveInspector() {
+      if (!document.body.classList.contains("inspector-open")) return;
+      document.body.classList.remove("inspector-open");
+      updateResponsiveControls();
+    }
+    function updateResponsiveControls() {
+      const inspectorOpen = document.body.classList.contains("inspector-open");
+      els2.responsiveInspectorToggle?.setAttribute("aria-expanded", String(inspectorOpen || ui2.mobileView === "tools"));
+      document.querySelectorAll(".mobile-view-tab").forEach((button) => {
+        const active = button.dataset.mobileView === ui2.mobileView;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+    }
+    function isResponsiveWorkspace() {
+      return window.matchMedia?.("(max-width: 1100px)")?.matches || window.innerWidth <= 1100;
+    }
+    function isMobileWorkspace() {
+      return window.matchMedia?.("(max-width: 768px)")?.matches || window.innerWidth <= 768;
+    }
+    function setupWorkspaceResizer(handle, side) {
+      if (!handle || !els2.workspace) return;
+      handle.addEventListener("pointerdown", (event) => {
+        if (window.matchMedia("(max-width: 1180px)").matches) return;
+        event.preventDefault();
+        handle.setPointerCapture(event.pointerId);
+        handle.classList.add("dragging");
+        const startX = event.clientX;
+        const startLayout = readWorkspaceLayout();
+        const onPointerMove = (moveEvent) => {
+          const delta = moveEvent.clientX - startX;
+          const nextLayout = resizeWorkspaceLayout(startLayout, side, delta);
+          applyWorkspaceLayout(nextLayout);
+        };
+        const onPointerUp = () => {
+          handle.classList.remove("dragging");
+          const nextLayout = readWorkspaceLayoutFromCss();
+          saveWorkspaceLayout(nextLayout);
+          window.removeEventListener("pointermove", onPointerMove);
+          window.removeEventListener("pointerup", onPointerUp);
+          window.removeEventListener("pointercancel", onPointerUp);
+        };
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+        window.addEventListener("pointercancel", onPointerUp);
+      });
+      handle.addEventListener("keydown", (event) => {
+        if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+        event.preventDefault();
+        const delta = event.key === "ArrowRight" ? 24 : -24;
+        const layout = resizeWorkspaceLayout(readWorkspaceLayout(), side, delta);
+        applyWorkspaceLayout(layout);
+        saveWorkspaceLayout(layout);
+      });
+    }
+    function resizeWorkspaceLayout(layout, side, delta) {
+      if (side === "left") return normalizeWorkspaceLayout({ ...layout, sidebar: layout.sidebar + delta });
+      return normalizeWorkspaceLayout({ ...layout, inspector: layout.inspector - delta });
+    }
+    function readWorkspaceLayout() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(WORKSPACE_LAYOUT_KEY) || "null");
+        return normalizeWorkspaceLayout({ ...DEFAULT_WORKSPACE_LAYOUT, ...parsed });
+      } catch {
+        return normalizeWorkspaceLayout(DEFAULT_WORKSPACE_LAYOUT);
+      }
+    }
+    function readWorkspaceLayoutFromCss() {
+      const styles = getComputedStyle(document.documentElement);
+      return normalizeWorkspaceLayout({
+        sidebar: Number.parseInt(styles.getPropertyValue("--sidebar-w"), 10),
+        inspector: Number.parseInt(styles.getPropertyValue("--inspector-w"), 10)
+      });
+    }
+    function saveWorkspaceLayout(layout) {
+      try {
+        localStorage.setItem(WORKSPACE_LAYOUT_KEY, JSON.stringify(normalizeWorkspaceLayout(layout)));
+      } catch {
+      }
+    }
+    function applyWorkspaceLayout(layout) {
+      const normalized = normalizeWorkspaceLayout(layout);
+      document.documentElement.style.setProperty("--sidebar-w", `${normalized.sidebar}px`);
+      document.documentElement.style.setProperty("--inspector-w", `${normalized.inspector}px`);
+    }
+    function normalizeWorkspaceLayout(layout) {
+      const workspaceWidth = els2.workspace?.clientWidth || window.innerWidth || 1280;
+      const handleWidth = 16;
+      const minEditor = 420;
+      const sidebar = clampNumber(layout.sidebar, 220, Math.min(440, workspaceWidth - 300 - minEditor - handleWidth));
+      const inspector = clampNumber(layout.inspector, 300, Math.min(560, workspaceWidth - sidebar - minEditor - handleWidth));
+      return { sidebar, inspector };
+    }
+    function clampNumber(value, min2, max2) {
+      const finiteValue = Number.isFinite(value) ? value : min2;
+      const safeMax = Math.max(min2, max2);
+      return Math.min(Math.max(finiteValue, min2), safeMax);
+    }
+    return {
+      bindEvents: bindEvents2,
+      restoreWorkspaceLayout,
+      setupWorkspaceResizers,
+      setupResponsiveWorkspace,
+      setMobileView,
+      openResponsiveTools,
+      closeResponsiveInspector,
+      isMobileWorkspace
+    };
   }
 
   // src/ui/theme.js
@@ -32771,15 +34158,18 @@ ${JSON.stringify(payload, null, 2)}`
     editorUndoInputActive: false,
     editorUndoInputTimer: null,
     editorUndoLocked: false,
+    editorMenuReturnFocus: null,
     persistPromise: Promise.resolve(),
     progressElement: null,
+    activeTasks: {},
+    mobileView: "editor",
+    pptPreviewReturnFocus: null,
+    trashModalReturnFocus: null,
     generatedDraft: "",
     pptDraft: "",
     pptDeckSpec: null
   };
   var els = {};
-  var WORKSPACE_LAYOUT_KEY = "mowen-nibi-workbench:workspace-layout";
-  var DEFAULT_WORKSPACE_LAYOUT = { sidebar: 284, inspector: 360 };
   var EDITOR_UNDO_LIMIT = 80;
   var aiClient = createAiClient({
     getSettings: () => state.settings || {},
@@ -32788,7 +34178,8 @@ ${JSON.stringify(payload, null, 2)}`
   var {
     callAiWithRetry,
     callAiJsonWithRepair,
-    friendlyAiErrorMessage: friendlyAiErrorMessage2
+    friendlyAiErrorMessage: friendlyAiErrorMessage2,
+    isAbortError: isAbortError2
   } = aiClient;
   var progressController = createProgressController({
     getCurrent: () => ui.progressElement,
@@ -32796,6 +34187,7 @@ ${JSON.stringify(payload, null, 2)}`
       ui.progressElement = element;
     }
   });
+  var layoutController = createLayoutController({ els, ui });
   var folderManager = createFolderManager({
     state,
     ui,
@@ -32855,15 +34247,23 @@ ${JSON.stringify(payload, null, 2)}`
     onSelectDocument: (docId) => {
       saveEditor(false);
       ui.selectedDocId = docId;
+      if (layoutController.isMobileWorkspace()) layoutController.setMobileView("editor");
       persist();
       eventBus.emit(EVENTS.RENDER_DOC_LIST);
       eventBus.emit(EVENTS.RENDER_EDITOR);
     },
     onCopyDocument: duplicateDocument,
+    onMoveDocument: moveDocument,
+    onMoveDocumentToTop: moveDocumentToTop,
+    onMoveDocumentToBottom: moveDocumentToBottom,
     onDeleteDocument: (docId) => {
       ui.selectedDocId = docId;
       deleteCurrentDocument();
-    }
+    },
+    onRestoreDocument: restoreDocument,
+    onRestoreAllTrash: restoreAllTrashDocuments,
+    onPermanentlyDeleteDocument: permanentlyDeleteDocument,
+    onClearTrash: clearTrashDocuments
   });
   var documentEditor = createDocumentEditor({
     state,
@@ -32897,6 +34297,71 @@ ${JSON.stringify(payload, null, 2)}`
     confirmLargeImport,
     withImportProgress: withProgress
   });
+  var trashController = createTrashController({
+    els,
+    ui,
+    renderTrashModal,
+    restoreAllTrashDocuments,
+    clearTrashDocuments,
+    getFocusableElements
+  });
+  var generationController = createGenerationController({
+    els,
+    ui,
+    state,
+    defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+    toast,
+    cancelActiveTask,
+    withCancelableTask,
+    throwIfTaskAborted,
+    getCurrentDoc,
+    getType,
+    resolveInvokedSkills,
+    formatSkillPrompt,
+    callAiWithRetry,
+    createDocument,
+    deriveGeneratedTitle,
+    recordEditorUndoPoint,
+    saveEditor,
+    getDocumentLocation,
+    getSelectionOrLine
+  });
+  var pptController = createPptController({
+    els,
+    ui,
+    state,
+    defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+    toast,
+    cancelActiveTask,
+    withCancelableTask,
+    withLoading,
+    withProgress,
+    throwIfTaskAborted,
+    setupFileDrop,
+    getCurrentDoc,
+    resolveInvokedSkills,
+    formatSkillPrompt,
+    callAiJsonWithRepair,
+    buildGuizangPptPrompt,
+    normalizePptSpec,
+    parseGuizangPptSpec,
+    renderPptSpecPreview,
+    inspectPptSpec,
+    formatPptQualityReport,
+    createPptxBlob,
+    sanitizeFileName,
+    getDownloadLocation,
+    downloadBlob,
+    filterImportableFilesBySize,
+    confirmLargeImport,
+    canImportFile,
+    readImportFileText,
+    buildUnsupportedFileMessage,
+    getFocusableElements,
+    savePptStyleAsSkill,
+    pptStyleOptions: PPT_STYLE_OPTIONS,
+    escapeHtml
+  });
   document.addEventListener("DOMContentLoaded", async () => {
     bindElements();
     bindEventBus();
@@ -32905,8 +34370,9 @@ ${JSON.stringify(payload, null, 2)}`
     bindEvents();
     initThemeToggle(els.themeToggle);
     hydrateStaticSelects();
-    restoreWorkspaceLayout();
-    setupWorkspaceResizers();
+    layoutController.restoreWorkspaceLayout();
+    layoutController.setupWorkspaceResizers();
+    layoutController.setupResponsiveWorkspace();
     selectFirstDocumentIfNeeded();
     render();
     if (window.lucide) {
@@ -32938,7 +34404,17 @@ ${JSON.stringify(payload, null, 2)}`
       "importInput",
       "exportDocBtn",
       "backupBtn",
+      "trashTopBtn",
+      "trashModal",
+      "trashModalCount",
+      "trashModalList",
+      "closeTrashModalBtn",
+      "restoreAllTrashBtn",
+      "clearTrashBtn",
       "apiTopBtn",
+      "responsiveInspectorToggle",
+      "mobileWorkspaceNav",
+      "responsiveBackdrop",
       "linkFolderBtn",
       "addFolderBtn",
       "folderCreateBox",
@@ -32949,6 +34425,7 @@ ${JSON.stringify(payload, null, 2)}`
       "searchInput",
       "docDropZone",
       "docList",
+      "trashCount",
       "titleInput",
       "typeSelect",
       "customTypeActions",
@@ -33006,6 +34483,9 @@ ${JSON.stringify(payload, null, 2)}`
       "styleDropZone",
       "styleFileInput",
       "styleExampleList",
+      "importSkillPackageBtn",
+      "exportSkillPackageBtn",
+      "importSkillPackageInput",
       "summarizeStyleBtn",
       "skillAnalysisInput",
       "skillAggregationInput",
@@ -33102,6 +34582,11 @@ ${JSON.stringify(payload, null, 2)}`
         }
       ];
     }
+    state.docs = state.docs.map((doc) => ({
+      ...doc,
+      deletedAt: doc.deletedAt || "",
+      deletedFromFolderId: doc.deletedFromFolderId || ""
+    }));
     state.settings = {
       provider: "openai-compatible",
       baseUrl: "",
@@ -33163,7 +34648,12 @@ ${JSON.stringify(payload, null, 2)}`
     setupFileDrop(els.docList, importDocumentFiles);
     els.exportDocBtn.addEventListener("click", exportCurrentDocument);
     els.backupBtn.addEventListener("click", exportWorkspaceBackup);
-    els.apiTopBtn.addEventListener("click", () => switchTab("api"));
+    trashController.bindEvents();
+    els.apiTopBtn.addEventListener("click", () => {
+      switchTab("api");
+      layoutController.openResponsiveTools();
+    });
+    layoutController.bindEvents();
     preventWindowFileNavigation();
     els.linkFolderBtn.addEventListener("click", linkRealFolder);
     els.addFolderBtn.addEventListener("click", () => {
@@ -33204,6 +34694,7 @@ ${JSON.stringify(payload, null, 2)}`
     });
     els.contentEditor.addEventListener("contextmenu", showEditorMenu);
     els.editorMenu.addEventListener("click", handleEditorMenuAction);
+    els.editorMenu.addEventListener("keydown", handleEditorMenuKeydown);
     document.addEventListener("click", (event) => {
       if (!event.target.closest("#editorMenu")) hideEditorMenu();
       if (!event.target.closest("#skillMentionPanel") && !event.target.matches("#generatePrompt, #contentEditor")) {
@@ -33212,8 +34703,9 @@ ${JSON.stringify(payload, null, 2)}`
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
-        hideEditorMenu();
+        hideEditorMenu({ restoreFocus: true });
         hideSkillMentionPanel();
+        layoutController.closeResponsiveInspector();
       }
     });
     els.generatePrompt.addEventListener("input", () => showSkillMentionsFor(els.generatePrompt));
@@ -33231,58 +34723,25 @@ ${JSON.stringify(payload, null, 2)}`
     const tabs = document.querySelector(".tabs");
     tabs.addEventListener("click", (event) => {
       const button = event.target.closest(".tab");
-      if (button) switchTab(button.dataset.tab);
+      if (button) {
+        switchTab(button.dataset.tab);
+        if (layoutController.isMobileWorkspace()) layoutController.setMobileView("tools");
+      }
     });
-    els.generateDocBtn.addEventListener("click", () => generateDocument("new"));
-    els.overwriteDraftBtn.addEventListener("click", () => generateDocument("overwrite"));
-    els.insertDraftBtn.addEventListener("click", () => generateDocument("insert"));
+    generationController.bindEvents();
     setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
     setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
-    setupFileDrop(els.pptPanel, importPptPromptFiles);
-    setupFileDrop(els.pptPromptInput, importPptPromptFiles);
-    setupFileDrop(els.pptDropZone, importPptPromptFiles);
-    els.generatePptBtn.addEventListener("click", generatePptDeck);
-    els.downloadPptBtn.addEventListener("click", downloadPptDeck);
-    els.savePptStyleBtn.addEventListener("click", savePptStyleAsSkill);
-    els.pptStyleSelect.addEventListener("change", updatePptStyleControls);
-    els.pptSlideCountSelect.addEventListener("input", () => {
-      if (ui.pptDeckSpec) renderPptQualityReport(ui.pptDeckSpec);
-    });
-    els.pptAutoSlideCountInput.addEventListener("change", () => {
-      updatePptSlideCountControls();
-      if (ui.pptDeckSpec) renderPptQualityReport(ui.pptDeckSpec);
-    });
-    els.pptOutput.addEventListener("input", () => {
-      ui.pptDraft = els.pptOutput.value;
-      try {
-        ui.pptDeckSpec = parseGuizangPptSpec(ui.pptDraft, {
-          title: els.pptTitleInput.value.trim(),
-          ...getPptOptions()
-        });
-        renderPptPreview(ui.pptDeckSpec);
-        renderPptQualityReport(ui.pptDeckSpec);
-      } catch {
-      }
-    });
-    els.openPptPreviewBtn.addEventListener("click", openPptPreviewModal);
-    els.closePptPreviewBtn.addEventListener("click", closePptPreviewModal);
-    els.pptPreviewOverlay.addEventListener("click", (event) => {
-      if (event.target === els.pptPreviewOverlay) closePptPreviewModal();
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && els.pptPreviewOverlay && !els.pptPreviewOverlay.hidden) {
-        closePptPreviewModal();
-      }
-    });
-    updatePptStyleControls();
-    updatePptSlideCountControls();
+    pptController.bindEvents();
     els.newStyleBtn.addEventListener("click", () => {
       ui.editingStyle = createEmptyStyle();
       eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
       hideSkillDetailMenu();
     });
     els.styleFileInput.addEventListener("change", importStyleExamples);
-    setupFileDrop(els.styleDropZone, importStyleExampleFiles);
+    setupFileDrop(els.styleDropZone, importStyleDropFiles);
+    els.importSkillPackageBtn.addEventListener("click", () => els.importSkillPackageInput.click());
+    els.exportSkillPackageBtn.addEventListener("click", exportSkillPackage);
+    els.importSkillPackageInput.addEventListener("change", importSkillPackages);
     els.summarizeStyleBtn.addEventListener("click", summarizeStyle);
     els.saveStyleBtn.addEventListener("click", saveStyle);
     els.deleteStyleBtn.addEventListener("click", deleteStyle);
@@ -33376,92 +34835,6 @@ ${JSON.stringify(payload, null, 2)}`
       if (docId) handler(docId);
     });
   }
-  function restoreWorkspaceLayout() {
-    const layout = readWorkspaceLayout();
-    applyWorkspaceLayout(layout);
-  }
-  function setupWorkspaceResizers() {
-    setupWorkspaceResizer(els.leftWorkspaceResizer, "left");
-    setupWorkspaceResizer(els.rightWorkspaceResizer, "right");
-  }
-  function setupWorkspaceResizer(handle, side) {
-    if (!handle || !els.workspace) return;
-    handle.addEventListener("pointerdown", (event) => {
-      if (window.matchMedia("(max-width: 1180px)").matches) return;
-      event.preventDefault();
-      handle.setPointerCapture(event.pointerId);
-      handle.classList.add("dragging");
-      const startX = event.clientX;
-      const startLayout = readWorkspaceLayout();
-      const onPointerMove = (moveEvent) => {
-        const delta = moveEvent.clientX - startX;
-        const nextLayout = resizeWorkspaceLayout(startLayout, side, delta);
-        applyWorkspaceLayout(nextLayout);
-      };
-      const onPointerUp = () => {
-        handle.classList.remove("dragging");
-        const nextLayout = readWorkspaceLayoutFromCss();
-        saveWorkspaceLayout(nextLayout);
-        window.removeEventListener("pointermove", onPointerMove);
-        window.removeEventListener("pointerup", onPointerUp);
-        window.removeEventListener("pointercancel", onPointerUp);
-      };
-      window.addEventListener("pointermove", onPointerMove);
-      window.addEventListener("pointerup", onPointerUp);
-      window.addEventListener("pointercancel", onPointerUp);
-    });
-    handle.addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-      event.preventDefault();
-      const delta = event.key === "ArrowRight" ? 24 : -24;
-      const layout = resizeWorkspaceLayout(readWorkspaceLayout(), side, delta);
-      applyWorkspaceLayout(layout);
-      saveWorkspaceLayout(layout);
-    });
-  }
-  function resizeWorkspaceLayout(layout, side, delta) {
-    if (side === "left") return normalizeWorkspaceLayout({ ...layout, sidebar: layout.sidebar + delta });
-    return normalizeWorkspaceLayout({ ...layout, inspector: layout.inspector - delta });
-  }
-  function readWorkspaceLayout() {
-    try {
-      const parsed = JSON.parse(localStorage.getItem(WORKSPACE_LAYOUT_KEY) || "null");
-      return normalizeWorkspaceLayout({ ...DEFAULT_WORKSPACE_LAYOUT, ...parsed });
-    } catch {
-      return normalizeWorkspaceLayout(DEFAULT_WORKSPACE_LAYOUT);
-    }
-  }
-  function readWorkspaceLayoutFromCss() {
-    const styles = getComputedStyle(document.documentElement);
-    return normalizeWorkspaceLayout({
-      sidebar: Number.parseInt(styles.getPropertyValue("--sidebar-w"), 10),
-      inspector: Number.parseInt(styles.getPropertyValue("--inspector-w"), 10)
-    });
-  }
-  function saveWorkspaceLayout(layout) {
-    try {
-      localStorage.setItem(WORKSPACE_LAYOUT_KEY, JSON.stringify(normalizeWorkspaceLayout(layout)));
-    } catch {
-    }
-  }
-  function applyWorkspaceLayout(layout) {
-    const normalized = normalizeWorkspaceLayout(layout);
-    document.documentElement.style.setProperty("--sidebar-w", `${normalized.sidebar}px`);
-    document.documentElement.style.setProperty("--inspector-w", `${normalized.inspector}px`);
-  }
-  function normalizeWorkspaceLayout(layout) {
-    const workspaceWidth = els.workspace?.clientWidth || window.innerWidth || 1280;
-    const handleWidth = 16;
-    const minEditor = 420;
-    const sidebar = clampNumber(layout.sidebar, 220, Math.min(440, workspaceWidth - 300 - minEditor - handleWidth));
-    const inspector = clampNumber(layout.inspector, 300, Math.min(560, workspaceWidth - sidebar - minEditor - handleWidth));
-    return { sidebar, inspector };
-  }
-  function clampNumber(value, min2, max2) {
-    const finiteValue = Number.isFinite(value) ? value : min2;
-    const safeMax = Math.max(min2, max2);
-    return Math.min(Math.max(finiteValue, min2), safeMax);
-  }
   function preventWindowFileNavigation() {
     ["dragover", "drop"].forEach((eventName) => {
       window.addEventListener(eventName, async (event) => {
@@ -33483,18 +34856,21 @@ ${JSON.stringify(payload, null, 2)}`
   async function importFilesFromGlobalDrop(files) {
     const target = getDropImportTarget(document.querySelector(".tab-panel.active")?.id || "");
     if (target === "ppt") {
-      await importPptPromptFiles(files);
+      await pptController.importPptPromptFiles(files);
       return;
     }
     if (target === "style") {
-      await importStyleExampleFiles(files);
+      await importStyleDropFiles(files);
       return;
     }
     await importDocumentFiles(files);
   }
+  function isSkillPackageFile(file) {
+    return /\.skill\.json$/i.test(file?.name || "");
+  }
   function hydrateStaticSelects() {
     renderTypeSelect();
-    hydratePptStyleSelect();
+    pptController.hydratePptStyleSelect();
   }
   function getDocumentTypes() {
     return [...DOCUMENT_TYPES, ...Array.isArray(state.customTypes) ? state.customTypes : []];
@@ -33529,19 +34905,6 @@ ${JSON.stringify(payload, null, 2)}`
       els.deleteTypeBtn.title = isActualCustomType ? "\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B" : "\u5148\u6DFB\u52A0\u6216\u9009\u62E9\u4E00\u4E2A\u81EA\u5B9A\u4E49\u7C7B\u578B";
     }
   }
-  function hydratePptStyleSelect() {
-    if (!els.pptStyleSelect) return;
-    const current = els.pptStyleSelect.value || "magazine";
-    const groups = [...new Set(PPT_STYLE_OPTIONS.map((option) => option.group))];
-    els.pptStyleSelect.innerHTML = groups.map((group2) => {
-      const options = PPT_STYLE_OPTIONS.filter((option) => option.group === group2).map(
-        (option) => `<option value="${option.id}" title="${escapeHtml(option.description)}">${escapeHtml(option.name)}</option>`
-      ).join("");
-      return `<optgroup label="${escapeHtml(group2)}">${options}</optgroup>`;
-    }).join("");
-    els.pptStyleSelect.value = PPT_STYLE_OPTIONS.some((option) => option.id === current) ? current : "magazine";
-    updatePptStyleControls();
-  }
   function render() {
     renderFolders();
     renderFolderSelect();
@@ -33553,7 +34916,9 @@ ${JSON.stringify(payload, null, 2)}`
     renderStyleEditor();
     renderStyleList();
     updateAiStatus();
-    els.storageLabel.textContent = `${state.docs.length} \u4EFD\u6587\u6863 / ${state.folders.length} \u4E2A\u6587\u4EF6\u5939`;
+    const activeDocCount = state.docs.filter((doc) => !doc.deletedAt).length;
+    const trashDocCount = state.docs.filter((doc) => doc.deletedAt).length;
+    els.storageLabel.textContent = `${activeDocCount} \u4EFD\u6587\u6863 / ${trashDocCount} \u4EFD\u5728\u5783\u573E\u7BB1 / ${state.folders.length} \u4E2A\u6587\u4EF6\u5939`;
     els.storageLabel.title = `\u5B58\u50A8\u4F4D\u7F6E\uFF1A${getStorageRootLocation()}`;
     if (window.lucide) {
       window.lucide.createIcons();
@@ -33571,10 +34936,16 @@ ${JSON.stringify(payload, null, 2)}`
   function renderDocList() {
     documentRenderer.renderDocList();
   }
+  function renderTrashModal() {
+    documentRenderer.renderTrashModal();
+  }
   function renderEditor() {
     documentRenderer.renderEditor();
     resetEditorUndoHistory();
-    hideSaveStatus();
+    const currentDoc = getCurrentDoc();
+    if (currentDoc && !currentDoc.deletedAt) {
+      hideSaveStatus();
+    }
     updateTypeControlState();
   }
   function renderApiSettings() {
@@ -33607,8 +34978,29 @@ ${JSON.stringify(payload, null, 2)}`
   function duplicateDocument(docId) {
     return documentManager.duplicateDocument(docId);
   }
+  function moveDocument(sourceId, targetId, placement) {
+    return documentManager.moveDocument(sourceId, targetId, placement);
+  }
+  function moveDocumentToTop(docId) {
+    return documentManager.moveDocumentToTop(docId);
+  }
+  function moveDocumentToBottom(docId) {
+    return documentManager.moveDocumentToBottom(docId);
+  }
   function deleteCurrentDocument() {
     return documentManager.deleteCurrentDocument();
+  }
+  function restoreDocument(docId) {
+    return documentManager.restoreDocument(docId);
+  }
+  function restoreAllTrashDocuments() {
+    return documentManager.restoreAllDocumentsFromTrash();
+  }
+  function permanentlyDeleteDocument(docId) {
+    return documentManager.permanentlyDeleteDocument(docId);
+  }
+  function clearTrashDocuments() {
+    return documentManager.clearTrashDocuments();
   }
   function queueEditorSave() {
     documentEditor.queueEditorSave();
@@ -33723,7 +35115,9 @@ ${JSON.stringify(payload, null, 2)}`
   }
   function showEditorMenu(event) {
     event.preventDefault();
+    ui.editorMenuReturnFocus = document.activeElement;
     els.contentEditor.focus();
+    syncEditorSkillSelectDefault();
     const panel = document.querySelector(".editor-panel");
     const panelRect = panel.getBoundingClientRect();
     const menu = els.editorMenu;
@@ -33735,9 +35129,24 @@ ${JSON.stringify(payload, null, 2)}`
     menu.style.left = `${left}px`;
     menu.style.top = `${top}px`;
     if (window.lucide) window.lucide.createIcons();
+    window.setTimeout(() => getEditorMenuItems()[0]?.focus(), 0);
   }
-  function hideEditorMenu() {
+  function syncEditorSkillSelectDefault() {
+    if (!els.editorSkillSelect) return;
+    const preferred = els.styleSelect?.value || getCurrentDoc()?.styleId || "";
+    const hasPreferred = Array.from(els.editorSkillSelect.options || []).some((option) => option.value === preferred);
+    if (hasPreferred) {
+      els.editorSkillSelect.value = preferred;
+    }
+  }
+  function hideEditorMenu(options = {}) {
+    if (!els.editorMenu || els.editorMenu.hidden) return;
     els.editorMenu.hidden = true;
+    if (options.restoreFocus) {
+      const target = ui.editorMenuReturnFocus?.isConnected ? ui.editorMenuReturnFocus : els.contentEditor;
+      target?.focus?.();
+    }
+    ui.editorMenuReturnFocus = null;
   }
   async function handleEditorMenuAction(event) {
     const button = event.target.closest("button[data-editor-action]");
@@ -33750,7 +35159,11 @@ ${JSON.stringify(payload, null, 2)}`
       deleteEditorText();
     }
     if (action === "rewrite") {
-      await rewriteSelection(button);
+      await generationController.rewriteSelection({
+        triggerButton: button,
+        mode: button.dataset.rewriteMode || "preserve",
+        skillId: els.editorSkillSelect.value
+      });
     }
     if (action === "format") {
       formatCurrentDocument();
@@ -33758,7 +35171,35 @@ ${JSON.stringify(payload, null, 2)}`
     if (action === "insert-skill") {
       insertSkillIntoEditor(els.editorSkillSelect.value);
     }
-    hideEditorMenu();
+    hideEditorMenu({ restoreFocus: true });
+  }
+  function handleEditorMenuKeydown(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      hideEditorMenu({ restoreFocus: true });
+      return;
+    }
+    if (event.key === "Tab") {
+      hideEditorMenu({ restoreFocus: false });
+      return;
+    }
+    if (event.target === els.editorSkillSelect) return;
+    const items = getEditorMenuItems();
+    const currentIndex = items.indexOf(document.activeElement);
+    const keyMap = {
+      ArrowDown: currentIndex < 0 ? 0 : (currentIndex + 1) % items.length,
+      ArrowRight: currentIndex < 0 ? 0 : (currentIndex + 1) % items.length,
+      ArrowUp: currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length,
+      ArrowLeft: currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length,
+      Home: 0,
+      End: items.length - 1
+    };
+    if (!(event.key in keyMap)) return;
+    event.preventDefault();
+    items[keyMap[event.key]]?.focus();
+  }
+  function getEditorMenuItems() {
+    return Array.from(els.editorMenu?.querySelectorAll("button[data-editor-action]") || []);
   }
   async function copyEditorText() {
     const selection = getSelectionOrLine();
@@ -34014,6 +35455,47 @@ ${JSON.stringify(payload, null, 2)}`
     downloadBlob(fileName, content, "application/json;charset=utf-8");
     toast(`\u5DF2\u5BFC\u51FA\u6267\u7B14\u4EBA\u89C4\u5219 JSON \u5230\uFF1A${getDownloadLocation(fileName)}`);
   }
+  function exportSkillPackage() {
+    const skill = syncEditingStyleFromInputs();
+    if (!skill.name.trim()) {
+      toast("\u8BF7\u5148\u586B\u5199\u6267\u7B14\u4EBA\u540D\u79F0", "warn");
+      return;
+    }
+    const packageData = skillManager.createSkillPackage(skill);
+    const fileName = `${sanitizeFileName(skill.name)}.skill.json`;
+    downloadBlob(fileName, JSON.stringify(packageData, null, 2), "application/json;charset=utf-8");
+    toast(`\u5DF2\u5BFC\u51FA\u6267\u7B14\u4EBA\u5305\u5230\uFF1A${getDownloadLocation(fileName)}`);
+  }
+  async function importSkillPackages(event) {
+    const files = Array.from(event.target.files || []);
+    await importSkillPackageFiles(files);
+    event.target.value = "";
+  }
+  async function importSkillPackageFiles(files) {
+    if (!files || files.length === 0) return;
+    let importedCount = 0;
+    const failed = [];
+    await withProgress(`\u6B63\u5728\u5BFC\u5165 ${files.length} \u4E2A\u6267\u7B14\u4EBA\u5305`, async (progress) => {
+      for (const [index, file] of files.entries()) {
+        progress.update(`\u6B63\u5728\u8BFB\u53D6 ${file.name}`, Math.round(index / files.length * 72) + 12);
+        try {
+          const payload = JSON.parse(await file.text());
+          skillManager.importSkillPackage(payload);
+          importedCount += 1;
+        } catch (error) {
+          failed.push(file.name);
+          console.warn("\u5BFC\u5165\u6267\u7B14\u4EBA\u5305\u5931\u8D25", file.name, error);
+        }
+      }
+      progress.update("\u6B63\u5728\u5237\u65B0\u6267\u7B14\u4EBA\u5217\u8868", 92);
+    });
+    if (importedCount > 0) {
+      switchTab("style");
+      toast(`\u5DF2\u5BFC\u5165 ${importedCount} \u4E2A\u6267\u7B14\u4EBA${failed.length ? `\uFF0C${failed.length} \u4E2A\u6587\u4EF6\u683C\u5F0F\u4E0D\u6B63\u786E` : ""}`);
+    } else {
+      toast("\u672A\u5BFC\u5165\u6267\u7B14\u4EBA\uFF0C\u8BF7\u68C0\u67E5 .skill.json \u6587\u4EF6\u683C\u5F0F", "warn");
+    }
+  }
   async function linkRealFolder() {
     return folderManager.linkRealFolder();
   }
@@ -34113,231 +35595,21 @@ ${JSON.stringify(payload, null, 2)}`
     eventBus.emit(EVENTS.RENDER_ALL);
     toast(`\u5DF2\u5220\u9664\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`, "warn");
   }
-  async function generateDocument(mode = "new") {
-    const userPrompt = els.generatePrompt.value.trim();
-    const docType = els.typeSelect.value || getCurrentDoc()?.type || "notice";
-    const currentDoc = getCurrentDoc();
-    if (!userPrompt) {
-      toast("\u8BF7\u8F93\u5165\u8D77\u8349\u63D0\u793A\u8BCD", "warn");
-      return;
-    }
-    if (mode === "overwrite" && !currentDoc) {
-      toast("\u8BF7\u5148\u9009\u62E9\u8981\u8986\u76D6\u7684\u5F53\u524D\u6587\u6863", "warn");
-      return;
-    }
-    const button = mode === "insert" ? els.insertDraftBtn : mode === "overwrite" ? els.overwriteDraftBtn : els.generateDocBtn;
-    await withLoading(button, "\u751F\u6210\u4E2D", async () => withProgress("AI \u6B63\u5728\u751F\u6210\u6587\u6863", async (progress) => {
-      progress.update("\u6B63\u5728\u6574\u7406\u63D0\u793A\u8BCD", 18);
-      const type = getType(docType);
-      const invokedSkills = resolveInvokedSkills(userPrompt, els.styleSelect.value);
-      const prompt = [
-        "\u8BF7\u6839\u636E\u7528\u6237\u63D0\u793A\u8BCD\u64B0\u5199\u4E00\u4EFD\u4E2D\u6587\u6B63\u5F0F\u6587\u6863\u3002",
-        `\u5F53\u524D\u6587\u6863\u7C7B\u578B\u53C2\u8003\uFF1A${type.name}`,
-        `\u5E38\u89C1\u7ED3\u6784\u53C2\u8003\uFF1A${type.structure}`,
-        formatSkillPrompt(invokedSkills),
-        `\u7528\u6237\u63D0\u793A\u8BCD\uFF1A
-${userPrompt}`,
-        "\u8F93\u51FA\u8981\u6C42\uFF1A\u4E25\u683C\u6267\u884C\u88AB @ \u8C03\u7528\u7684\u6267\u7B14\u4EBA\u89C4\u5219\uFF1B\u76F4\u63A5\u7ED9\u51FA\u5B8C\u6574\u6587\u6863\u5185\u5BB9\uFF0C\u4E0D\u8981\u89E3\u91CA\u5199\u4F5C\u8FC7\u7A0B\uFF1B\u6807\u9898\u7F6E\u4E8E\u9996\u884C\uFF1B\u4E8B\u5B9E\u4E0D\u660E\u5904\u4F7F\u7528\u53EF\u66FF\u6362\u5360\u4F4D\uFF0C\u4E0D\u8981\u7F16\u9020\u3002"
-      ].filter(Boolean).join("\n\n");
-      progress.update("\u6B63\u5728\u8BF7\u6C42 AI \u751F\u6210\u6B63\u6587", 42);
-      const content = await callAiWithRetry([
-        { role: "system", content: state.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT },
-        { role: "user", content: prompt }
-      ]);
-      progress.update("\u6B63\u5728\u5199\u5165\u6587\u6863", 82);
-      if (mode === "insert") {
-        const current = getCurrentDoc() || createDocument({ title: deriveGeneratedTitle(content, userPrompt), type: docType });
-        const separator = els.contentEditor.value.trim() ? "\n\n" : "";
-        recordEditorUndoPoint();
-        els.contentEditor.value = `${els.contentEditor.value}${separator}${content}`;
-        saveEditor(true);
-        ui.generatedDraft = content;
-        toast("\u5DF2\u63D2\u5165\u5230\u5F53\u524D\u6587\u6863");
-        return current;
-      }
-      if (mode === "overwrite") {
-        const title2 = deriveGeneratedTitle(content, userPrompt);
-        recordEditorUndoPoint();
-        els.titleInput.value = title2;
-        els.typeSelect.value = docType;
-        if (invokedSkills[0]?.id) els.styleSelect.value = invokedSkills[0].id;
-        els.contentEditor.value = content;
-        saveEditor(true);
-        ui.generatedDraft = content;
-        toast(`\u5DF2\u8986\u76D6\u5F53\u524D\u6587\u6863\uFF1A${getDocumentLocation(getCurrentDoc())}`);
-        return getCurrentDoc();
-      }
-      const title = deriveGeneratedTitle(content, userPrompt);
-      const newDoc = createDocument({
-        title,
-        type: docType,
-        styleId: invokedSkills[0]?.id || "",
-        content
-      });
-      ui.generatedDraft = content;
-      toast(`\u5DF2\u751F\u6210\u65B0\u6587\u6863\u5230\uFF1A${getDocumentLocation(newDoc)}`);
-      return null;
-    }));
-  }
-  async function generatePptDeck() {
-    const currentDoc = getCurrentDoc();
-    const title = els.pptTitleInput.value.trim() || els.titleInput.value.trim() || currentDoc?.title || "\u6F14\u793A\u7A3F";
-    const pptOptions = getPptOptions();
-    const material = els.pptPromptInput.value.trim() || [els.titleInput.value.trim(), els.contentEditor.value.trim()].filter(Boolean).join("\n\n");
-    if (!material) {
-      toast("\u8BF7\u8F93\u5165 PPT \u5185\u5BB9\u8981\u6C42\uFF0C\u6216\u5148\u6253\u5F00\u4E00\u7BC7\u53EF\u4F5C\u4E3A\u7D20\u6750\u7684\u6587\u6863", "warn");
-      return;
-    }
-    await withLoading(els.generatePptBtn, "\u751F\u6210\u4E2D", async () => withProgress("AI \u6B63\u5728\u751F\u6210\u539F\u751F PPTX \u8349\u7A3F", async (progress) => {
-      progress.update("\u6B63\u5728\u6574\u7406\u5F52\u85CF PPTX \u63D0\u793A\u8BCD", 20);
-      const invokedSkills = resolveInvokedSkills(material, "");
-      const prompt = buildGuizangPptPrompt({
-        title,
-        ...pptOptions,
-        content: material,
-        skillPrompt: formatSkillPrompt(invokedSkills)
-      });
-      progress.update("\u6B63\u5728\u8BF7\u6C42 AI \u751F\u6210\u5E7B\u706F\u7247\u7ED3\u6784", 44);
-      const output = await callAiJsonWithRepair([
-        { role: "system", content: state.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT },
-        { role: "user", content: prompt }
-      ], "PPT \u7ED3\u6784 JSON");
-      progress.update("\u6B63\u5728\u6E32\u67D3\u7ED3\u6784\u9884\u89C8", 74);
-      const spec = normalizePptSpec(output, {
-        title,
-        ...pptOptions,
-        content: material
-      });
-      ui.pptDeckSpec = spec;
-      ui.pptDraft = JSON.stringify(spec, null, 2);
-      els.pptOutput.value = ui.pptDraft;
-      renderPptPreview(spec);
-      renderPptQualityReport(spec);
-      toast(`\u5DF2\u751F\u6210 PPTX \u8349\u7A3F\uFF0C\u70B9\u51FB\u201C\u4E0B\u8F7D PPTX\u201D\u4FDD\u5B58\u5230\uFF1A${getDownloadLocation(`${sanitizeFileName(title)}.pptx`)}`);
-    }));
-  }
-  async function importPptPromptFiles(files) {
-    if (!files || files.length === 0) return;
-    const { accepted: importFiles, skipped: sizeSkipped } = await filterImportableFilesBySize(files, {
-      confirm: confirmLargeImport,
-      notify: toast
+  function getFocusableElements(root2) {
+    if (!root2) return [];
+    const selector = [
+      "a[href]",
+      "button:not([disabled])",
+      "textarea:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "[tabindex]:not([tabindex='-1'])"
+    ].join(",");
+    return Array.from(root2.querySelectorAll(selector)).filter((element) => {
+      if (element.closest("[hidden]")) return false;
+      const style = window.getComputedStyle(element);
+      return style.display !== "none" && style.visibility !== "hidden";
     });
-    if (importFiles.length === 0) return;
-    let importedCount = 0;
-    const skippedFiles = [];
-    const sections = [];
-    await withProgress(`\u6B63\u5728\u5BFC\u5165 ${importFiles.length} \u4E2A PPT \u7D20\u6750`, async (progress) => {
-      for (const [index, file] of importFiles.entries()) {
-        progress.update(`\u6B63\u5728\u8BFB\u53D6 ${file.name}`, Math.round(index / importFiles.length * 78) + 10);
-        if (!canImportFile(file.name)) {
-          skippedFiles.push(file.name);
-          continue;
-        }
-        try {
-          const text = await readImportFileText(file);
-          sections.push(`# ${file.name}
-
-${text}`);
-          importedCount += 1;
-        } catch (error) {
-          skippedFiles.push(file.name);
-          console.warn("\u5BFC\u5165 PPT \u7D20\u6750\u5931\u8D25", file.name, error);
-        }
-      }
-      progress.update("\u6B63\u5728\u5199\u5165 PPT \u5185\u5BB9\u533A", 92);
-    });
-    if (importedCount === 0 && skippedFiles.length > 0) {
-      toast(`\u672A\u6DFB\u52A0 PPT \u7D20\u6750\uFF1A${buildUnsupportedFileMessage(skippedFiles[0])}`, "warn");
-      return;
-    }
-    const existing = els.pptPromptInput.value.trim();
-    const addition = sections.join("\n\n---\n\n");
-    els.pptPromptInput.value = [existing, addition].filter(Boolean).join("\n\n---\n\n");
-    els.pptPromptInput.focus();
-    const skippedCount = skippedFiles.length + sizeSkipped.length;
-    toast(`\u5DF2\u6DFB\u52A0 ${importedCount} \u4EFD\u7D20\u6750\u5230 PPT \u5185\u5BB9\u533A${skippedCount ? `\uFF0C\u5DF2\u8DF3\u8FC7 ${skippedCount} \u4E2A\u6682\u4E0D\u652F\u6301\u3001\u8FC7\u5927\u6216\u8BFB\u53D6\u5931\u8D25\u7684\u6587\u4EF6` : ""}`);
-  }
-  async function downloadPptDeck() {
-    const jsonText = els.pptOutput.value.trim() || ui.pptDraft;
-    if (!jsonText && !ui.pptDeckSpec) {
-      toast("\u8BF7\u5148\u751F\u6210 PPTX \u8349\u7A3F", "warn");
-      return;
-    }
-    await withLoading(els.downloadPptBtn, "\u6253\u5305\u4E2D", async () => withProgress("\u6B63\u5728\u6253\u5305\u539F\u751F PPTX", async (progress) => {
-      progress.update("\u6B63\u5728\u8BFB\u53D6\u5E7B\u706F\u7247\u7ED3\u6784", 28);
-      const spec = jsonText ? parseGuizangPptSpec(jsonText, {
-        title: els.pptTitleInput.value.trim(),
-        ...getPptOptions()
-      }) : ui.pptDeckSpec;
-      const qualityReport = renderPptQualityReport(spec);
-      if (qualityReport?.errors?.length) {
-        toast("PPTX \u7ED3\u6784\u81EA\u68C0\u53D1\u73B0\u9700\u8981\u5904\u7406\u7684\u95EE\u9898\uFF0C\u4ECD\u5C06\u6309\u5F53\u524D\u7ED3\u6784\u5BFC\u51FA\u3002", "warn");
-      }
-      progress.update("\u6B63\u5728\u751F\u6210 PowerPoint \u6587\u4EF6", 68);
-      const fileName = `${sanitizeFileName(spec.title || els.pptTitleInput.value || "\u6F14\u793A\u7A3F")}.pptx`;
-      const blob = await createPptxBlob(spec);
-      downloadBlob(fileName, blob, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-      progress.update("\u5DF2\u5B8C\u6210", 100);
-      toast(`\u5DF2\u5BFC\u51FA\u539F\u751F PPTX \u5230\uFF1A${getDownloadLocation(fileName)}`);
-    }));
-  }
-  function renderPptPreview(spec) {
-    const html = spec ? renderPptSpecPreview(spec) : "";
-    if (els.pptPreview) els.pptPreview.srcdoc = html;
-    if (els.pptPreviewModalFrame) els.pptPreviewModalFrame.srcdoc = html;
-  }
-  function openPptPreviewModal() {
-    if (!ui.pptDeckSpec) {
-      toast("\u8BF7\u5148\u751F\u6210\u6216\u7C98\u8D34\u4E00\u4EFD\u53EF\u8BC6\u522B\u7684 PPT \u7ED3\u6784\uFF0C\u518D\u6253\u5F00\u653E\u5927\u9884\u89C8\u3002", "warn");
-      return;
-    }
-    renderPptPreview(ui.pptDeckSpec);
-    els.pptPreviewOverlay.hidden = false;
-    document.body.classList.add("modal-open");
-  }
-  function closePptPreviewModal() {
-    if (!els.pptPreviewOverlay) return;
-    els.pptPreviewOverlay.hidden = true;
-    document.body.classList.remove("modal-open");
-  }
-  function getPptOptions() {
-    const autoSlideCount = Boolean(els.pptAutoSlideCountInput?.checked);
-    const slideCount = autoSlideCount ? null : normalizePptSlideCount(els.pptSlideCountSelect.value);
-    return {
-      style: els.pptStyleSelect.value || "magazine",
-      styleDescription: els.pptCustomStyleInput.value.trim(),
-      autoSlideCount,
-      slideCount
-    };
-  }
-  function normalizePptSlideCount(value) {
-    const count = Number.parseInt(value, 10);
-    const normalized = Number.isFinite(count) ? Math.min(Math.max(count, 1), 40) : 12;
-    if (els.pptSlideCountSelect && String(els.pptSlideCountSelect.value) !== String(normalized)) {
-      els.pptSlideCountSelect.value = String(normalized);
-    }
-    return normalized;
-  }
-  function updatePptSlideCountControls() {
-    const autoSlideCount = Boolean(els.pptAutoSlideCountInput?.checked);
-    els.pptSlideCountSelect.disabled = autoSlideCount;
-    els.pptSlideCountSelect.title = autoSlideCount ? "\u5DF2\u542F\u7528\u81EA\u52A8\u9875\u6570\uFF0CAI \u4F1A\u6839\u636E\u7D20\u6750\u4FE1\u606F\u91CF\u81EA\u884C\u51B3\u5B9A\u9875\u6570" : "\u624B\u52A8\u6307\u5B9A PPT \u9875\u6570";
-  }
-  function updatePptStyleControls() {
-    const isCustom = els.pptStyleSelect.value === "custom";
-    els.pptCustomStyleField.classList.toggle("active", isCustom);
-    els.pptCustomStyleInput.placeholder = isCustom ? "\u63CF\u8FF0\u4F60\u5E0C\u671B\u590D\u7528\u7684 PPT \u98CE\u683C\u3001\u7248\u5F0F\u8282\u594F\u3001\u989C\u8272\u503E\u5411\u3001\u9002\u7528\u573A\u666F\u548C\u7981\u5FCC\u3002" : "\u53EF\u9009\uFF1A\u8865\u5145\u672C\u6B21 PPT \u7684\u98CE\u683C\u8981\u6C42\uFF0C\u4E5F\u53EF\u4EE5\u9009\u62E9\u201C\u81EA\u5B9A\u4E49\u98CE\u683C\u201D\u540E\u4FDD\u5B58\u4E3A PPT \u6267\u7B14\u4EBA\u3002";
-  }
-  function renderPptQualityReport(spec) {
-    if (!els.pptQualityReport || !spec) return null;
-    const report = inspectPptSpec(spec, getPptOptions());
-    els.pptQualityReport.textContent = formatPptQualityReport(report);
-    if (els.pptQualityStatus) {
-      els.pptQualityStatus.textContent = report.errors.length ? "\u9700\u5904\u7406" : report.warnings.length ? "\u6709\u63D0\u793A" : "\u901A\u8FC7";
-      els.pptQualityStatus.classList.toggle("ready", !report.errors.length);
-      els.pptQualityStatus.classList.toggle("error", report.errors.length > 0);
-    }
-    return report;
   }
   function savePptStyleAsSkill() {
     const styleDescription = els.pptCustomStyleInput.value.trim();
@@ -34409,51 +35681,21 @@ ${text}`);
       return null;
     }
   }
-  async function rewriteSelection(triggerButton = null) {
-    const selection = getSelectionOrLine();
-    if (!selection.text.trim()) {
-      toast("\u8BF7\u9009\u4E2D\u6216\u5B9A\u4F4D\u5230\u9700\u8981\u91CD\u5199\u7684\u6BB5\u843D", "warn");
-      return;
-    }
-    const doc = getCurrentDoc();
-    const type = getType(doc?.type || "custom");
-    const invokedSkills = resolveInvokedSkills(selection.text, els.styleSelect.value);
-    const runner = async () => {
-      await withProgress("AI \u6B63\u5728\u91CD\u5199\u6BB5\u843D", async (progress) => {
-        progress.update("\u6B63\u5728\u6574\u7406\u6BB5\u843D\u8981\u6C42", 20);
-        const prompt = [
-          "\u8BF7\u91CD\u5199\u4E0B\u9762\u8FD9\u6BB5\u6B63\u5F0F\u6587\u6863\u5185\u5BB9\u3002",
-          `\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`,
-          formatSkillPrompt(invokedSkills),
-          "\u8981\u6C42\uFF1A\u4FDD\u7559\u4E8B\u5B9E\u4FE1\u606F\uFF0C\u4E0D\u65B0\u589E\u672A\u63D0\u4F9B\u7684\u6570\u636E\uFF1B\u8868\u8FBE\u66F4\u89C4\u8303\u3001\u6E05\u695A\u3001\u6B63\u5F0F\uFF1B\u53EA\u8F93\u51FA\u91CD\u5199\u540E\u7684\u6BB5\u843D\u3002",
-          `\u539F\u6BB5\u843D\uFF1A
-${selection.text}`
-        ].filter(Boolean).join("\n\n");
-        progress.update("\u6B63\u5728\u8BF7\u6C42 AI \u6539\u5199", 45);
-        const rewritten = await callAiWithRetry([
-          { role: "system", content: state.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT },
-          { role: "user", content: prompt }
-        ]);
-        progress.update("\u6B63\u5728\u66FF\u6362\u9009\u4E2D\u6BB5\u843D", 85);
-        const content = els.contentEditor.value;
-        recordEditorUndoPoint();
-        els.contentEditor.value = content.slice(0, selection.start) + rewritten + content.slice(selection.end);
-        els.contentEditor.focus();
-        els.contentEditor.setSelectionRange(selection.start, selection.start + rewritten.length);
-        saveEditor(true);
-        toast("\u6BB5\u843D\u5DF2\u91CD\u5199");
-      });
-    };
-    if (triggerButton) {
-      await withLoading(triggerButton, "\u91CD\u5199\u4E2D", runner);
-    } else {
-      await runner();
-    }
-  }
   async function importStyleExamples(event) {
     const files = Array.from(event.target.files || []);
     await importStyleExampleFiles(files);
     event.target.value = "";
+  }
+  async function importStyleDropFiles(files) {
+    const fileList = Array.from(files || []);
+    const skillPackages = fileList.filter(isSkillPackageFile);
+    const exampleFiles = fileList.filter((file) => !isSkillPackageFile(file));
+    if (skillPackages.length > 0) {
+      await importSkillPackageFiles(skillPackages);
+    }
+    if (exampleFiles.length > 0) {
+      await importStyleExampleFiles(exampleFiles);
+    }
   }
   async function importStyleExampleFiles(files) {
     if (!files || files.length === 0) return;
@@ -34498,6 +35740,7 @@ ${selection.text}`
     toast(`\u5DF2\u6DFB\u52A0 ${importedCount} \u4EFD\u793A\u8303\u5230\uFF1A${getSkillTrainingLocation(ui.editingStyle)}${skippedCount ? `\uFF0C\u5DF2\u8DF3\u8FC7 ${skippedCount} \u4E2A\u6682\u4E0D\u652F\u6301\u3001\u8FC7\u5927\u6216\u8BFB\u53D6\u5931\u8D25\u7684\u6587\u4EF6` : ""}`);
   }
   async function summarizeStyle() {
+    if (cancelActiveTask("skill-build")) return;
     const style = syncEditingStyleFromInputs();
     if (!style.name.trim()) {
       toast("\u8BF7\u8F93\u5165\u6267\u7B14\u4EBA\u540D\u79F0", "warn");
@@ -34511,8 +35754,15 @@ ${selection.text}`
       const ok = window.confirm("\u53EA\u6709 1 \u7BC7\u793A\u8303\u53EA\u80FD\u751F\u6210\u4E0D\u7A33\u5B9A\u8349\u6848\uFF0C\u5EFA\u8BAE\u81F3\u5C11 3-5 \u7BC7\u3002\u662F\u5426\u7EE7\u7EED\u751F\u6210\u8349\u6848\uFF1F");
       if (!ok) return;
     }
-    await withLoading(els.summarizeStyleBtn, "\u751F\u6210\u4E2D", async () => withProgress("\u6B63\u5728\u6784\u5EFA\u591A\u6587\u6863\u6267\u7B14\u4EBA", async (progress) => {
-      const outputs = await skillBuilder.buildSkillWithAiChain(style, progress);
+    await withCancelableTask({
+      key: "skill-build",
+      button: els.summarizeStyleBtn,
+      busyText: "\u751F\u6210\u4E2D",
+      progressMessage: "\u6B63\u5728\u6784\u5EFA\u591A\u6587\u6863\u6267\u7B14\u4EBA",
+      cancelToast: "\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6784\u5EFA"
+    }, async ({ progress, signal }) => {
+      const outputs = await skillBuilder.buildSkillWithAiChain(style, progress, { signal });
+      throwIfTaskAborted(signal);
       const version = skillBuilder.createSkillVersion(style, outputs);
       progress.update("\u6B63\u5728\u4FDD\u5B58\u6267\u7B14\u4EBA\u7248\u672C", 92);
       style.analyses = outputs.analyses;
@@ -34534,12 +35784,13 @@ ${selection.text}`
       eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
       switchSkillDetailTab("workflow");
       toast(`\u5DF2\u751F\u6210 v${version.version} \u5E76\u4FDD\u5B58\u5230\uFF1A${getSkillLocation(ui.editingStyle)}`);
-    }));
+    });
   }
   function syncEditingStyleFromInputs() {
     return skillManager.syncEditingStyleFromInputs();
   }
   async function runSkillGenerationTest() {
+    if (cancelActiveTask("skill-test")) return;
     const style = syncEditingStyleFromInputs();
     const testPrompt = els.skillTestPrompt.value.trim();
     if (!style.skillJson.trim()) {
@@ -34550,10 +35801,17 @@ ${selection.text}`
       toast("\u8BF7\u8F93\u5165\u6D4B\u8BD5\u8D77\u8349\u4EFB\u52A1", "warn");
       return;
     }
-    await withLoading(els.runSkillTestBtn, "\u6D4B\u8BD5\u4E2D", async () => withProgress("\u6B63\u5728\u6D4B\u8BD5\u6267\u7B14\u4EBA\u751F\u6210\u6548\u679C", async (progress) => {
+    await withCancelableTask({
+      key: "skill-test",
+      button: els.runSkillTestBtn,
+      busyText: "\u6D4B\u8BD5\u4E2D",
+      progressMessage: "\u6B63\u5728\u6D4B\u8BD5\u6267\u7B14\u4EBA\u751F\u6210\u6548\u679C",
+      cancelToast: "\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6D4B\u8BD5"
+    }, async ({ progress, signal }) => {
       const skillJson = parseSkillJsonObject(style.skillJson, style);
-      progress.update("\u6B63\u5728\u751F\u6210\u6D4B\u8BD5\u6587\u6863", 35);
-      const outputs = await skillBuilder.testSkillOnGeneration(style, skillJson, { \u7528\u6237\u6D4B\u8BD5\u4EFB\u52A1: testPrompt });
+      progress.update("\u6B65\u9AA4 1/2\uFF1A\u6B63\u5728\u751F\u6210\u6D4B\u8BD5\u6587\u6863", 35);
+      const outputs = await skillBuilder.testSkillOnGeneration(style, skillJson, { \u7528\u6237\u6D4B\u8BD5\u4EFB\u52A1: testPrompt }, { signal });
+      throwIfTaskAborted(signal);
       progress.update("\u6B63\u5728\u4FDD\u5B58\u6D4B\u8BD5\u62A5\u544A", 86);
       style.lastTest = {
         id: createId(),
@@ -34567,7 +35825,7 @@ ${selection.text}`
       eventBus.emit(EVENTS.RENDER_SKILL_TEST);
       eventBus.emit(EVENTS.RENDER_SKILL_QUALITY);
       toast(`\u6D4B\u8BD5\u7ED3\u679C\u5DF2\u4FDD\u5B58\u5230\uFF1A${getSkillLocation(ui.editingStyle)} / \u6D4B\u8BD5\u8BB0\u5F55`);
-    }));
+    });
   }
   function saveSkillFeedback() {
     const style = syncEditingStyleFromInputs();
@@ -34665,8 +35923,95 @@ ${selection.text}`
       if (window.lucide) window.lucide.createIcons();
     }
   }
-  async function withProgress(message, task, initialProgress = 8) {
-    return progressController.withProgress(message, task, initialProgress);
+  async function withCancelableTask(options, task) {
+    const {
+      key,
+      button,
+      busyText = "\u5904\u7406\u4E2D",
+      progressMessage = "\u6B63\u5728\u5904\u7406",
+      cancelToast = "\u5DF2\u53D6\u6D88\u672C\u6B21\u64CD\u4F5C",
+      initialProgress = 8
+    } = options;
+    const controller = new AbortController();
+    const oldHtml = button?.innerHTML || "";
+    const activeTask = {
+      key,
+      controller,
+      button,
+      oldHtml,
+      cancelToast
+    };
+    ui.activeTasks[key] = activeTask;
+    setCancelableButton(button, `${busyText}\u2026\u70B9\u51FB\u53D6\u6D88`);
+    try {
+      return await withProgress(
+        progressMessage,
+        (progress) => task({
+          progress,
+          signal: controller.signal
+        }),
+        initialProgress,
+        {
+          signal: controller.signal,
+          onCancel: () => cancelActiveTask(key)
+        }
+      );
+    } catch (error) {
+      if (isTaskAbortError(error) || controller.signal.aborted) {
+        toast(cancelToast, "warn");
+        return null;
+      }
+      toast(friendlyAiErrorMessage2(error) || "\u64CD\u4F5C\u5931\u8D25", "error");
+      return null;
+    } finally {
+      if (ui.activeTasks[key] === activeTask) delete ui.activeTasks[key];
+      restoreCancelableButton(activeTask);
+    }
+  }
+  function cancelActiveTask(key) {
+    const activeTask = ui.activeTasks[key];
+    if (!activeTask) return false;
+    if (!activeTask.controller.signal.aborted) {
+      activeTask.controller.abort();
+    }
+    if (activeTask.button) {
+      activeTask.button.disabled = true;
+      activeTask.button.classList.remove("is-cancelable-task");
+      activeTask.button.classList.add("is-canceling-task");
+      activeTask.button.textContent = "\u6B63\u5728\u53D6\u6D88...";
+    }
+    return true;
+  }
+  function setCancelableButton(button, text) {
+    if (!button) return;
+    button.disabled = false;
+    button.textContent = text;
+    button.classList.add("is-cancelable-task");
+    button.classList.remove("is-canceling-task");
+    button.setAttribute("aria-busy", "true");
+  }
+  function restoreCancelableButton(activeTask) {
+    const button = activeTask?.button;
+    if (!button) return;
+    button.disabled = false;
+    button.innerHTML = activeTask.oldHtml;
+    button.classList.remove("is-cancelable-task", "is-canceling-task");
+    button.removeAttribute("aria-busy");
+    if (window.lucide) window.lucide.createIcons();
+  }
+  function throwIfTaskAborted(signal) {
+    if (signal?.aborted) {
+      const error = new Error("\u5DF2\u53D6\u6D88\u672C\u6B21\u64CD\u4F5C");
+      error.name = "AbortError";
+      error.code = "aborted";
+      throw error;
+    }
+  }
+  function isTaskAbortError(error) {
+    return isAbortError2?.(error) || error?.name === "AbortError" || error?.code === "aborted";
+  }
+  async function withProgress(message, task, initialProgress = 8, options = {}) {
+    return progressController.withProgress(message, task, initialProgress, options);
   }
   function confirmLargeImport(message) {
     return window.confirm(message);

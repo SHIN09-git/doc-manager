@@ -27,8 +27,10 @@ export function createSkillRenderer(deps) {
       '<option value="">无默认执笔人</option>',
       ...enabledStyles.map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)} · ${escapeHtml(style.name)}</option>`),
     ].join("");
-    els.editorSkillSelect.innerHTML = enabledStyles
-      .map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)}</option>`)
+    els.editorSkillSelect.innerHTML = [
+      '<option value="">不指定执笔人</option>',
+      ...enabledStyles.map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)}</option>`),
+    ]
       .join("");
   }
 

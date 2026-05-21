@@ -24,7 +24,7 @@ test("createDocxArrayBuffer creates a Word package without duplicated heading te
   assert.equal((documentXml.match(/关于培训安排的通知/g) || []).length, 1);
 });
 
-test("document list keeps current document first without reordering the rest", () => {
+test("document list keeps stored order when current selection changes", () => {
   const renderer = createDocumentRenderer({
     state: {
       folders: [],
@@ -46,6 +46,6 @@ test("document list keeps current document first without reordering the rest", (
 
   assert.deepEqual(
     renderer.getVisibleDocuments().map((doc) => doc.id),
-    ["b", "a", "c"],
+    ["a", "b", "c"],
   );
 });

@@ -22,6 +22,8 @@ import { createAiClient } from "./src/modules/ai/aiClient.js";
 import { createDocumentEditor } from "./src/modules/documents/documentEditor.js";
 import { createDocumentManager } from "./src/modules/documents/documentManager.js";
 import { createDocumentRenderer } from "./src/modules/documents/documentRenderer.js";
+import { createTrashController } from "./src/modules/documents/trashController.js";
+import { createGenerationController } from "./src/modules/generation/generationController.js";
 import { createBrowserFileSystemAdapter } from "./src/modules/folders/fileSystemAdapter.js";
 import { createFolderManager } from "./src/modules/folders/folderManager.js";
 import { createFolderRenderer } from "./src/modules/folders/folderRenderer.js";
@@ -34,12 +36,14 @@ import {
   PPT_STYLE_OPTIONS,
   renderPptSpecPreview,
 } from "./src/modules/ppt/guizangPpt.js";
+import { createPptController } from "./src/modules/ppt/pptController.js";
 import { createPptxBlob } from "./src/modules/ppt/pptxBuilder.js";
 import { createSkillBuilder } from "./src/modules/skills/skillBuilder.js";
 import { createSkillManager } from "./src/modules/skills/skillManager.js";
 import { createSkillRenderer } from "./src/modules/skills/skillRenderer.js";
 import { createProgressController } from "./src/ui/components/progress.js";
 import { showToast } from "./src/ui/components/toast.js";
+import { createLayoutController } from "./src/ui/layoutController.js";
 import { initThemeToggle } from "./src/ui/theme.js";
 import {
   clone,
@@ -69,16 +73,19 @@ const ui = {
   editorUndoInputActive: false,
   editorUndoInputTimer: null,
   editorUndoLocked: false,
+  editorMenuReturnFocus: null,
   persistPromise: Promise.resolve(),
   progressElement: null,
+  activeTasks: {},
+  mobileView: "editor",
+  pptPreviewReturnFocus: null,
+  trashModalReturnFocus: null,
   generatedDraft: "",
   pptDraft: "",
   pptDeckSpec: null,
 };
 
 const els = {};
-const WORKSPACE_LAYOUT_KEY = "mowen-nibi-workbench:workspace-layout";
-const DEFAULT_WORKSPACE_LAYOUT = { sidebar: 284, inspector: 360 };
 const EDITOR_UNDO_LIMIT = 80;
 const aiClient = createAiClient({
   getSettings: () => state.settings || {},
@@ -88,6 +95,7 @@ const {
   callAiWithRetry,
   callAiJsonWithRepair,
   friendlyAiErrorMessage,
+  isAbortError,
 } = aiClient;
 const progressController = createProgressController({
   getCurrent: () => ui.progressElement,
@@ -95,6 +103,7 @@ const progressController = createProgressController({
     ui.progressElement = element;
   },
 });
+const layoutController = createLayoutController({ els, ui });
 const folderManager = createFolderManager({
   state,
   ui,
@@ -154,15 +163,23 @@ const documentRenderer = createDocumentRenderer({
   onSelectDocument: (docId) => {
     saveEditor(false);
     ui.selectedDocId = docId;
+    if (layoutController.isMobileWorkspace()) layoutController.setMobileView("editor");
     persist();
     eventBus.emit(EVENTS.RENDER_DOC_LIST);
     eventBus.emit(EVENTS.RENDER_EDITOR);
   },
   onCopyDocument: duplicateDocument,
+  onMoveDocument: moveDocument,
+  onMoveDocumentToTop: moveDocumentToTop,
+  onMoveDocumentToBottom: moveDocumentToBottom,
   onDeleteDocument: (docId) => {
     ui.selectedDocId = docId;
     deleteCurrentDocument();
   },
+  onRestoreDocument: restoreDocument,
+  onRestoreAllTrash: restoreAllTrashDocuments,
+  onPermanentlyDeleteDocument: permanentlyDeleteDocument,
+  onClearTrash: clearTrashDocuments,
 });
 const documentEditor = createDocumentEditor({
   state,
@@ -196,6 +213,71 @@ const documentManager = createDocumentManager({
   confirmLargeImport,
   withImportProgress: withProgress,
 });
+const trashController = createTrashController({
+  els,
+  ui,
+  renderTrashModal,
+  restoreAllTrashDocuments,
+  clearTrashDocuments,
+  getFocusableElements,
+});
+const generationController = createGenerationController({
+  els,
+  ui,
+  state,
+  defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+  toast,
+  cancelActiveTask,
+  withCancelableTask,
+  throwIfTaskAborted,
+  getCurrentDoc,
+  getType,
+  resolveInvokedSkills,
+  formatSkillPrompt,
+  callAiWithRetry,
+  createDocument,
+  deriveGeneratedTitle,
+  recordEditorUndoPoint,
+  saveEditor,
+  getDocumentLocation,
+  getSelectionOrLine,
+});
+const pptController = createPptController({
+  els,
+  ui,
+  state,
+  defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+  toast,
+  cancelActiveTask,
+  withCancelableTask,
+  withLoading,
+  withProgress,
+  throwIfTaskAborted,
+  setupFileDrop,
+  getCurrentDoc,
+  resolveInvokedSkills,
+  formatSkillPrompt,
+  callAiJsonWithRepair,
+  buildGuizangPptPrompt,
+  normalizePptSpec,
+  parseGuizangPptSpec,
+  renderPptSpecPreview,
+  inspectPptSpec,
+  formatPptQualityReport,
+  createPptxBlob,
+  sanitizeFileName,
+  getDownloadLocation,
+  downloadBlob,
+  filterImportableFilesBySize,
+  confirmLargeImport,
+  canImportFile,
+  readImportFileText,
+  buildUnsupportedFileMessage,
+  getFocusableElements,
+  savePptStyleAsSkill,
+  pptStyleOptions: PPT_STYLE_OPTIONS,
+  escapeHtml,
+});
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindElements();
@@ -205,8 +287,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindEvents();
   initThemeToggle(els.themeToggle);
   hydrateStaticSelects();
-  restoreWorkspaceLayout();
-  setupWorkspaceResizers();
+  layoutController.restoreWorkspaceLayout();
+  layoutController.setupWorkspaceResizers();
+  layoutController.setupResponsiveWorkspace();
   selectFirstDocumentIfNeeded();
   render();
   if (window.lucide) {
@@ -240,7 +323,17 @@ function bindElements() {
     "importInput",
     "exportDocBtn",
     "backupBtn",
+    "trashTopBtn",
+    "trashModal",
+    "trashModalCount",
+    "trashModalList",
+    "closeTrashModalBtn",
+    "restoreAllTrashBtn",
+    "clearTrashBtn",
     "apiTopBtn",
+    "responsiveInspectorToggle",
+    "mobileWorkspaceNav",
+    "responsiveBackdrop",
     "linkFolderBtn",
     "addFolderBtn",
     "folderCreateBox",
@@ -251,6 +344,7 @@ function bindElements() {
     "searchInput",
     "docDropZone",
     "docList",
+    "trashCount",
     "titleInput",
     "typeSelect",
     "customTypeActions",
@@ -308,6 +402,9 @@ function bindElements() {
     "styleDropZone",
     "styleFileInput",
     "styleExampleList",
+    "importSkillPackageBtn",
+    "exportSkillPackageBtn",
+    "importSkillPackageInput",
     "summarizeStyleBtn",
     "skillAnalysisInput",
     "skillAggregationInput",
@@ -410,6 +507,11 @@ function initializeMissingData() {
       },
     ];
   }
+  state.docs = state.docs.map((doc) => ({
+    ...doc,
+    deletedAt: doc.deletedAt || "",
+    deletedFromFolderId: doc.deletedFromFolderId || "",
+  }));
 
   state.settings = {
     provider: "openai-compatible",
@@ -485,7 +587,12 @@ function bindEvents() {
   setupFileDrop(els.docList, importDocumentFiles);
   els.exportDocBtn.addEventListener("click", exportCurrentDocument);
   els.backupBtn.addEventListener("click", exportWorkspaceBackup);
-  els.apiTopBtn.addEventListener("click", () => switchTab("api"));
+  trashController.bindEvents();
+  els.apiTopBtn.addEventListener("click", () => {
+    switchTab("api");
+    layoutController.openResponsiveTools();
+  });
+  layoutController.bindEvents();
   preventWindowFileNavigation();
 
   els.linkFolderBtn.addEventListener("click", linkRealFolder);
@@ -528,6 +635,7 @@ function bindEvents() {
   });
   els.contentEditor.addEventListener("contextmenu", showEditorMenu);
   els.editorMenu.addEventListener("click", handleEditorMenuAction);
+  els.editorMenu.addEventListener("keydown", handleEditorMenuKeydown);
   document.addEventListener("click", (event) => {
     if (!event.target.closest("#editorMenu")) hideEditorMenu();
     if (!event.target.closest("#skillMentionPanel") && !event.target.matches("#generatePrompt, #contentEditor")) {
@@ -536,8 +644,9 @@ function bindEvents() {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      hideEditorMenu();
+      hideEditorMenu({ restoreFocus: true });
       hideSkillMentionPanel();
+      layoutController.closeResponsiveInspector();
     }
   });
   els.generatePrompt.addEventListener("input", () => showSkillMentionsFor(els.generatePrompt));
@@ -556,53 +665,16 @@ function bindEvents() {
   const tabs = document.querySelector(".tabs");
   tabs.addEventListener("click", (event) => {
     const button = event.target.closest(".tab");
-    if (button) switchTab(button.dataset.tab);
+    if (button) {
+      switchTab(button.dataset.tab);
+      if (layoutController.isMobileWorkspace()) layoutController.setMobileView("tools");
+    }
   });
 
-  els.generateDocBtn.addEventListener("click", () => generateDocument("new"));
-  els.overwriteDraftBtn.addEventListener("click", () => generateDocument("overwrite"));
-  els.insertDraftBtn.addEventListener("click", () => generateDocument("insert"));
+  generationController.bindEvents();
   setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
   setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
-  setupFileDrop(els.pptPanel, importPptPromptFiles);
-  setupFileDrop(els.pptPromptInput, importPptPromptFiles);
-  setupFileDrop(els.pptDropZone, importPptPromptFiles);
-  els.generatePptBtn.addEventListener("click", generatePptDeck);
-  els.downloadPptBtn.addEventListener("click", downloadPptDeck);
-  els.savePptStyleBtn.addEventListener("click", savePptStyleAsSkill);
-  els.pptStyleSelect.addEventListener("change", updatePptStyleControls);
-  els.pptSlideCountSelect.addEventListener("input", () => {
-    if (ui.pptDeckSpec) renderPptQualityReport(ui.pptDeckSpec);
-  });
-  els.pptAutoSlideCountInput.addEventListener("change", () => {
-    updatePptSlideCountControls();
-    if (ui.pptDeckSpec) renderPptQualityReport(ui.pptDeckSpec);
-  });
-  els.pptOutput.addEventListener("input", () => {
-    ui.pptDraft = els.pptOutput.value;
-    try {
-      ui.pptDeckSpec = parseGuizangPptSpec(ui.pptDraft, {
-        title: els.pptTitleInput.value.trim(),
-        ...getPptOptions(),
-      });
-      renderPptPreview(ui.pptDeckSpec);
-      renderPptQualityReport(ui.pptDeckSpec);
-    } catch {
-      // Allow users to keep editing partial JSON without interrupting input.
-    }
-  });
-  els.openPptPreviewBtn.addEventListener("click", openPptPreviewModal);
-  els.closePptPreviewBtn.addEventListener("click", closePptPreviewModal);
-  els.pptPreviewOverlay.addEventListener("click", (event) => {
-    if (event.target === els.pptPreviewOverlay) closePptPreviewModal();
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && els.pptPreviewOverlay && !els.pptPreviewOverlay.hidden) {
-      closePptPreviewModal();
-    }
-  });
-  updatePptStyleControls();
-  updatePptSlideCountControls();
+  pptController.bindEvents();
 
   els.newStyleBtn.addEventListener("click", () => {
     ui.editingStyle = createEmptyStyle();
@@ -610,7 +682,10 @@ function bindEvents() {
     hideSkillDetailMenu();
   });
   els.styleFileInput.addEventListener("change", importStyleExamples);
-  setupFileDrop(els.styleDropZone, importStyleExampleFiles);
+  setupFileDrop(els.styleDropZone, importStyleDropFiles);
+  els.importSkillPackageBtn.addEventListener("click", () => els.importSkillPackageInput.click());
+  els.exportSkillPackageBtn.addEventListener("click", exportSkillPackage);
+  els.importSkillPackageInput.addEventListener("change", importSkillPackages);
   els.summarizeStyleBtn.addEventListener("click", summarizeStyle);
   els.saveStyleBtn.addEventListener("click", saveStyle);
   els.deleteStyleBtn.addEventListener("click", deleteStyle);
@@ -708,103 +783,6 @@ function setupDocumentDrop(target, handler) {
   });
 }
 
-function restoreWorkspaceLayout() {
-  const layout = readWorkspaceLayout();
-  applyWorkspaceLayout(layout);
-}
-
-function setupWorkspaceResizers() {
-  setupWorkspaceResizer(els.leftWorkspaceResizer, "left");
-  setupWorkspaceResizer(els.rightWorkspaceResizer, "right");
-}
-
-function setupWorkspaceResizer(handle, side) {
-  if (!handle || !els.workspace) return;
-  handle.addEventListener("pointerdown", (event) => {
-    if (window.matchMedia("(max-width: 1180px)").matches) return;
-    event.preventDefault();
-    handle.setPointerCapture(event.pointerId);
-    handle.classList.add("dragging");
-    const startX = event.clientX;
-    const startLayout = readWorkspaceLayout();
-    const onPointerMove = (moveEvent) => {
-      const delta = moveEvent.clientX - startX;
-      const nextLayout = resizeWorkspaceLayout(startLayout, side, delta);
-      applyWorkspaceLayout(nextLayout);
-    };
-    const onPointerUp = () => {
-      handle.classList.remove("dragging");
-      const nextLayout = readWorkspaceLayoutFromCss();
-      saveWorkspaceLayout(nextLayout);
-      window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("pointerup", onPointerUp);
-      window.removeEventListener("pointercancel", onPointerUp);
-    };
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-  });
-  handle.addEventListener("keydown", (event) => {
-    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
-    event.preventDefault();
-    const delta = event.key === "ArrowRight" ? 24 : -24;
-    const layout = resizeWorkspaceLayout(readWorkspaceLayout(), side, delta);
-    applyWorkspaceLayout(layout);
-    saveWorkspaceLayout(layout);
-  });
-}
-
-function resizeWorkspaceLayout(layout, side, delta) {
-  if (side === "left") return normalizeWorkspaceLayout({ ...layout, sidebar: layout.sidebar + delta });
-  return normalizeWorkspaceLayout({ ...layout, inspector: layout.inspector - delta });
-}
-
-function readWorkspaceLayout() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(WORKSPACE_LAYOUT_KEY) || "null");
-    return normalizeWorkspaceLayout({ ...DEFAULT_WORKSPACE_LAYOUT, ...parsed });
-  } catch {
-    return normalizeWorkspaceLayout(DEFAULT_WORKSPACE_LAYOUT);
-  }
-}
-
-function readWorkspaceLayoutFromCss() {
-  const styles = getComputedStyle(document.documentElement);
-  return normalizeWorkspaceLayout({
-    sidebar: Number.parseInt(styles.getPropertyValue("--sidebar-w"), 10),
-    inspector: Number.parseInt(styles.getPropertyValue("--inspector-w"), 10),
-  });
-}
-
-function saveWorkspaceLayout(layout) {
-  try {
-    localStorage.setItem(WORKSPACE_LAYOUT_KEY, JSON.stringify(normalizeWorkspaceLayout(layout)));
-  } catch {
-    // Layout preferences are optional; ignore storage failures.
-  }
-}
-
-function applyWorkspaceLayout(layout) {
-  const normalized = normalizeWorkspaceLayout(layout);
-  document.documentElement.style.setProperty("--sidebar-w", `${normalized.sidebar}px`);
-  document.documentElement.style.setProperty("--inspector-w", `${normalized.inspector}px`);
-}
-
-function normalizeWorkspaceLayout(layout) {
-  const workspaceWidth = els.workspace?.clientWidth || window.innerWidth || 1280;
-  const handleWidth = 16;
-  const minEditor = 420;
-  const sidebar = clampNumber(layout.sidebar, 220, Math.min(440, workspaceWidth - 300 - minEditor - handleWidth));
-  const inspector = clampNumber(layout.inspector, 300, Math.min(560, workspaceWidth - sidebar - minEditor - handleWidth));
-  return { sidebar, inspector };
-}
-
-function clampNumber(value, min, max) {
-  const finiteValue = Number.isFinite(value) ? value : min;
-  const safeMax = Math.max(min, max);
-  return Math.min(Math.max(finiteValue, min), safeMax);
-}
-
 function preventWindowFileNavigation() {
   ["dragover", "drop"].forEach((eventName) => {
     window.addEventListener(eventName, async (event) => {
@@ -829,19 +807,23 @@ function isDocumentDrag(event) {
 async function importFilesFromGlobalDrop(files) {
   const target = getDropImportTarget(document.querySelector(".tab-panel.active")?.id || "");
   if (target === "ppt") {
-    await importPptPromptFiles(files);
+    await pptController.importPptPromptFiles(files);
     return;
   }
   if (target === "style") {
-    await importStyleExampleFiles(files);
+    await importStyleDropFiles(files);
     return;
   }
   await importDocumentFiles(files);
 }
 
+function isSkillPackageFile(file) {
+  return /\.skill\.json$/i.test(file?.name || "");
+}
+
 function hydrateStaticSelects() {
   renderTypeSelect();
-  hydratePptStyleSelect();
+  pptController.hydratePptStyleSelect();
 }
 
 function getDocumentTypes() {
@@ -884,25 +866,6 @@ function updateTypeControlState() {
   }
 }
 
-function hydratePptStyleSelect() {
-  if (!els.pptStyleSelect) return;
-  const current = els.pptStyleSelect.value || "magazine";
-  const groups = [...new Set(PPT_STYLE_OPTIONS.map((option) => option.group))];
-  els.pptStyleSelect.innerHTML = groups
-    .map((group) => {
-      const options = PPT_STYLE_OPTIONS.filter((option) => option.group === group)
-        .map(
-          (option) =>
-            `<option value="${option.id}" title="${escapeHtml(option.description)}">${escapeHtml(option.name)}</option>`,
-        )
-        .join("");
-      return `<optgroup label="${escapeHtml(group)}">${options}</optgroup>`;
-    })
-    .join("");
-  els.pptStyleSelect.value = PPT_STYLE_OPTIONS.some((option) => option.id === current) ? current : "magazine";
-  updatePptStyleControls();
-}
-
 function render() {
   renderFolders();
   renderFolderSelect();
@@ -914,7 +877,9 @@ function render() {
   renderStyleEditor();
   renderStyleList();
   updateAiStatus();
-  els.storageLabel.textContent = `${state.docs.length} 份文档 / ${state.folders.length} 个文件夹`;
+  const activeDocCount = state.docs.filter((doc) => !doc.deletedAt).length;
+  const trashDocCount = state.docs.filter((doc) => doc.deletedAt).length;
+  els.storageLabel.textContent = `${activeDocCount} 份文档 / ${trashDocCount} 份在垃圾箱 / ${state.folders.length} 个文件夹`;
   els.storageLabel.title = `存储位置：${getStorageRootLocation()}`;
   if (window.lucide) {
     window.lucide.createIcons();
@@ -937,10 +902,17 @@ function renderDocList() {
   documentRenderer.renderDocList();
 }
 
+function renderTrashModal() {
+  documentRenderer.renderTrashModal();
+}
+
 function renderEditor() {
   documentRenderer.renderEditor();
   resetEditorUndoHistory();
-  hideSaveStatus();
+  const currentDoc = getCurrentDoc();
+  if (currentDoc && !currentDoc.deletedAt) {
+    hideSaveStatus();
+  }
   updateTypeControlState();
 }
 
@@ -998,8 +970,36 @@ function duplicateDocument(docId) {
   return documentManager.duplicateDocument(docId);
 }
 
+function moveDocument(sourceId, targetId, placement) {
+  return documentManager.moveDocument(sourceId, targetId, placement);
+}
+
+function moveDocumentToTop(docId) {
+  return documentManager.moveDocumentToTop(docId);
+}
+
+function moveDocumentToBottom(docId) {
+  return documentManager.moveDocumentToBottom(docId);
+}
+
 function deleteCurrentDocument() {
   return documentManager.deleteCurrentDocument();
+}
+
+function restoreDocument(docId) {
+  return documentManager.restoreDocument(docId);
+}
+
+function restoreAllTrashDocuments() {
+  return documentManager.restoreAllDocumentsFromTrash();
+}
+
+function permanentlyDeleteDocument(docId) {
+  return documentManager.permanentlyDeleteDocument(docId);
+}
+
+function clearTrashDocuments() {
+  return documentManager.clearTrashDocuments();
 }
 
 function queueEditorSave() {
@@ -1135,7 +1135,9 @@ function toggleReplaceBar() {
 
 function showEditorMenu(event) {
   event.preventDefault();
+  ui.editorMenuReturnFocus = document.activeElement;
   els.contentEditor.focus();
+  syncEditorSkillSelectDefault();
   const panel = document.querySelector(".editor-panel");
   const panelRect = panel.getBoundingClientRect();
   const menu = els.editorMenu;
@@ -1148,10 +1150,26 @@ function showEditorMenu(event) {
   menu.style.left = `${left}px`;
   menu.style.top = `${top}px`;
   if (window.lucide) window.lucide.createIcons();
+  window.setTimeout(() => getEditorMenuItems()[0]?.focus(), 0);
 }
 
-function hideEditorMenu() {
+function syncEditorSkillSelectDefault() {
+  if (!els.editorSkillSelect) return;
+  const preferred = els.styleSelect?.value || getCurrentDoc()?.styleId || "";
+  const hasPreferred = Array.from(els.editorSkillSelect.options || []).some((option) => option.value === preferred);
+  if (hasPreferred) {
+    els.editorSkillSelect.value = preferred;
+  }
+}
+
+function hideEditorMenu(options = {}) {
+  if (!els.editorMenu || els.editorMenu.hidden) return;
   els.editorMenu.hidden = true;
+  if (options.restoreFocus) {
+    const target = ui.editorMenuReturnFocus?.isConnected ? ui.editorMenuReturnFocus : els.contentEditor;
+    target?.focus?.();
+  }
+  ui.editorMenuReturnFocus = null;
 }
 
 async function handleEditorMenuAction(event) {
@@ -1165,7 +1183,11 @@ async function handleEditorMenuAction(event) {
     deleteEditorText();
   }
   if (action === "rewrite") {
-    await rewriteSelection(button);
+    await generationController.rewriteSelection({
+      triggerButton: button,
+      mode: button.dataset.rewriteMode || "preserve",
+      skillId: els.editorSkillSelect.value,
+    });
   }
   if (action === "format") {
     formatCurrentDocument();
@@ -1173,7 +1195,37 @@ async function handleEditorMenuAction(event) {
   if (action === "insert-skill") {
     insertSkillIntoEditor(els.editorSkillSelect.value);
   }
-  hideEditorMenu();
+  hideEditorMenu({ restoreFocus: true });
+}
+
+function handleEditorMenuKeydown(event) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    hideEditorMenu({ restoreFocus: true });
+    return;
+  }
+  if (event.key === "Tab") {
+    hideEditorMenu({ restoreFocus: false });
+    return;
+  }
+  if (event.target === els.editorSkillSelect) return;
+  const items = getEditorMenuItems();
+  const currentIndex = items.indexOf(document.activeElement);
+  const keyMap = {
+    ArrowDown: currentIndex < 0 ? 0 : (currentIndex + 1) % items.length,
+    ArrowRight: currentIndex < 0 ? 0 : (currentIndex + 1) % items.length,
+    ArrowUp: currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length,
+    ArrowLeft: currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length,
+    Home: 0,
+    End: items.length - 1,
+  };
+  if (!(event.key in keyMap)) return;
+  event.preventDefault();
+  items[keyMap[event.key]]?.focus();
+}
+
+function getEditorMenuItems() {
+  return Array.from(els.editorMenu?.querySelectorAll("button[data-editor-action]") || []);
 }
 
 async function copyEditorText() {
@@ -1457,6 +1509,50 @@ function exportSkillJson() {
   toast(`已导出执笔人规则 JSON 到：${getDownloadLocation(fileName)}`);
 }
 
+function exportSkillPackage() {
+  const skill = syncEditingStyleFromInputs();
+  if (!skill.name.trim()) {
+    toast("请先填写执笔人名称", "warn");
+    return;
+  }
+  const packageData = skillManager.createSkillPackage(skill);
+  const fileName = `${sanitizeFileName(skill.name)}.skill.json`;
+  downloadBlob(fileName, JSON.stringify(packageData, null, 2), "application/json;charset=utf-8");
+  toast(`已导出执笔人包到：${getDownloadLocation(fileName)}`);
+}
+
+async function importSkillPackages(event) {
+  const files = Array.from(event.target.files || []);
+  await importSkillPackageFiles(files);
+  event.target.value = "";
+}
+
+async function importSkillPackageFiles(files) {
+  if (!files || files.length === 0) return;
+  let importedCount = 0;
+  const failed = [];
+  await withProgress(`正在导入 ${files.length} 个执笔人包`, async (progress) => {
+    for (const [index, file] of files.entries()) {
+      progress.update(`正在读取 ${file.name}`, Math.round((index / files.length) * 72) + 12);
+      try {
+        const payload = JSON.parse(await file.text());
+        skillManager.importSkillPackage(payload);
+        importedCount += 1;
+      } catch (error) {
+        failed.push(file.name);
+        console.warn("导入执笔人包失败", file.name, error);
+      }
+    }
+    progress.update("正在刷新执笔人列表", 92);
+  });
+  if (importedCount > 0) {
+    switchTab("style");
+    toast(`已导入 ${importedCount} 个执笔人${failed.length ? `，${failed.length} 个文件格式不正确` : ""}`);
+  } else {
+    toast("未导入执笔人，请检查 .skill.json 文件格式", "warn");
+  }
+}
+
 async function linkRealFolder() {
   return folderManager.linkRealFolder();
 }
@@ -1577,258 +1673,21 @@ function deleteCustomType() {
   toast(`已删除文档类型：${type.name}`, "warn");
 }
 
-async function generateDocument(mode = "new") {
-  const userPrompt = els.generatePrompt.value.trim();
-  const docType = els.typeSelect.value || getCurrentDoc()?.type || "notice";
-  const currentDoc = getCurrentDoc();
-  if (!userPrompt) {
-    toast("请输入起草提示词", "warn");
-    return;
-  }
-  if (mode === "overwrite" && !currentDoc) {
-    toast("请先选择要覆盖的当前文档", "warn");
-    return;
-  }
-
-  const button = mode === "insert" ? els.insertDraftBtn : mode === "overwrite" ? els.overwriteDraftBtn : els.generateDocBtn;
-  await withLoading(button, "生成中", async () => withProgress("AI 正在生成文档", async (progress) => {
-    progress.update("正在整理提示词", 18);
-    const type = getType(docType);
-    const invokedSkills = resolveInvokedSkills(userPrompt, els.styleSelect.value);
-    const prompt = [
-      "请根据用户提示词撰写一份中文正式文档。",
-      `当前文档类型参考：${type.name}`,
-      `常见结构参考：${type.structure}`,
-      formatSkillPrompt(invokedSkills),
-      `用户提示词：\n${userPrompt}`,
-      "输出要求：严格执行被 @ 调用的执笔人规则；直接给出完整文档内容，不要解释写作过程；标题置于首行；事实不明处使用可替换占位，不要编造。",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-    progress.update("正在请求 AI 生成正文", 42);
-    const content = await callAiWithRetry([
-      { role: "system", content: state.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT },
-      { role: "user", content: prompt },
-    ]);
-    progress.update("正在写入文档", 82);
-
-    if (mode === "insert") {
-      const current = getCurrentDoc() || createDocument({ title: deriveGeneratedTitle(content, userPrompt), type: docType });
-      const separator = els.contentEditor.value.trim() ? "\n\n" : "";
-      recordEditorUndoPoint();
-      els.contentEditor.value = `${els.contentEditor.value}${separator}${content}`;
-      saveEditor(true);
-      ui.generatedDraft = content;
-      toast("已插入到当前文档");
-      return current;
-    }
-
-    if (mode === "overwrite") {
-      const title = deriveGeneratedTitle(content, userPrompt);
-      recordEditorUndoPoint();
-      els.titleInput.value = title;
-      els.typeSelect.value = docType;
-      if (invokedSkills[0]?.id) els.styleSelect.value = invokedSkills[0].id;
-      els.contentEditor.value = content;
-      saveEditor(true);
-      ui.generatedDraft = content;
-      toast(`已覆盖当前文档：${getDocumentLocation(getCurrentDoc())}`);
-      return getCurrentDoc();
-    }
-
-    const title = deriveGeneratedTitle(content, userPrompt);
-    const newDoc = createDocument({
-      title,
-      type: docType,
-      styleId: invokedSkills[0]?.id || "",
-      content,
-    });
-    ui.generatedDraft = content;
-    toast(`已生成新文档到：${getDocumentLocation(newDoc)}`);
-    return null;
-  }));
-}
-
-async function generatePptDeck() {
-  const currentDoc = getCurrentDoc();
-  const title = els.pptTitleInput.value.trim() || els.titleInput.value.trim() || currentDoc?.title || "演示稿";
-  const pptOptions = getPptOptions();
-  const material =
-    els.pptPromptInput.value.trim() ||
-    [els.titleInput.value.trim(), els.contentEditor.value.trim()].filter(Boolean).join("\n\n");
-  if (!material) {
-    toast("请输入 PPT 内容要求，或先打开一篇可作为素材的文档", "warn");
-    return;
-  }
-
-  await withLoading(els.generatePptBtn, "生成中", async () => withProgress("AI 正在生成原生 PPTX 草稿", async (progress) => {
-    progress.update("正在整理归藏 PPTX 提示词", 20);
-    const invokedSkills = resolveInvokedSkills(material, "");
-    const prompt = buildGuizangPptPrompt({
-      title,
-      ...pptOptions,
-      content: material,
-      skillPrompt: formatSkillPrompt(invokedSkills),
-    });
-    progress.update("正在请求 AI 生成幻灯片结构", 44);
-    const output = await callAiJsonWithRepair([
-      { role: "system", content: state.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT },
-      { role: "user", content: prompt },
-    ], "PPT 结构 JSON");
-    progress.update("正在渲染结构预览", 74);
-    const spec = normalizePptSpec(output, {
-      title,
-      ...pptOptions,
-      content: material,
-    });
-    ui.pptDeckSpec = spec;
-    ui.pptDraft = JSON.stringify(spec, null, 2);
-    els.pptOutput.value = ui.pptDraft;
-    renderPptPreview(spec);
-    renderPptQualityReport(spec);
-    toast(`已生成 PPTX 草稿，点击“下载 PPTX”保存到：${getDownloadLocation(`${sanitizeFileName(title)}.pptx`)}`);
-  }));
-}
-
-async function importPptPromptFiles(files) {
-  if (!files || files.length === 0) return;
-  const { accepted: importFiles, skipped: sizeSkipped } = await filterImportableFilesBySize(files, {
-    confirm: confirmLargeImport,
-    notify: toast,
+function getFocusableElements(root) {
+  if (!root) return [];
+  const selector = [
+    "a[href]",
+    "button:not([disabled])",
+    "textarea:not([disabled])",
+    "input:not([disabled])",
+    "select:not([disabled])",
+    "[tabindex]:not([tabindex='-1'])",
+  ].join(",");
+  return Array.from(root.querySelectorAll(selector)).filter((element) => {
+    if (element.closest("[hidden]")) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden";
   });
-  if (importFiles.length === 0) return;
-
-  let importedCount = 0;
-  const skippedFiles = [];
-  const sections = [];
-
-  await withProgress(`正在导入 ${importFiles.length} 个 PPT 素材`, async (progress) => {
-    for (const [index, file] of importFiles.entries()) {
-      progress.update(`正在读取 ${file.name}`, Math.round((index / importFiles.length) * 78) + 10);
-      if (!canImportFile(file.name)) {
-        skippedFiles.push(file.name);
-        continue;
-      }
-      try {
-        const text = await readImportFileText(file);
-        sections.push(`# ${file.name}\n\n${text}`);
-        importedCount += 1;
-      } catch (error) {
-        skippedFiles.push(file.name);
-        console.warn("导入 PPT 素材失败", file.name, error);
-      }
-    }
-    progress.update("正在写入 PPT 内容区", 92);
-  });
-
-  if (importedCount === 0 && skippedFiles.length > 0) {
-    toast(`未添加 PPT 素材：${buildUnsupportedFileMessage(skippedFiles[0])}`, "warn");
-    return;
-  }
-
-  const existing = els.pptPromptInput.value.trim();
-  const addition = sections.join("\n\n---\n\n");
-  els.pptPromptInput.value = [existing, addition].filter(Boolean).join("\n\n---\n\n");
-  els.pptPromptInput.focus();
-  const skippedCount = skippedFiles.length + sizeSkipped.length;
-  toast(`已添加 ${importedCount} 份素材到 PPT 内容区${skippedCount ? `，已跳过 ${skippedCount} 个暂不支持、过大或读取失败的文件` : ""}`);
-}
-
-async function downloadPptDeck() {
-  const jsonText = els.pptOutput.value.trim() || ui.pptDraft;
-  if (!jsonText && !ui.pptDeckSpec) {
-    toast("请先生成 PPTX 草稿", "warn");
-    return;
-  }
-  await withLoading(els.downloadPptBtn, "打包中", async () => withProgress("正在打包原生 PPTX", async (progress) => {
-    progress.update("正在读取幻灯片结构", 28);
-    const spec = jsonText
-      ? parseGuizangPptSpec(jsonText, {
-          title: els.pptTitleInput.value.trim(),
-          ...getPptOptions(),
-        })
-      : ui.pptDeckSpec;
-    const qualityReport = renderPptQualityReport(spec);
-    if (qualityReport?.errors?.length) {
-      toast("PPTX 结构自检发现需要处理的问题，仍将按当前结构导出。", "warn");
-    }
-    progress.update("正在生成 PowerPoint 文件", 68);
-    const fileName = `${sanitizeFileName(spec.title || els.pptTitleInput.value || "演示稿")}.pptx`;
-    const blob = await createPptxBlob(spec);
-    downloadBlob(fileName, blob, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-    progress.update("已完成", 100);
-    toast(`已导出原生 PPTX 到：${getDownloadLocation(fileName)}`);
-  }));
-}
-
-function renderPptPreview(spec) {
-  const html = spec ? renderPptSpecPreview(spec) : "";
-  if (els.pptPreview) els.pptPreview.srcdoc = html;
-  if (els.pptPreviewModalFrame) els.pptPreviewModalFrame.srcdoc = html;
-}
-
-function openPptPreviewModal() {
-  if (!ui.pptDeckSpec) {
-    toast("请先生成或粘贴一份可识别的 PPT 结构，再打开放大预览。", "warn");
-    return;
-  }
-  renderPptPreview(ui.pptDeckSpec);
-  els.pptPreviewOverlay.hidden = false;
-  document.body.classList.add("modal-open");
-}
-
-function closePptPreviewModal() {
-  if (!els.pptPreviewOverlay) return;
-  els.pptPreviewOverlay.hidden = true;
-  document.body.classList.remove("modal-open");
-}
-
-function getPptOptions() {
-  const autoSlideCount = Boolean(els.pptAutoSlideCountInput?.checked);
-  const slideCount = autoSlideCount ? null : normalizePptSlideCount(els.pptSlideCountSelect.value);
-  return {
-    style: els.pptStyleSelect.value || "magazine",
-    styleDescription: els.pptCustomStyleInput.value.trim(),
-    autoSlideCount,
-    slideCount,
-  };
-}
-
-function normalizePptSlideCount(value) {
-  const count = Number.parseInt(value, 10);
-  const normalized = Number.isFinite(count) ? Math.min(Math.max(count, 1), 40) : 12;
-  if (els.pptSlideCountSelect && String(els.pptSlideCountSelect.value) !== String(normalized)) {
-    els.pptSlideCountSelect.value = String(normalized);
-  }
-  return normalized;
-}
-
-function updatePptSlideCountControls() {
-  const autoSlideCount = Boolean(els.pptAutoSlideCountInput?.checked);
-  els.pptSlideCountSelect.disabled = autoSlideCount;
-  els.pptSlideCountSelect.title = autoSlideCount
-    ? "已启用自动页数，AI 会根据素材信息量自行决定页数"
-    : "手动指定 PPT 页数";
-}
-
-function updatePptStyleControls() {
-  const isCustom = els.pptStyleSelect.value === "custom";
-  els.pptCustomStyleField.classList.toggle("active", isCustom);
-  els.pptCustomStyleInput.placeholder = isCustom
-    ? "描述你希望复用的 PPT 风格、版式节奏、颜色倾向、适用场景和禁忌。"
-    : "可选：补充本次 PPT 的风格要求，也可以选择“自定义风格”后保存为 PPT 执笔人。";
-}
-
-function renderPptQualityReport(spec) {
-  if (!els.pptQualityReport || !spec) return null;
-  const report = inspectPptSpec(spec, getPptOptions());
-  els.pptQualityReport.textContent = formatPptQualityReport(report);
-  if (els.pptQualityStatus) {
-    els.pptQualityStatus.textContent = report.errors.length ? "需处理" : report.warnings.length ? "有提示" : "通过";
-    els.pptQualityStatus.classList.toggle("ready", !report.errors.length);
-    els.pptQualityStatus.classList.toggle("error", report.errors.length > 0);
-  }
-  return report;
 }
 
 function savePptStyleAsSkill() {
@@ -1907,53 +1766,22 @@ function savePptStyleAsSkill() {
   }
 }
 
-async function rewriteSelection(triggerButton = null) {
-  const selection = getSelectionOrLine();
-  if (!selection.text.trim()) {
-    toast("请选中或定位到需要重写的段落", "warn");
-    return;
-  }
-  const doc = getCurrentDoc();
-  const type = getType(doc?.type || "custom");
-  const invokedSkills = resolveInvokedSkills(selection.text, els.styleSelect.value);
-  const runner = async () => {
-    await withProgress("AI 正在重写段落", async (progress) => {
-      progress.update("正在整理段落要求", 20);
-      const prompt = [
-      "请重写下面这段正式文档内容。",
-      `文档类型：${type.name}`,
-      formatSkillPrompt(invokedSkills),
-      "要求：保留事实信息，不新增未提供的数据；表达更规范、清楚、正式；只输出重写后的段落。",
-      `原段落：\n${selection.text}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-      progress.update("正在请求 AI 改写", 45);
-      const rewritten = await callAiWithRetry([
-      { role: "system", content: state.settings.systemPrompt || DEFAULT_SYSTEM_PROMPT },
-      { role: "user", content: prompt },
-    ]);
-      progress.update("正在替换选中段落", 85);
-      const content = els.contentEditor.value;
-      recordEditorUndoPoint();
-      els.contentEditor.value = content.slice(0, selection.start) + rewritten + content.slice(selection.end);
-      els.contentEditor.focus();
-      els.contentEditor.setSelectionRange(selection.start, selection.start + rewritten.length);
-      saveEditor(true);
-      toast("段落已重写");
-    });
-  };
-  if (triggerButton) {
-    await withLoading(triggerButton, "重写中", runner);
-  } else {
-    await runner();
-  }
-}
-
 async function importStyleExamples(event) {
   const files = Array.from(event.target.files || []);
   await importStyleExampleFiles(files);
   event.target.value = "";
+}
+
+async function importStyleDropFiles(files) {
+  const fileList = Array.from(files || []);
+  const skillPackages = fileList.filter(isSkillPackageFile);
+  const exampleFiles = fileList.filter((file) => !isSkillPackageFile(file));
+  if (skillPackages.length > 0) {
+    await importSkillPackageFiles(skillPackages);
+  }
+  if (exampleFiles.length > 0) {
+    await importStyleExampleFiles(exampleFiles);
+  }
 }
 
 async function importStyleExampleFiles(files) {
@@ -2001,6 +1829,7 @@ async function importStyleExampleFiles(files) {
 }
 
 async function summarizeStyle() {
+  if (cancelActiveTask("skill-build")) return;
   const style = syncEditingStyleFromInputs();
   if (!style.name.trim()) {
     toast("请输入执笔人名称", "warn");
@@ -2015,8 +1844,15 @@ async function summarizeStyle() {
     if (!ok) return;
   }
 
-  await withLoading(els.summarizeStyleBtn, "生成中", async () => withProgress("正在构建多文档执笔人", async (progress) => {
-    const outputs = await skillBuilder.buildSkillWithAiChain(style, progress);
+  await withCancelableTask({
+    key: "skill-build",
+    button: els.summarizeStyleBtn,
+    busyText: "生成中",
+    progressMessage: "正在构建多文档执笔人",
+    cancelToast: "已取消本次执笔人构建",
+  }, async ({ progress, signal }) => {
+    const outputs = await skillBuilder.buildSkillWithAiChain(style, progress, { signal });
+    throwIfTaskAborted(signal);
     const version = skillBuilder.createSkillVersion(style, outputs);
     progress.update("正在保存执笔人版本", 92);
     style.analyses = outputs.analyses;
@@ -2038,7 +1874,7 @@ async function summarizeStyle() {
     eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
     switchSkillDetailTab("workflow");
     toast(`已生成 v${version.version} 并保存到：${getSkillLocation(ui.editingStyle)}`);
-  }));
+  });
 }
 
 function syncEditingStyleFromInputs() {
@@ -2046,6 +1882,7 @@ function syncEditingStyleFromInputs() {
 }
 
 async function runSkillGenerationTest() {
+  if (cancelActiveTask("skill-test")) return;
   const style = syncEditingStyleFromInputs();
   const testPrompt = els.skillTestPrompt.value.trim();
   if (!style.skillJson.trim()) {
@@ -2057,10 +1894,17 @@ async function runSkillGenerationTest() {
     return;
   }
 
-  await withLoading(els.runSkillTestBtn, "测试中", async () => withProgress("正在测试执笔人生成效果", async (progress) => {
+  await withCancelableTask({
+    key: "skill-test",
+    button: els.runSkillTestBtn,
+    busyText: "测试中",
+    progressMessage: "正在测试执笔人生成效果",
+    cancelToast: "已取消本次执笔人测试",
+  }, async ({ progress, signal }) => {
     const skillJson = parseSkillJsonObject(style.skillJson, style);
-    progress.update("正在生成测试文档", 35);
-    const outputs = await skillBuilder.testSkillOnGeneration(style, skillJson, { 用户测试任务: testPrompt });
+    progress.update("步骤 1/2：正在生成测试文档", 35);
+    const outputs = await skillBuilder.testSkillOnGeneration(style, skillJson, { 用户测试任务: testPrompt }, { signal });
+    throwIfTaskAborted(signal);
     progress.update("正在保存测试报告", 86);
     style.lastTest = {
       id: createId(),
@@ -2074,7 +1918,7 @@ async function runSkillGenerationTest() {
     eventBus.emit(EVENTS.RENDER_SKILL_TEST);
     eventBus.emit(EVENTS.RENDER_SKILL_QUALITY);
     toast(`测试结果已保存到：${getSkillLocation(ui.editingStyle)} / 测试记录`);
-  }));
+  });
 }
 
 function saveSkillFeedback() {
@@ -2184,8 +2028,101 @@ async function withLoading(button, text, task) {
   }
 }
 
-async function withProgress(message, task, initialProgress = 8) {
-  return progressController.withProgress(message, task, initialProgress);
+async function withCancelableTask(options, task) {
+  const {
+    key,
+    button,
+    busyText = "处理中",
+    progressMessage = "正在处理",
+    cancelToast = "已取消本次操作",
+    initialProgress = 8,
+  } = options;
+  const controller = new AbortController();
+  const oldHtml = button?.innerHTML || "";
+  const activeTask = {
+    key,
+    controller,
+    button,
+    oldHtml,
+    cancelToast,
+  };
+  ui.activeTasks[key] = activeTask;
+  setCancelableButton(button, `${busyText}…点击取消`);
+  try {
+    return await withProgress(
+      progressMessage,
+      (progress) => task({
+        progress,
+        signal: controller.signal,
+      }),
+      initialProgress,
+      {
+        signal: controller.signal,
+        onCancel: () => cancelActiveTask(key),
+      },
+    );
+  } catch (error) {
+    if (isTaskAbortError(error) || controller.signal.aborted) {
+      toast(cancelToast, "warn");
+      return null;
+    }
+    toast(friendlyAiErrorMessage(error) || "操作失败", "error");
+    return null;
+  } finally {
+    if (ui.activeTasks[key] === activeTask) delete ui.activeTasks[key];
+    restoreCancelableButton(activeTask);
+  }
+}
+
+function cancelActiveTask(key) {
+  const activeTask = ui.activeTasks[key];
+  if (!activeTask) return false;
+  if (!activeTask.controller.signal.aborted) {
+    activeTask.controller.abort();
+  }
+  if (activeTask.button) {
+    activeTask.button.disabled = true;
+    activeTask.button.classList.remove("is-cancelable-task");
+    activeTask.button.classList.add("is-canceling-task");
+    activeTask.button.textContent = "正在取消...";
+  }
+  return true;
+}
+
+function setCancelableButton(button, text) {
+  if (!button) return;
+  button.disabled = false;
+  button.textContent = text;
+  button.classList.add("is-cancelable-task");
+  button.classList.remove("is-canceling-task");
+  button.setAttribute("aria-busy", "true");
+}
+
+function restoreCancelableButton(activeTask) {
+  const button = activeTask?.button;
+  if (!button) return;
+  button.disabled = false;
+  button.innerHTML = activeTask.oldHtml;
+  button.classList.remove("is-cancelable-task", "is-canceling-task");
+  button.removeAttribute("aria-busy");
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function throwIfTaskAborted(signal) {
+  if (signal?.aborted) {
+    const error = new Error("已取消本次操作");
+    error.name = "AbortError";
+    error.code = "aborted";
+    throw error;
+  }
+}
+
+function isTaskAbortError(error) {
+  return isAbortError?.(error) || error?.name === "AbortError" || error?.code === "aborted";
+}
+
+async function withProgress(message, task, initialProgress = 8, options = {}) {
+  return progressController.withProgress(message, task, initialProgress, options);
 }
 
 function confirmLargeImport(message) {

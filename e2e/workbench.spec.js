@@ -68,7 +68,7 @@ test("exports the current document as Word by default", async ({ page }) => {
   expect(download.suggestedFilename()).toMatch(/word-export\.docx$/);
 });
 
-test("keeps the clicked document first without reordering other documents", async ({ page }) => {
+test("selecting a document highlights it without reordering the list", async ({ page }) => {
   const snapshot = {
     selectedFolderId: "all",
     selectedDocId: "doc-a",
@@ -93,9 +93,258 @@ test("keeps the clicked document first without reordering other documents", asyn
   await page.goto("/index.html");
   await page.locator(".doc-item", { hasText: "C 文档" }).click();
 
+  await expect(page.locator("#titleInput")).toHaveValue("C 文档");
+  await expect(page.locator(".doc-item").nth(0)).toContainText("A 文档");
+  await expect(page.locator(".doc-item").nth(1)).toContainText("B 文档");
+  await expect(page.locator(".doc-item").nth(2)).toContainText("C 文档");
+  await expect(page.locator(".doc-item", { hasText: "C 文档" })).toHaveClass(/active/);
+});
+
+test("document more menu can move documents to top and bottom", async ({ page }) => {
+  const snapshot = {
+    selectedFolderId: "all",
+    selectedDocId: "doc-a",
+    folders: [{ id: "folder-1", name: "标签", kind: "tag", color: "#0f766e" }],
+    docs: [
+      { id: "doc-a", title: "A 文档", type: "notice", folderId: "folder-1", content: "A" },
+      { id: "doc-b", title: "B 文档", type: "notice", folderId: "folder-1", content: "B" },
+      { id: "doc-c", title: "C 文档", type: "notice", folderId: "folder-1", content: "C" },
+    ],
+    styles: [],
+    settings: {},
+  };
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, state }) => {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, state: snapshot },
+  );
+
+  await page.goto("/index.html");
+  await page.locator(".doc-item", { hasText: "C 文档" }).hover();
+  await page.locator(".doc-item", { hasText: "C 文档" }).locator("[data-doc-menu] summary").click();
+  await page.locator(".doc-item", { hasText: "C 文档" }).locator("[data-move-doc-top]").click();
+
   await expect(page.locator(".doc-item").nth(0)).toContainText("C 文档");
   await expect(page.locator(".doc-item").nth(1)).toContainText("A 文档");
   await expect(page.locator(".doc-item").nth(2)).toContainText("B 文档");
+
+  await page.locator(".doc-item", { hasText: "C 文档" }).hover();
+  await page.locator(".doc-item", { hasText: "C 文档" }).locator("[data-doc-menu] summary").click();
+  await page.locator(".doc-item", { hasText: "C 文档" }).locator("[data-move-doc-bottom]").click();
+
+  await expect(page.locator(".doc-item").nth(0)).toContainText("A 文档");
+  await expect(page.locator(".doc-item").nth(1)).toContainText("B 文档");
+  await expect(page.locator(".doc-item").nth(2)).toContainText("C 文档");
+});
+
+test("document cards can be dragged to reorder", async ({ page }) => {
+  const snapshot = {
+    selectedFolderId: "all",
+    selectedDocId: "doc-a",
+    folders: [{ id: "folder-1", name: "标签", kind: "tag", color: "#0f766e" }],
+    docs: [
+      { id: "doc-a", title: "A 文档", type: "notice", folderId: "folder-1", content: "A" },
+      { id: "doc-b", title: "B 文档", type: "notice", folderId: "folder-1", content: "B" },
+      { id: "doc-c", title: "C 文档", type: "notice", folderId: "folder-1", content: "C" },
+    ],
+    styles: [],
+    settings: {},
+  };
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, state }) => {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, state: snapshot },
+  );
+
+  await page.goto("/index.html");
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  const source = page.locator(".doc-item", { hasText: "A 文档" }).first();
+  const target = page.locator(".doc-item", { hasText: "C 文档" }).first();
+  const targetBox = await target.boundingBox();
+  expect(targetBox).not.toBeNull();
+  const dropY = targetBox.y + targetBox.height - 2;
+
+  await source.dispatchEvent("dragstart", { dataTransfer });
+  await target.dispatchEvent("dragover", { dataTransfer, clientY: dropY });
+  await target.dispatchEvent("drop", { dataTransfer, clientY: dropY });
+  await source.dispatchEvent("dragend", { dataTransfer });
+
+  await expect(page.locator(".doc-item").nth(0)).toContainText("B 文档");
+  await expect(page.locator(".doc-item").nth(1)).toContainText("C 文档");
+  await expect(page.locator(".doc-item").nth(2)).toContainText("A 文档");
+});
+
+test("document list supports keyboard focus and enter selection", async ({ page }) => {
+  const snapshot = {
+    selectedFolderId: "all",
+    selectedDocId: "doc-a",
+    folders: [{ id: "folder-1", name: "标签", kind: "tag", color: "#0f766e" }],
+    docs: [
+      { id: "doc-a", title: "A 文档", type: "notice", folderId: "folder-1", content: "A" },
+      { id: "doc-b", title: "B 文档", type: "notice", folderId: "folder-1", content: "B" },
+      { id: "doc-c", title: "C 文档", type: "notice", folderId: "folder-1", content: "C" },
+    ],
+    styles: [],
+    settings: {},
+  };
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, state }) => {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, state: snapshot },
+  );
+
+  await page.goto("/index.html");
+  await expect(page.locator("#docList")).toHaveAttribute("role", "listbox");
+  await page.locator(".doc-item").first().focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".doc-item").nth(1)).toBeFocused();
+  await page.keyboard.press("Enter");
+
+  await expect(page.locator("#titleInput")).toHaveValue("B 文档");
+  await expect(page.locator(".doc-item").first()).toContainText("A 文档");
+  await expect(page.locator(".doc-item").nth(1)).toHaveClass(/active/);
+});
+
+test("document trash supports restore and permanent delete", async ({ page }) => {
+  const snapshot = {
+    selectedFolderId: "all",
+    selectedDocId: "doc-a",
+    folders: [{ id: "folder-1", name: "标签", kind: "tag", color: "#0f766e" }],
+    docs: [
+      { id: "doc-a", title: "可恢复文档", type: "notice", folderId: "folder-1", content: "A" },
+      { id: "doc-b", title: "保留文档", type: "notice", folderId: "folder-1", content: "B" },
+    ],
+    styles: [],
+    settings: {},
+  };
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, state }) => {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, state: snapshot },
+  );
+
+  await page.goto("/index.html");
+  page.once("dialog", async (dialog) => dialog.accept());
+  await page.locator(".doc-item", { hasText: "可恢复文档" }).locator("[data-delete-doc]").click();
+
+  await expect(page.locator(".doc-item", { hasText: "可恢复文档" })).toHaveCount(0);
+  await expect(page.locator("#trashCount")).toHaveText("1");
+
+  await page.locator("#trashTopBtn").click();
+  await expect(page.locator("#trashModal")).toBeVisible();
+  await expect(page.locator("#trashModalList").locator(".trash-item", { hasText: "可恢复文档" })).toBeVisible();
+  await expect(page.locator("#restoreAllTrashBtn")).toBeEnabled();
+  await expect(page.locator("#clearTrashBtn")).toBeEnabled();
+
+  await page.locator("#trashModalList").locator("[data-restore-doc='doc-a']").click();
+  await expect(page.locator(".doc-item", { hasText: "可恢复文档" })).toBeVisible();
+  await expect(page.locator("#trashCount")).toHaveText("0");
+  await expect(page.locator("#trashModalList")).toContainText("垃圾箱为空");
+  await page.locator("#closeTrashModalBtn").click();
+
+  page.once("dialog", async (dialog) => dialog.accept());
+  await page.locator(".doc-item", { hasText: "可恢复文档" }).locator("[data-delete-doc]").click();
+  await page.locator("#trashTopBtn").click();
+  page.once("dialog", async (dialog) => dialog.accept());
+  await page.locator("#trashModalList").locator("[data-permanent-delete-doc='doc-a']").click();
+
+  await expect(page.locator("#trashModalList")).toContainText("垃圾箱为空");
+  await expect(page.locator("#trashCount")).toHaveText("0");
+});
+
+test("deleting the last active document leaves a disabled empty editor", async ({ page }) => {
+  const snapshot = {
+    selectedFolderId: "all",
+    selectedDocId: "doc-a",
+    folders: [{ id: "folder-1", name: "标签", kind: "tag", color: "#0f766e" }],
+    docs: [
+      { id: "doc-a", title: "最后一份文档", type: "notice", folderId: "folder-1", content: "A" },
+    ],
+    styles: [],
+    settings: {},
+  };
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, state }) => {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, state: snapshot },
+  );
+
+  await page.goto("/index.html");
+  page.once("dialog", async (dialog) => dialog.accept());
+  await page.locator(".doc-item", { hasText: "最后一份文档" }).locator("[data-delete-doc]").click();
+
+  await expect(page.locator("#docList")).toContainText("没有匹配的文档");
+  await expect(page.locator("#titleInput")).toBeDisabled();
+  await expect(page.locator("#contentEditor")).toBeDisabled();
+  await expect(page.locator("#saveDocBtn")).toBeDisabled();
+  await expect(page.locator("#undoEditBtn")).toBeDisabled();
+  await expect(page.locator("#saveState")).toHaveText("请新建或导入文档");
+  await expect(page.locator("#trashCount")).toHaveText("1");
+});
+
+test("trash bulk actions restore all and clear all documents", async ({ page }) => {
+  const snapshot = {
+    selectedFolderId: "all",
+    selectedDocId: "doc-a",
+    folders: [{ id: "folder-1", name: "标签", kind: "tag", color: "#0f766e" }],
+    docs: [
+      { id: "doc-a", title: "批量文档 A", type: "notice", folderId: "folder-1", content: "A" },
+      { id: "doc-b", title: "批量文档 B", type: "notice", folderId: "folder-1", content: "B" },
+    ],
+    styles: [],
+    settings: {},
+  };
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, state }) => {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, state: snapshot },
+  );
+
+  await page.goto("/index.html");
+  page.once("dialog", async (dialog) => dialog.accept());
+  await page.locator(".doc-item", { hasText: "批量文档 A" }).locator("[data-delete-doc]").click();
+  page.once("dialog", async (dialog) => dialog.accept());
+  await page.locator(".doc-item", { hasText: "批量文档 B" }).locator("[data-delete-doc]").click();
+  await expect(page.locator("#trashCount")).toHaveText("2");
+
+  await page.locator("#trashTopBtn").click();
+  await expect(page.locator("#trashModalList").locator(".trash-item")).toHaveCount(2);
+  await page.locator("#restoreAllTrashBtn").click();
+  await expect(page.locator("#trashCount")).toHaveText("0");
+  await expect(page.locator("#trashModalList")).toContainText("垃圾箱为空");
+  await expect(page.locator(".doc-item", { hasText: "批量文档 A" })).toBeVisible();
+  await expect(page.locator(".doc-item", { hasText: "批量文档 B" })).toBeVisible();
+  await page.locator("#closeTrashModalBtn").click();
+
+  page.once("dialog", async (dialog) => dialog.accept());
+  await page.locator(".doc-item", { hasText: "批量文档 A" }).locator("[data-delete-doc]").click();
+  page.once("dialog", async (dialog) => dialog.accept());
+  await page.locator(".doc-item", { hasText: "批量文档 B" }).locator("[data-delete-doc]").click();
+  await page.locator("#trashTopBtn").click();
+  page.once("dialog", async (dialog) => dialog.accept());
+  await page.locator("#clearTrashBtn").click();
+
+  await expect(page.locator("#trashCount")).toHaveText("0");
+  await expect(page.locator("#trashModalList")).toContainText("垃圾箱为空");
+  await expect(page.locator("#docList")).toContainText("没有匹配的文档");
 });
 
 test("routes PPT panel drops into the PPT material box", async ({ page }) => {
@@ -192,6 +441,140 @@ test("workspace columns can be resized from the editor handles", async ({ page }
   expect(after).toBeLessThan(before);
 });
 
+test("editor context menu supports menu roles arrow navigation and escape", async ({ page }) => {
+  await page.goto("/index.html");
+  await page.locator("#contentEditor").click({ button: "right" });
+
+  await expect(page.locator("#editorMenu")).toBeVisible();
+  await expect(page.locator("#editorMenu")).toHaveAttribute("role", "menu");
+  await expect(page.getByRole("menuitem", { name: /复制选中内容/ })).toBeFocused();
+
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: /删除选中内容/ })).toBeFocused();
+  await page.keyboard.press("Escape");
+
+  await expect(page.locator("#editorMenu")).toBeHidden();
+  await expect(page.locator("#contentEditor")).toBeFocused();
+});
+
+test("editor context menu rewrites selection with a chosen skill preset", async ({ page }) => {
+  const snapshot = {
+    selectedFolderId: "all",
+    selectedDocId: "doc-a",
+    folders: [{ id: "folder-1", name: "标签", kind: "tag", color: "#0f766e" }],
+    docs: [
+      { id: "doc-a", title: "会议记录", type: "summary", folderId: "folder-1", content: "今天开了会，大家说要推进项目。" },
+    ],
+    styles: [
+      {
+        id: "style-1",
+        name: "会议纪要",
+        handle: "会议纪要",
+        category: "公文写作",
+        enabled: true,
+        skillJson: JSON.stringify({ name: "会议纪要", handle: "会议纪要", style_rules: { must: ["客观记录会议事项"] } }),
+      },
+    ],
+    settings: {
+      provider: "openai-compatible",
+      baseUrl: "http://127.0.0.1:4173/mock-ai",
+      endpointPath: "/chat/completions",
+      model: "test-model",
+    },
+  };
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, state }) => {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, state: snapshot },
+  );
+  await page.route("**/mock-ai/chat/completions", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ choices: [{ message: { content: "会议要求各相关人员持续推进项目，并按节点反馈进展。" } }] }),
+    });
+  });
+
+  await page.goto("/index.html");
+  await page.locator("#contentEditor").focus();
+  await page.locator("#contentEditor").evaluate((editor) => editor.setSelectionRange(0, editor.value.length));
+  await page.locator("#contentEditor").click({ button: "right", position: { x: 24, y: 18 } });
+  await page.locator("#editorSkillSelect").selectOption("style-1");
+  await page.getByRole("menuitem", { name: /改文风/ }).click();
+
+  await expect(page.locator("#contentEditor")).toHaveValue(/会议要求各相关人员持续推进项目/);
+});
+
+test("skill packages can be exported and imported", async ({ page }) => {
+  await page.goto("/index.html");
+  await page.locator('[data-tab="style"]').click();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#exportSkillPackageBtn").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/\.skill\.json$/);
+
+  const packageText = JSON.stringify({
+    schema: "mowen-nibi-workbench.skill-package.v1",
+    skill: {
+      name: "导入会议纪要",
+      handle: "导入会议纪要",
+      summaryMd: "# 导入会议纪要",
+      ruleJson: { name: "导入会议纪要", handle: "导入会议纪要", category: "公文写作" },
+      sourceDocuments: [{ name: "会议样本.docx", length: 900 }],
+    },
+  });
+  await page.locator("#importSkillPackageInput").setInputFiles({
+    name: "meeting.skill.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(packageText),
+  });
+
+  await expect(page.locator("#styleList")).toContainText("导入会议纪要");
+  await expect(page.locator("#styleExampleList")).toContainText("会议样本.docx");
+});
+
+test("responsive tablet layout opens tools in a drawer", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 760 });
+  await page.goto("/index.html");
+
+  await expect(page.locator("#responsiveInspectorToggle")).toBeVisible();
+  await expect(page.locator("#rightWorkspaceResizer")).toBeHidden();
+  await expect(page.locator("body")).not.toHaveClass(/inspector-open/);
+
+  await page.locator("#responsiveInspectorToggle").click();
+  await expect(page.locator("body")).toHaveClass(/inspector-open/);
+  await expect(page.locator("#responsiveInspectorToggle")).toHaveAttribute("aria-expanded", "true");
+
+  await page.locator("#responsiveBackdrop").click();
+  await expect(page.locator("body")).not.toHaveClass(/inspector-open/);
+});
+
+test("responsive mobile layout switches between docs editor and tools", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 760 });
+  await page.goto("/index.html");
+
+  await expect(page.locator("#mobileWorkspaceNav")).toBeVisible();
+  await expect(page.locator("body")).toHaveAttribute("data-mobile-view", "editor");
+  await expect(page.locator(".editor-panel")).toBeVisible();
+  await expect(page.locator(".sidebar")).toBeHidden();
+
+  await page.locator("[data-mobile-view='docs']").click();
+  await expect(page.locator("body")).toHaveAttribute("data-mobile-view", "docs");
+  await expect(page.locator(".sidebar")).toBeVisible();
+  await expect(page.locator(".editor-panel")).toBeHidden();
+
+  await page.locator("[data-mobile-view='tools']").click();
+  await expect(page.locator("body")).toHaveAttribute("data-mobile-view", "tools");
+  await expect(page.locator(".inspector")).toBeVisible();
+  await expect(page.locator(".editor-panel")).toBeHidden();
+
+  await page.locator("[data-tab='ppt']").click();
+  await expect(page.locator("#pptPanel")).toBeVisible();
+});
+
 test("PPT preview modal expands the generated HTML preview", async ({ page }) => {
   await page.goto("/index.html");
   await page.locator('[data-tab="ppt"]').click();
@@ -211,8 +594,12 @@ test("PPT preview modal expands the generated HTML preview", async ({ page }) =>
   await page.locator("#openPptPreviewBtn").click();
   await expect(page.locator("#pptPreviewOverlay")).toBeVisible();
   await expect(page.locator("#pptPreviewModalFrame")).toBeVisible();
+  await expect(page.locator("#closePptPreviewBtn")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.locator("#closePptPreviewBtn")).toBeFocused();
   await page.locator("#closePptPreviewBtn").click();
   await expect(page.locator("#pptPreviewOverlay")).toBeHidden();
+  await expect(page.locator("#openPptPreviewBtn")).toBeFocused();
 });
 
 test("routes style panel drops into the current skill examples", async ({ page }) => {

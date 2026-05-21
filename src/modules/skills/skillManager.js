@@ -3,6 +3,203 @@ import { clone, createId, normalizeHandle, now } from "../../utils/helpers.js";
 import { coerceArray } from "../../utils/validation.js";
 import { EVENTS } from "../../core/eventBus.js";
 
+const DEFAULT_MISSING_FACT_POLICY = "事实缺失时使用可替换占位符，不编造具体人名、时间、地点、活动名称和落款。";
+export const SKILL_PACKAGE_SCHEMA = "mowen-nibi-workbench.skill-package.v1";
+
+export function buildSkillRuntimePayload(skillJson, skill = {}, fallbackConfidence = "low") {
+  const handle = normalizeHandle(skillJson.handle || skill.handle || skillJson.name || skill.name);
+  const mustRules = coerceArray(skillJson.style_rules?.must);
+  const recommendedRules = coerceArray(skillJson.style_rules?.recommended);
+  const optionalRules = coerceArray(skillJson.style_rules?.optional);
+  return {
+    name: skillJson.name || skill.name || "未命名执笔人",
+    handle,
+    description: skillJson.description || skill.description || "",
+    trigger_description:
+      skillJson.trigger_description ||
+      (handle ? `当用户通过 @${handle} 调用，或任务匹配该文种/场景时使用。` : "当任务匹配该文种/场景时使用。"),
+    concise_instruction: skillJson.concise_instruction || skillJson.description || "",
+    applicable_scope: skillJson.applicable_scope || "",
+    confidence: skillJson.confidence || fallbackConfidence,
+    input_contract: normalizeSkillInputContract(skillJson),
+    document_structure_template: coerceArray(skillJson.document_structure_template),
+    style_rules: {
+      must: mustRules,
+      recommended: recommendedRules,
+      optional: optionalRules,
+    },
+    format_rules: coerceArray(skillJson.format_rules),
+    common_expression_library: coerceArray(skillJson.common_expression_library || skillJson.reusable_expressions),
+    scene_variations: coerceArray(skillJson.scene_variations),
+    variable_slots: coerceArray(skillJson.variable_slots),
+    forbidden: coerceArray(skillJson.forbidden),
+    privacy_filters: coerceArray(skillJson.privacy_filters),
+    case_specific_exclusions: coerceArray(skillJson.case_specific_exclusions),
+    execution_workflow: coerceArray(skillJson.execution_workflow || skillJson.generation_steps),
+    validation_checklist: coerceArray(skillJson.validation_checklist || skillJson.self_checklist || skillJson.review_standards),
+    quality_controls: {
+      ...(skillJson.quality_controls || {}),
+      single_document_rule_policy: "单篇样本只作为候选规则；生成时不得把个案信息当成通用规则",
+      candidate_rule_policy: "recommended/optional 只能辅助写作，不能覆盖用户提供的事实",
+      privacy_filter: true,
+    },
+  };
+}
+
+export function createSkillPackage(skill = {}) {
+  const name = String(skill.name || "未命名执笔人").trim();
+  const handle = normalizeHandle(skill.handle || name);
+  const ruleJson = parseRuleJsonForPackage(skill.skillJson, skill);
+  return {
+    schema: SKILL_PACKAGE_SCHEMA,
+    version: 1,
+    exportedAt: now(),
+    skill: {
+      name,
+      handle,
+      category: skill.category || "自定义",
+      description: skill.description || "",
+      enabled: skill.enabled !== false,
+      summaryMd: skill.summary || "",
+      ruleJson,
+      qualityReport: skill.qualityReport || null,
+      buildArtifacts: {
+        analysis: skill.analysis || "",
+        aggregation: skill.aggregation || "",
+        aggregationData: skill.aggregationData || null,
+        analyses: Array.isArray(skill.analyses) ? skill.analyses : [],
+      },
+      sourceDocuments: summarizeSkillSourceDocuments(skill),
+      versions: summarizeSkillVersions(skill.versions),
+    },
+  };
+}
+
+export function parseImportedSkillPackage(payload = {}) {
+  const source = payload.schema === SKILL_PACKAGE_SCHEMA ? payload.skill || {} : payload;
+  const ruleJson = source.ruleJson || source.skillJson || source.rule || source;
+  const ruleObject = parseRuleJsonForPackage(ruleJson, source);
+  const ruleJsonText = JSON.stringify(ruleObject || {}, null, 2);
+  const name = source.name || ruleObject?.name || payload.name || "导入执笔人";
+  const handle = normalizeHandle(source.handle || ruleObject?.handle || name);
+  const artifacts = source.buildArtifacts || {};
+  return {
+    id: null,
+    name,
+    handle,
+    category: source.category || ruleObject?.category || "自定义",
+    description: source.description || ruleObject?.description || "",
+    enabled: source.enabled !== false,
+    analysis: artifacts.analysis || source.analysis || "",
+    aggregation: artifacts.aggregation || source.aggregation || "",
+    summary: source.summaryMd || source.summary || source.markdown || "",
+    skillJson: ruleJsonText,
+    examples: normalizeImportedSourceDocuments(source.sourceDocuments),
+    analyses: Array.isArray(artifacts.analyses) ? artifacts.analyses : [],
+    aggregationData: artifacts.aggregationData || source.aggregationData || null,
+    qualityReport: source.qualityReport || null,
+    versions: normalizeImportedVersions(source.versions),
+    feedbacks: [],
+    lastTest: null,
+    createdAt: now(),
+    updatedAt: now(),
+  };
+}
+
+function parseRuleJsonForPackage(value, skill) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return clone(value);
+  }
+  const raw = String(value || "").trim();
+  if (raw) {
+    try {
+      return JSON.parse(extractJsonObject(raw) || raw);
+    } catch {
+      return { raw };
+    }
+  }
+  return {
+    name: skill.name || "未命名执笔人",
+    handle: normalizeHandle(skill.handle || skill.name),
+    category: skill.category || "自定义",
+    description: skill.description || "",
+  };
+}
+
+function summarizeSkillSourceDocuments(skill = {}) {
+  const versionSources = (skill.versions || [])
+    .flatMap((version) => version.sourceExamples || [])
+    .filter(Boolean);
+  const examples = Array.isArray(skill.examples) ? skill.examples : [];
+  const sources = versionSources.length ? versionSources : examples;
+  return sources.map((source) => ({
+    name: source.name || "未命名示范",
+    length: Number(source.length || source.text?.length || 0),
+    addedAt: source.addedAt || source.createdAt || "",
+  }));
+}
+
+function summarizeSkillVersions(versions = []) {
+  return (Array.isArray(versions) ? versions : []).map((version, index) => ({
+    version: Number(version.version || index + 1),
+    createdAt: version.createdAt || "",
+    sourceExamples: (version.sourceExamples || []).map((source) => ({
+      name: source.name || "未命名示范",
+      length: Number(source.length || 0),
+    })),
+    summary: version.summary || "",
+    skillJson: version.skillJson || "",
+    qualityReport: version.qualityReport || null,
+  }));
+}
+
+function normalizeImportedVersions(versions = []) {
+  return (Array.isArray(versions) ? versions : []).map((version, index) => ({
+    id: createId(),
+    version: Number(version.version || index + 1),
+    createdAt: version.createdAt || now(),
+    sourceExamples: Array.isArray(version.sourceExamples) ? version.sourceExamples : [],
+    analyses: Array.isArray(version.analyses) ? version.analyses : [],
+    analysis: version.analysis || "",
+    aggregation: version.aggregation || "",
+    aggregationData: version.aggregationData || null,
+    summary: version.summary || "",
+    skillJson: version.skillJson || "",
+    qualityReport: version.qualityReport || null,
+    testDoc: version.testDoc || "",
+    testReport: version.testReport || "",
+  }));
+}
+
+function normalizeImportedSourceDocuments(sourceDocuments = []) {
+  return (Array.isArray(sourceDocuments) ? sourceDocuments : []).map((source) => ({
+    id: createId(),
+    name: source.name || "导入示范摘要",
+    text: `（导入包仅包含示范摘要，不包含原始全文。原文长度：${Number(source.length || 0)} 字符）`,
+    addedAt: source.addedAt || now(),
+    importedSummary: true,
+    originalLength: Number(source.length || 0),
+  }));
+}
+
+function normalizeSkillInputContract(skillJson) {
+  const inputContract = skillJson.input_contract;
+  const fallbackFields = coerceArray(skillJson.user_input_fields || skillJson.required_user_inputs);
+  if (Array.isArray(inputContract)) {
+    return {
+      required_fields: inputContract,
+      optional_fields: [],
+      missing_fact_policy: DEFAULT_MISSING_FACT_POLICY,
+    };
+  }
+  return {
+    ...(inputContract && typeof inputContract === "object" ? inputContract : {}),
+    required_fields: coerceArray(inputContract?.required_fields || inputContract?.fields || fallbackFields),
+    optional_fields: coerceArray(inputContract?.optional_fields),
+    missing_fact_policy: inputContract?.missing_fact_policy || DEFAULT_MISSING_FACT_POLICY,
+  };
+}
+
 export function createSkillManager(deps) {
   const {
     state,
@@ -96,20 +293,36 @@ export function createSkillManager(deps) {
         enabled: style.enabled !== false,
         category: style.category || "自定义",
         description: style.description || "",
+        trigger_description: handle ? `当用户通过 @${handle} 调用，或任务匹配该文种/场景时使用。` : "",
+        default_prompt: handle ? `@${handle} 请根据以下事项起草一篇同类正式文本：` : "",
+        concise_instruction: "",
         applicable_scope: "",
         confidence: "low",
         source_documents: [],
+        input_contract: {
+          required_fields: [],
+          optional_fields: [],
+          missing_fact_policy: DEFAULT_MISSING_FACT_POLICY,
+        },
+        user_input_fields: [],
         required_user_inputs: [],
         document_structure_template: [],
         style_rules: { must: [], recommended: [], optional: [] },
+        common_expression_library: [],
         reusable_expressions: [],
         variable_slots: [],
         scene_variations: [],
         forbidden: [],
+        privacy_filters: [],
+        case_specific_exclusions: [],
+        execution_workflow: [],
         generation_steps: [],
+        validation_checklist: [],
         self_checklist: [],
+        activation_examples: handle ? [`@${handle} 请根据以下事项起草文档：...`] : [],
         quality_controls: {
           promote_to_strong_rule: "仅当多篇样本文档共同验证时才提升为强规则",
+          candidate_rule_policy: "候选规则只能辅助写作，不能覆盖用户事实",
           exclude_case_specific_info: true,
           privacy_filter: true,
         },
@@ -147,6 +360,18 @@ export function createSkillManager(deps) {
     } catch {
       return JSON.parse(synthesizeSkillJson(style));
     }
+  }
+
+  function createUniqueSkillHandle(value, currentId = null) {
+    const base = normalizeHandle(value) || "imported";
+    let handle = base;
+    let index = 2;
+    while (state.styles.some((style) => style.id !== currentId && style.handle === handle)) {
+      const suffix = `-${index}`;
+      handle = normalizeHandle(`${base.slice(0, Math.max(1, 24 - suffix.length))}${suffix}`);
+      index += 1;
+    }
+    return handle;
   }
 
   function syncEditingStyleFromInputs() {
@@ -238,6 +463,24 @@ export function createSkillManager(deps) {
     return normalized;
   }
 
+  function importSkillPackage(payload) {
+    const draft = parseImportedSkillPackage(payload);
+    draft.id = createId();
+    draft.createdAt = now();
+    draft.updatedAt = now();
+    draft.handle = createUniqueSkillHandle(draft.handle || draft.name);
+    draft.skillJson = normalizeSkillJsonText(draft.skillJson, draft);
+    const normalized = normalizeSkill(clone(draft));
+    state.styles.push(normalized);
+    ui.editingStyle = clone(normalized);
+    persist();
+    eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
+    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+    toast(`已导入 @${normalized.handle} 到：${getSkillLocation(normalized)}`);
+    return normalized;
+  }
+
   function deleteStyle(confirmDelete = (message) => window.confirm(message)) {
     const draft = ui.editingStyle;
     if (!draft?.id || !state.styles.some((style) => style.id === draft.id)) {
@@ -284,29 +527,13 @@ export function createSkillManager(deps) {
       "执行原则：必须优先遵守 style_rules.must；recommended 仅在用户任务匹配时使用；optional 不得压过用户事实。禁止复用 case_specific_exclusions、privacy_filters 和 forbidden 中的内容。事实缺失时使用可替换占位符，不能编造。",
       ...enabledSkills.map((skill, index) => {
         const skillJson = parseSkillJsonObject(skill.skillJson, skill);
-        const strongRules = coerceArray(skillJson.style_rules?.must);
-        const recommendedRules = coerceArray(skillJson.style_rules?.recommended);
-        const forbidden = coerceArray(skillJson.forbidden);
-        const payload = {
-          ...skillJson,
-          style_rules: {
-            must: strongRules,
-            recommended: recommendedRules,
-            optional: coerceArray(skillJson.style_rules?.optional),
-          },
-          forbidden,
-          quality_controls: {
-            ...(skillJson.quality_controls || {}),
-            single_document_rule_policy: "单篇样本只作为候选规则；生成时不得把个案信息当成通用规则",
-            privacy_filter: true,
-          },
-        };
+        const payload = buildSkillRuntimePayload(skillJson, skill, skill.qualityReport?.confidence || "low");
         return [
           `${index + 1}. @${skill.handle} · ${skill.name}`,
           skill.category ? `分类：${skill.category}` : "",
           skill.description ? `能力：${skill.description}` : "",
           `规则置信度：${skillJson.confidence || skill.qualityReport?.confidence || "low"}`,
-          `程序调用规则 JSON：\n${JSON.stringify(payload, null, 2)}`,
+          `程序调用执行卡 JSON：\n${JSON.stringify(payload, null, 2)}`,
         ]
           .filter(Boolean)
           .join("\n");
@@ -321,9 +548,11 @@ export function createSkillManager(deps) {
     synthesizeSkillJson,
     normalizeSkillJsonText,
     parseSkillJsonObject,
+    createSkillPackage,
     syncEditingStyleFromInputs,
     saveStyle,
     commitSkillToState,
+    importSkillPackage,
     deleteStyle,
     resolveInvokedSkills,
     buildSkillPromptForDocumentGeneration,

@@ -82,3 +82,42 @@ test("callAiJsonWithRepair repairs invalid JSON output", async () => {
     globalThis.window = originalWindow;
   }
 });
+
+test("callAiWithRetry aborts without retrying when external signal is cancelled", async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  globalThis.window = {
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout,
+  };
+  let calls = 0;
+  globalThis.fetch = async (_url, init) => {
+    calls += 1;
+    return new Promise((_resolve, reject) => {
+      init.signal.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    });
+  };
+
+  try {
+    const controller = new AbortController();
+    const client = createAiClient({
+      getSettings: () => ({
+        baseUrl: "http://localhost:8787/v1",
+        endpointPath: "/chat/completions",
+        model: "test-model",
+      }),
+    });
+    const request = client.callAiWithRetry([{ role: "user", content: "ping" }], { signal: controller.signal }, 3);
+    await Promise.resolve();
+    controller.abort();
+    await assert.rejects(request, /取消/);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.window = originalWindow;
+  }
+});

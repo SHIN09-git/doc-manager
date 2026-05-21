@@ -6,9 +6,9 @@
   "type": "module",
   "scripts": {
     "build": "esbuild src/main.js --bundle --format=iife --target=es2022 --outfile=build/bundle.js",
-    "check": "node --check app.js && node --check src/main.js && node --check build/bundle.js",
+    "check": "node --check app.js && node --check src/main.js && node --check e2e/serve-static.mjs && node --check e2e/run-e2e.mjs && node --check playwright.config.js && node --check build/bundle.js",
     "test": "node --test test/*.test.js",
-    "test:e2e": "npm run build && playwright test"
+    "test:e2e": "npm run build && node e2e/run-e2e.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

@@ -19,9 +19,10 @@ export function createDocumentEditor(deps) {
   } = deps;
 
   function queueEditorSave() {
-    if (!getCurrentDoc()) {
+    const doc = getCurrentDoc();
+    if (!doc || doc.deletedAt) {
       window.clearTimeout(ui.saveTimer);
-      showSaveStatus("");
+      showSaveStatus(doc?.deletedAt ? "在垃圾箱中" : "");
       return;
     }
     showSaveStatus("保存中");
@@ -33,6 +34,10 @@ export function createDocumentEditor(deps) {
     const doc = getCurrentDoc();
     if (!doc) {
       showSaveStatus("");
+      return;
+    }
+    if (doc.deletedAt) {
+      showSaveStatus("在垃圾箱中", { title: "请先恢复文档再编辑或保存" });
       return;
     }
     doc.title = els.titleInput.value.trim() || "未命名文档";
