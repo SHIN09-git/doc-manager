@@ -100,7 +100,7 @@ npm run test:e2e
 
 当前测试覆盖：
 
-- 单元测试：70 项
+- 单元测试：78 项
 - 端到端测试：25 项
 - GitHub Actions：自动运行 `npm run check` 和 `npm test`
 

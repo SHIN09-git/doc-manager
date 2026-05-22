@@ -2616,12 +2616,17 @@ textarea.drag-over {
 }
 
 .toast-region {
-  position: static;
+  position: fixed;
+  left: 50%;
+  right: auto;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
   display: grid;
   gap: 8px;
-  width: 100%;
-  max-width: none;
-  z-index: 1;
+  width: min(720px, calc(100vw - 32px));
+  max-width: 720px;
+  z-index: 1400;
+  pointer-events: none;
 }
 
 .toast {
@@ -2636,6 +2641,7 @@ textarea.drag-over {
   padding: 10px 10px 10px 12px;
   box-shadow: var(--shadow-sm);
   animation: toast-in var(--duration-base) var(--ease-out);
+  pointer-events: auto;
 }
 
 .toast.error {
@@ -3207,7 +3213,14 @@ button.is-canceling-task {
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
   }
 
-  .toast-region,
+  .toast-region {
+    left: 50%;
+    right: auto;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    width: calc(100vw - 24px);
+    max-width: none;
+  }
+
   .progress-bar {
     right: auto;
     left: auto;

@@ -351,7 +351,6 @@ function bindElements() {
     "mobileWorkspaceNav",
     "responsiveBackdrop",
     "linkFolderBtn",
-    "addFolderBtn",
     "folderCreateBox",
     "folderNameInput",
     "confirmFolderBtn",
@@ -628,12 +627,6 @@ function bindEvents() {
   preventWindowFileNavigation();
 
   els.linkFolderBtn.addEventListener("click", linkRealFolder);
-  els.addFolderBtn.addEventListener("click", () => {
-    els.folderCreateBox.hidden = !els.folderCreateBox.hidden;
-    if (!els.folderCreateBox.hidden) {
-      els.folderNameInput.focus();
-    }
-  });
   els.confirmFolderBtn.addEventListener("click", addFolder);
   els.folderNameInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") addFolder();

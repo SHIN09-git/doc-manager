@@ -159,7 +159,9 @@ export function createFolderManager(deps) {
     state.folders.push(folder);
     ui.selectedFolderId = folder.id;
     els.folderNameInput.value = "";
-    els.folderCreateBox.hidden = true;
+    if (els.addFolderBtn) {
+      els.folderCreateBox.hidden = true;
+    }
     persist();
     eventBus.emit(EVENTS.RENDER_ALL);
     toast(`已创建标签：${getFolderLocation(folder)}`);

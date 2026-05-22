@@ -34,8 +34,45 @@ test("buildSkillRuntimePayload keeps only compact execution fields", () => {
   assert.deepEqual(payload.common_expression_library, ["请各部门按要求落实。"]);
   assert.deepEqual(payload.execution_workflow, ["确认对象", "分条说明事项"]);
   assert.deepEqual(payload.validation_checklist, ["未编造日期"]);
+  assert.ok(payload.execution_priority.some((rule) => rule.includes("用户本次提供的事实优先")));
   assert.equal(payload.example_output, undefined);
   assert.equal(payload.source_documents, undefined);
+});
+
+test("runtime prompt keeps user facts above recommended and optional rules", () => {
+  const state = {
+    styles: [
+      {
+        id: "notice",
+        name: "通知写作",
+        handle: "notice",
+        enabled: true,
+        skillJson: JSON.stringify({
+          name: "通知写作",
+          handle: "notice",
+          style_rules: { must: ["标题明确"], recommended: ["语气正式"], optional: ["适当扩写"] },
+          forbidden: ["样本人名"],
+          privacy_filters: ["手机号"],
+          case_specific_exclusions: ["2026年5月23日"],
+        }),
+      },
+    ],
+  };
+  const manager = createSkillManager({
+    state,
+    ui: {},
+    els: {},
+    persist: () => {},
+    eventBus: { emit: () => {} },
+    toast: () => {},
+    getSkillLocation: (skill) => `@${skill.handle}`,
+  });
+
+  const prompt = manager.buildSkillPromptForDocumentGeneration(state.styles);
+  assert.match(prompt, /用户本次提供的事实优先于执笔人规则/);
+  assert.match(prompt, /recommended \/ optional 不能压过用户本次输入/);
+  assert.match(prompt, /【可替换占位符】/);
+  assert.match(prompt, /case_specific_exclusions/);
 });
 
 test("createSkillPackage exports runtime rules without raw examples", () => {

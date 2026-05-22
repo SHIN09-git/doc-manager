@@ -2,8 +2,9 @@ import { extractJsonObject } from "../../utils/formatters.js";
 import { clone, createId, normalizeHandle, now } from "../../utils/helpers.js";
 import { coerceArray } from "../../utils/validation.js";
 import { EVENTS } from "../../core/eventBus.js";
+import { MISSING_FACT_PLACEHOLDER, SKILL_RUNTIME_PRIORITY_RULES } from "../../config/constants.js";
 
-const DEFAULT_MISSING_FACT_POLICY = "事实缺失时使用可替换占位符，不编造具体人名、时间、地点、活动名称和落款。";
+const DEFAULT_MISSING_FACT_POLICY = `事实缺失时使用${MISSING_FACT_PLACEHOLDER}，不编造具体人名、时间、地点、单位、数据、结论、政策依据和落款。`;
 export const SKILL_PACKAGE_SCHEMA = "mowen-nibi-workbench.skill-package.v1";
 
 export function buildSkillRuntimePayload(skillJson, skill = {}, fallbackConfidence = "low") {
@@ -21,6 +22,7 @@ export function buildSkillRuntimePayload(skillJson, skill = {}, fallbackConfiden
     concise_instruction: skillJson.concise_instruction || skillJson.description || "",
     applicable_scope: skillJson.applicable_scope || "",
     confidence: skillJson.confidence || fallbackConfidence,
+    execution_priority: SKILL_RUNTIME_PRIORITY_RULES,
     input_contract: normalizeSkillInputContract(skillJson),
     document_structure_template: coerceArray(skillJson.document_structure_template),
     style_rules: {
@@ -35,6 +37,7 @@ export function buildSkillRuntimePayload(skillJson, skill = {}, fallbackConfiden
     forbidden: coerceArray(skillJson.forbidden),
     privacy_filters: coerceArray(skillJson.privacy_filters),
     case_specific_exclusions: coerceArray(skillJson.case_specific_exclusions),
+    rule_evidence: normalizeRuleEvidence(skillJson.rule_evidence),
     execution_workflow: coerceArray(skillJson.execution_workflow || skillJson.generation_steps),
     validation_checklist: coerceArray(skillJson.validation_checklist || skillJson.self_checklist || skillJson.review_standards),
     quality_controls: {
@@ -324,6 +327,7 @@ export function createSkillManager(deps) {
         required_user_inputs: [],
         document_structure_template: [],
         style_rules: { must: [], recommended: [], optional: [] },
+        rule_evidence: {},
         common_expression_library: [],
         reusable_expressions: [],
         variable_slots: [],
@@ -338,6 +342,7 @@ export function createSkillManager(deps) {
         activation_examples: handle ? [`@${handle} 请根据以下事项起草文档：...`] : [],
         quality_controls: {
           promote_to_strong_rule: "仅当多篇样本文档共同验证时才提升为强规则",
+          execution_priority: SKILL_RUNTIME_PRIORITY_RULES,
           candidate_rule_policy: "候选规则只能辅助写作，不能覆盖用户事实",
           exclude_case_specific_info: true,
           privacy_filter: true,
@@ -362,6 +367,12 @@ export function createSkillManager(deps) {
         handle: normalizeHandle(parsed.handle || style.handle || style.name),
         category: parsed.category || style.category || "自定义",
         description: parsed.description || style.description || "",
+        input_contract: normalizeSkillInputContract(parsed),
+        style_rules: normalizeRuntimeStyleRules(parsed.style_rules),
+        rule_evidence: normalizeRuleEvidence(parsed.rule_evidence),
+        execution_priority: Array.isArray(parsed.execution_priority) && parsed.execution_priority.length
+          ? parsed.execution_priority
+          : SKILL_RUNTIME_PRIORITY_RULES,
       };
       return JSON.stringify(normalized, null, 2);
     } catch {
@@ -547,7 +558,8 @@ export function createSkillManager(deps) {
     if (enabledSkills.length === 0) return "";
     return [
       "被调用的执笔人（仅使用已启用执笔人）：",
-      "执行原则：必须优先遵守 style_rules.must；recommended 仅在用户任务匹配时使用；optional 不得压过用户事实。禁止复用 case_specific_exclusions、privacy_filters 和 forbidden 中的内容。事实缺失时使用可替换占位符，不能编造。",
+      ["固定执行优先级：", ...SKILL_RUNTIME_PRIORITY_RULES.map((rule, index) => `${index + 1}. ${rule}`)].join("\n"),
+      "禁止复用 case_specific_exclusions、privacy_filters 和 forbidden 中的内容；recommended / optional 不能压过用户本次输入。",
       ...enabledSkills.map((skill, index) => {
         const skillJson = parseSkillJsonObject(skill.skillJson, skill);
         const payload = buildSkillRuntimePayload(skillJson, skill, skill.qualityReport?.confidence || "low");
@@ -581,4 +593,29 @@ export function createSkillManager(deps) {
     resolveInvokedSkills,
     buildSkillPromptForDocumentGeneration,
   };
+}
+
+function normalizeRuntimeStyleRules(styleRules = {}) {
+  return {
+    must: coerceArray(styleRules.must),
+    recommended: coerceArray(styleRules.recommended),
+    optional: coerceArray(styleRules.optional),
+  };
+}
+
+function normalizeRuleEvidence(ruleEvidence = {}) {
+  if (!ruleEvidence || typeof ruleEvidence !== "object" || Array.isArray(ruleEvidence)) return {};
+  return Object.fromEntries(
+    Object.entries(ruleEvidence)
+      .filter(([rule]) => String(rule || "").trim())
+      .map(([rule, evidence]) => [
+        String(rule).trim(),
+        {
+          support_count: Number(evidence?.support_count || evidence?.evidence_count || 0),
+          support_doc_ids: coerceArray(evidence?.support_doc_ids || evidence?.source_documents),
+          scope: evidence?.scope || "document_type",
+          confidence: ["low", "medium", "high"].includes(evidence?.confidence) ? evidence.confidence : "medium",
+        },
+      ]),
+  );
 }

@@ -16,6 +16,17 @@ export const AI_RETRY_BASE_DELAY_MS = 1000;
 export const AI_MAX_RETRIES = 3;
 export const LARGE_IMPORT_WARNING_BYTES = 10 * 1024 * 1024;
 export const MAX_IMPORT_FILE_BYTES = 50 * 1024 * 1024;
+export const MISSING_FACT_PLACEHOLDER = "【可替换占位符】";
+
+export const SKILL_RUNTIME_PRIORITY_RULES = [
+  "不得编造事实、不得复用隐私信息、不得复用个案信息，永远优先。",
+  "用户本次提供的事实优先于执笔人规则。",
+  "用户本次明确提出的格式、篇幅、语气要求优先于 recommended 和 optional。",
+  "style_rules.must 是硬规则；但如果与用户本次事实或明确要求冲突，不得硬套，应优先保证事实正确和任务可用。",
+  "recommended 仅在用户任务和执笔人适用场景匹配时使用。",
+  "optional 只能作为润色参考，不得改变事实、结构和用户目标。",
+  `信息缺失时使用${MISSING_FACT_PLACEHOLDER}，不得自行补全具体时间、地点、单位、数据、结论、政策依据。`,
+];
 
 export const DOCUMENT_TYPES = [
   {
@@ -61,7 +72,7 @@ export const DOCUMENT_TYPES = [
 ];
 
 export const DEFAULT_SYSTEM_PROMPT =
-  "你是中文事务文档写作助手，擅长撰写通知、方案、总结、会议纪要、请示报告、函件和讲话稿。输出要准确、稳妥、条理清晰，避免编造事实；缺少信息时用可替换占位表达。";
+  `你是中文事务文档写作助手，擅长撰写通知、方案、总结、会议纪要、请示报告、函件和讲话稿。输出要准确、稳妥、条理清晰，避免编造事实；缺少信息时使用${MISSING_FACT_PLACEHOLDER}。`;
 
 export const DEFAULT_STYLE_SKILL =
   "适用场景：组织内部通知、工作安排、事项告知等正式文本。\n结构要求：标题明确；正文先说明事项背景，再列出时间、地点、对象、安排和要求；末尾保留落款与日期。\n语言风格：庄重、简洁、可执行；多用“请”“现将有关事项通知如下”“请各部门结合实际落实”等表达。\n格式要求：层级编号清晰，重要事项分条列示，避免口语化和夸张形容。";
