@@ -37,11 +37,14 @@ export function createAiClient({ getSettings, notify = () => {} }) {
       response = await fetch(url, {
         method: "POST",
         headers,
+        credentials: settings.credentials || "same-origin",
         signal: controller.signal,
         body: JSON.stringify({
           model: settings.model,
           messages,
           temperature: options.temperature ?? 0.35,
+          task_type: options.taskType || settings.taskType || "chat",
+          metadata: options.metadata || {},
         }),
       });
     } catch (error) {
@@ -79,6 +82,7 @@ export function createAiClient({ getSettings, notify = () => {} }) {
     const content =
       data?.choices?.[0]?.message?.content ||
       data?.choices?.[0]?.text ||
+      data?.reply ||
       data?.output_text ||
       data?.content;
     if (!content) {
@@ -112,8 +116,10 @@ export function createAiClient({ getSettings, notify = () => {} }) {
   }
 
   async function callAiJsonWithRepair(messages, label, options = {}) {
+    const taskType = options.taskType || inferTaskTypeFromLabel(label);
     const first = await callAiWithRetry(messages, {
       ...options,
+      taskType,
       temperature: options.temperature ?? 0.15,
     });
     const parsed = parseLooseJson(first);
@@ -128,7 +134,7 @@ export function createAiClient({ getSettings, notify = () => {} }) {
         content: `上一次“${label}”不是有效 JSON。请修复为严格 JSON：不加 Markdown、不加解释、不要尾随逗号、字符串必须用双引号。`,
       },
     ];
-    const second = await callAiWithRetry(repairMessages, { ...options, temperature: 0 });
+    const second = await callAiWithRetry(repairMessages, { ...options, taskType, temperature: 0 });
     const repaired = parseLooseJson(second);
     if (repaired.ok) return repaired.value;
     throw new Error(`${label} 解析失败，请重试或检查模型输出格式。`);
@@ -142,6 +148,12 @@ export function createAiClient({ getSettings, notify = () => {} }) {
     isAbortError,
     sleep,
   };
+}
+
+function inferTaskTypeFromLabel(label = "") {
+  if (/PPT|ppt/i.test(label)) return "ppt_generation";
+  if (/执笔人|skill|样本|聚合|草案|测试|反馈|文档分析/i.test(label)) return "writer_build";
+  return "json_generation";
 }
 
 export function friendlyAiErrorMessage(error) {

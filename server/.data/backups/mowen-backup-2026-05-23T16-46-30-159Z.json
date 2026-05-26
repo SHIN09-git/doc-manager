@@ -1,0 +1,23 @@
+{
+  "exported_at": "2026-05-23T16:46:30.160Z",
+  "data": {
+    "users": [],
+    "organizations": [],
+    "memberships": [],
+    "organization_invitations": [],
+    "email_verifications": [],
+    "password_resets": [],
+    "email_deliveries": [],
+    "login_attempts": [],
+    "documents": [],
+    "writer_profiles": [],
+    "writer_versions": [],
+    "ai_usage": [],
+    "api_keys": [],
+    "audit_logs": [],
+    "system_events": [],
+    "sessions": [],
+    "rate_limits": [],
+    "payment_webhooks": []
+  }
+}

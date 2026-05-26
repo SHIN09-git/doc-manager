@@ -47,6 +47,10 @@
             <span>垃圾箱</span>
             <small id="trashCount">0</small>
           </button>
+          <button class="icon-button" id="cloudTopBtn" type="button" title="打开云端模式" aria-controls="cloudPanel" aria-pressed="false">
+            <i data-lucide="cloud"></i>
+            <span>云端</span>
+          </button>
           <button class="icon-button" id="apiTopBtn" type="button" title="打开 AI 接口配置" aria-controls="apiPanel" aria-pressed="false">
             <i data-lucide="plug-zap"></i>
             <span>接口</span>
@@ -476,8 +480,333 @@
             </div>
             <button id="clearApiBtn" class="danger-text" type="button">清除接口配置</button>
           </section>
+
+          <section class="tab-panel" id="cloudPanel">
+            <div class="panel-heading">
+              <h2>云端模式</h2>
+              <span id="cloudStatusLabel">本地模式</span>
+            </div>
+            <label>
+              <span>后端 API</span>
+              <input id="cloudBaseUrlInput" type="url" placeholder="http://127.0.0.1:8787/api" />
+            </label>
+            <div class="two-actions">
+              <button id="cloudRefreshBtn" type="button">刷新状态</button>
+              <button id="cloudLogoutBtn" type="button">退出登录</button>
+            </div>
+            <div class="cloud-card" id="cloudAccountCard">
+              <strong>未登录</strong>
+              <span>未登录时继续使用本地模式，云端数据不会自动上传。</span>
+            </div>
+            <div class="cloud-auth-grid">
+              <label>
+                <span>邮箱</span>
+                <input id="cloudEmailInput" type="email" autocomplete="email" placeholder="you@example.com" />
+              </label>
+              <label>
+                <span>密码</span>
+                <input id="cloudPasswordInput" type="password" autocomplete="current-password" placeholder="至少 8 位" />
+              </label>
+              <label>
+                <span>姓名 / 组织名</span>
+                <input id="cloudNameInput" type="text" placeholder="首次注册时使用" />
+              </label>
+              <div class="two-actions cloud-auth-actions">
+                <button id="cloudLoginBtn" class="primary-action" type="button">登录</button>
+                <button id="cloudRegisterBtn" type="button">注册</button>
+              </div>
+            </div>
+            <section class="cloud-section">
+              <div class="panel-heading compact-heading">
+                <h3>账号安全</h3>
+                <span>验证与重置</span>
+              </div>
+              <div class="cloud-auth-grid">
+                <label>
+                  <span>邮箱验证码</span>
+                  <input id="cloudEmailTokenInput" type="text" autocomplete="one-time-code" placeholder="注册或申请后显示" />
+                </label>
+                <div class="two-actions cloud-auth-actions">
+                  <button id="cloudRequestVerifyBtn" type="button">申请验证</button>
+                  <button id="cloudVerifyEmailBtn" type="button">验证邮箱</button>
+                </div>
+                <label>
+                  <span>重置码</span>
+                  <input id="cloudResetTokenInput" type="text" autocomplete="one-time-code" placeholder="申请重置后显示" />
+                </label>
+                <label>
+                  <span>新密码</span>
+                  <input id="cloudNewPasswordInput" type="password" autocomplete="new-password" placeholder="至少 8 位" />
+                </label>
+                <div class="two-actions cloud-auth-actions">
+                  <button id="cloudRequestResetBtn" type="button">申请重置</button>
+                  <button id="cloudConfirmResetBtn" type="button">确认重置</button>
+                  <button id="cloudLogoutAllBtn" type="button">退出所有设备</button>
+                </div>
+              </div>
+            </section>
+            <section class="cloud-section">
+              <div class="panel-heading compact-heading">
+                <h3>团队协作</h3>
+                <span>组织成员</span>
+              </div>
+              <div class="cloud-auth-grid">
+                <label>
+                  <span>邀请邮箱</span>
+                  <input id="cloudInviteEmailInput" type="email" placeholder="member@example.com" />
+                </label>
+                <label>
+                  <span>角色</span>
+                  <select id="cloudInviteRoleSelect">
+                    <option value="member">成员</option>
+                    <option value="admin">管理员</option>
+                  </select>
+                </label>
+                <button id="cloudInviteBtn" type="button">生成邀请</button>
+              </div>
+              <div class="cloud-team-list" id="cloudMembersList">登录后显示成员。</div>
+              <div class="cloud-team-list" id="cloudInvitationsList">暂无邀请。</div>
+            </section>
+            <section class="cloud-section">
+              <div class="panel-heading compact-heading">
+                <h3>云端同步</h3>
+                <span>手动同步</span>
+              </div>
+              <div class="two-actions">
+                <button id="cloudSaveDocBtn" type="button">保存当前文档到云端</button>
+                <button id="cloudPullDocsBtn" type="button">从云端导入文档</button>
+                <button id="cloudSaveWriterBtn" type="button">保存当前执笔人到云端</button>
+                <button id="cloudPullWritersBtn" type="button">从云端导入执笔人</button>
+              </div>
+            </section>
+            <section class="cloud-section">
+              <div class="panel-heading compact-heading">
+                <h3>云端 AI 代理</h3>
+                <span>后端加密 Key</span>
+              </div>
+              <label>
+                <span>模型</span>
+                <input id="cloudModelInput" type="text" placeholder="由后端或模型供应商决定" />
+              </label>
+              <label>
+                <span>组织 API Key</span>
+                <input id="cloudApiKeyInput" type="password" autocomplete="off" placeholder="提交后只在后端加密保存" />
+              </label>
+              <div class="two-actions">
+                <button id="cloudSaveApiKeyBtn" type="button">保存到后端</button>
+                <button id="cloudUseAiProxyBtn" class="primary-action" type="button">使用云端 AI 代理</button>
+              </div>
+            </section>
+            <section class="cloud-section">
+              <div class="panel-heading compact-heading">
+                <h3>用量</h3>
+                <span id="cloudUsageLabel">待刷新</span>
+              </div>
+              <pre id="cloudUsageReport" class="quality-report">登录后显示今日 AI 请求、成功数、失败数和 token 统计。</pre>
+            </section>
+            <section class="cloud-section">
+              <div class="panel-heading compact-heading">
+                <h3>账单与套餐</h3>
+                <span id="cloudBillingLabel">待刷新</span>
+              </div>
+              <div class="cloud-billing-actions">
+                <label>
+                  <span>升级套餐</span>
+                  <select id="cloudCheckoutPlanSelect" aria-label="选择升级套餐">
+                    <option value="pro">Pro</option>
+                    <option value="team">Team</option>
+                  </select>
+                </label>
+                <button id="cloudCheckoutBtn" class="primary-action" type="button">创建升级入口</button>
+              </div>
+              <div class="manual-recharge-card" id="cloudManualRechargeCard">
+                <div class="manual-recharge-head">
+                  <div>
+                    <strong>人工确认充值</strong>
+                    <span>扫码付款后提交订单，管理员确认后开通会员或发放额度。</span>
+                  </div>
+                  <span id="cloudCreditBalanceLabel">额度：-</span>
+                </div>
+                <div class="manual-recharge-grid">
+                  <label>
+                    <span>充值套餐</span>
+                    <select id="cloudManualPackageSelect" aria-label="选择充值套餐"></select>
+                  </label>
+                  <label>
+                    <span>支付方式</span>
+                    <select id="cloudManualPaymentMethodSelect" aria-label="选择支付方式">
+                      <option value="wechat">微信</option>
+                      <option value="alipay">支付宝</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="manual-payment-methods" id="cloudManualPaymentMethods"></div>
+                <label>
+                  <span>付款备注</span>
+                  <input id="cloudManualOrderNoteInput" type="text" placeholder="例如：付款昵称、转账尾号或付款时间">
+                </label>
+                <label>
+                  <span>凭证说明</span>
+                  <textarea id="cloudManualProofInput" rows="2" placeholder="可填写订单号、截图文件名或其他便于核对的信息"></textarea>
+                </label>
+                <button id="cloudManualOrderBtn" class="primary-action" type="button">提交充值订单</button>
+              </div>
+              <pre id="cloudBillingReport" class="quality-report">管理员登录后显示当前套餐、账单事件和升级入口。</pre>
+            </section>
+            <section class="cloud-section">
+              <div class="panel-heading compact-heading">
+                <h3>数据与运维</h3>
+                <span>导出 / 删除 / 错误</span>
+              </div>
+              <div class="two-actions">
+                <button id="cloudExportDataBtn" type="button">导出我的云端数据</button>
+                <button id="cloudDeleteAccountBtn" type="button">删除云端账号</button>
+                <button id="cloudRecentErrorsBtn" type="button">查看最近错误</button>
+                <button id="cloudAdminDashboardBtn" type="button">管理汇总</button>
+              </div>
+              <label>
+                <span>内测反馈</span>
+                <textarea id="cloudFeedbackInput" rows="3" placeholder="记录试用中遇到的问题、希望优化的流程或错误现象"></textarea>
+              </label>
+              <button id="cloudSendFeedbackBtn" type="button">提交反馈</button>
+              <pre id="cloudOpsReport" class="quality-report">管理员可查看最近 AI 和接口错误。</pre>
+            </section>
+          </section>
         </aside>
       </main>
+
+      <div class="preview-overlay cloud-admin-overlay" id="cloudAdminModal" hidden>
+        <div class="preview-modal cloud-admin-modal" role="dialog" aria-modal="true" aria-labelledby="cloudAdminModalTitle" tabindex="-1">
+          <div class="preview-modal-head">
+            <div>
+              <h2 id="cloudAdminModalTitle">云端管理后台</h2>
+              <p>查看组织、成员、用量、审计、反馈、错误和账单事件。</p>
+            </div>
+            <button class="ghost-icon" id="closeCloudAdminModalBtn" type="button" title="关闭">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          <div class="cloud-admin-toolbar">
+            <button id="cloudAdminRefreshBtn" class="primary-action" type="button">刷新后台</button>
+            <button id="cloudAdminExportOrgBtn" type="button">导出组织数据</button>
+            <button id="cloudAdminExportUsageCsvBtn" type="button">导出用量 CSV</button>
+            <button id="cloudAdminExportAuditCsvBtn" type="button">导出审计 CSV</button>
+            <button id="cloudAdminDeletionRequestBtn" class="danger-text" type="button">创建删除草案</button>
+          </div>
+          <div class="cloud-admin-grid">
+            <section class="cloud-admin-card">
+              <h3>组织概览</h3>
+              <div id="cloudAdminOverview" class="cloud-admin-list">等待加载。</div>
+            </section>
+            <section class="cloud-admin-card">
+              <h3>成员与邀请</h3>
+              <div id="cloudAdminMembers" class="cloud-admin-list">等待加载。</div>
+            </section>
+            <section class="cloud-admin-card">
+              <h3>用量筛选</h3>
+              <div class="cloud-admin-filter">
+                <input id="cloudAdminUsageFrom" type="date" aria-label="用量开始日期" />
+                <input id="cloudAdminUsageTo" type="date" aria-label="用量结束日期" />
+                <input id="cloudAdminUsageTask" type="text" placeholder="任务类型" />
+                <select id="cloudAdminUsageStatus" aria-label="用量状态">
+                  <option value="">全部状态</option>
+                  <option value="success">成功</option>
+                  <option value="failed">失败</option>
+                </select>
+              </div>
+              <div id="cloudAdminUsageList" class="cloud-admin-list">等待加载。</div>
+            </section>
+            <section class="cloud-admin-card">
+              <h3>审计筛选</h3>
+              <div class="cloud-admin-filter">
+                <input id="cloudAdminAuditFrom" type="date" aria-label="审计开始日期" />
+                <input id="cloudAdminAuditTo" type="date" aria-label="审计结束日期" />
+                <input id="cloudAdminAuditAction" type="text" placeholder="动作" />
+              </div>
+              <div id="cloudAdminAuditList" class="cloud-admin-list">等待加载。</div>
+            </section>
+            <section class="cloud-admin-card">
+              <div class="cloud-admin-card-head">
+                <h3>反馈流转</h3>
+                <select id="cloudAdminFeedbackStatusFilter" aria-label="反馈状态筛选">
+                  <option value="">全部反馈</option>
+                  <option value="pending">待处理</option>
+                  <option value="processing">处理中</option>
+                  <option value="resolved">已解决</option>
+                  <option value="closed">已关闭</option>
+                </select>
+              </div>
+              <div id="cloudAdminFeedbackList" class="cloud-admin-list">等待加载。</div>
+            </section>
+            <section class="cloud-admin-card">
+              <h3>邮件投递</h3>
+              <div class="cloud-admin-filter">
+                <input id="cloudAdminEmailInput" type="text" placeholder="邮箱" aria-label="邮件邮箱筛选" />
+                <select id="cloudAdminEmailTemplate" aria-label="邮件模板筛选">
+                  <option value="">全部模板</option>
+                  <option value="email_verification">邮箱验证</option>
+                  <option value="password_reset">密码重置</option>
+                </select>
+                <select id="cloudAdminEmailStatus" aria-label="邮件状态筛选">
+                  <option value="">全部状态</option>
+                  <option value="pending">待发送</option>
+                  <option value="sent">已发送</option>
+                  <option value="delivered">已送达</option>
+                  <option value="opened">已打开</option>
+                  <option value="bounced">已退信</option>
+                  <option value="failed">失败</option>
+                </select>
+              </div>
+              <div id="cloudAdminEmailList" class="cloud-admin-list">等待加载。</div>
+            </section>
+            <section class="cloud-admin-card">
+              <h3>错误与账单</h3>
+              <div id="cloudAdminOpsList" class="cloud-admin-list">等待加载。</div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <section class="cloud-admin-workspace" id="cloudAdminWorkspace" aria-labelledby="cloudAdminWorkspaceTitle" hidden>
+        <div class="cloud-admin-workspace-shell">
+          <header class="cloud-admin-workspace-head">
+            <div>
+              <p class="eyebrow">云端运营</p>
+              <h2 id="cloudAdminWorkspaceTitle">管理后台</h2>
+              <span id="cloudAdminWorkspaceSubtitle">组织、用量、审计、反馈、邮件和账单事件。</span>
+            </div>
+            <div class="cloud-admin-workspace-actions">
+              <button id="cloudAdminWorkspaceRefreshBtn" class="primary-action" type="button">刷新</button>
+              <button id="cloudAdminWorkspaceOrgExportBtn" type="button">导出组织</button>
+              <button id="cloudAdminWorkspaceExportUsageCsvBtn" type="button">导出用量 CSV</button>
+              <button id="cloudAdminWorkspaceExportAuditCsvBtn" type="button">导出审计 CSV</button>
+              <button class="ghost-icon" id="closeCloudAdminWorkspaceBtn" type="button" title="返回工作台">
+                <i data-lucide="x"></i>
+              </button>
+            </div>
+          </header>
+          <div id="cloudAdminWorkspaceSummary" class="cloud-admin-summary-grid">等待加载。</div>
+          <div class="cloud-admin-workspace-body">
+            <nav id="cloudAdminWorkspaceNav" class="cloud-admin-side-nav" aria-label="管理后台栏目">
+              <button class="active" type="button" data-admin-workspace-view="overview">概览</button>
+              <button type="button" data-admin-workspace-view="members">成员</button>
+              <button type="button" data-admin-workspace-view="usage">用量</button>
+              <button type="button" data-admin-workspace-view="audit">审计</button>
+              <button type="button" data-admin-workspace-view="feedback">反馈</button>
+              <button type="button" data-admin-workspace-view="email">邮件</button>
+              <button type="button" data-admin-workspace-view="billing">账单</button>
+              <button type="button" data-admin-workspace-view="errors">错误</button>
+            </nav>
+            <section class="cloud-admin-workspace-panel">
+              <div class="cloud-admin-workspace-panel-head">
+                <h3 id="cloudAdminWorkspacePanelTitle">概览</h3>
+                <button id="cloudAdminWorkspaceDeletionRequestBtn" class="danger-text" type="button">创建删除草案</button>
+              </div>
+              <div id="cloudAdminWorkspaceContent" class="cloud-admin-workspace-content">等待加载。</div>
+            </section>
+          </div>
+        </div>
+      </section>
 
       <div class="preview-overlay skill-builder-overlay" id="skillBuilderModal" hidden>
         <div class="preview-modal skill-builder-modal" role="dialog" aria-modal="true" aria-labelledby="skillBuilderModalTitle" tabindex="-1">

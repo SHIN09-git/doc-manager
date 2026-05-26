@@ -1,6 +1,248 @@
 # TODO
 
-更新时间：2026-05-22
+## 2026-05-26 人工确认版充值系统完成记录
+
+- [x] 新增人工充值订单数据闭环：`manual_payment_orders` 记录用户提交的套餐、支付方式、备注、凭证说明和审核状态。
+- [x] 新增额度账户与额度流水：`credit_accounts` 保存剩余 AI 额度，`credit_ledger` 记录充值入账和超额调用扣减。
+- [x] 新增 `GET/POST /api/billing/manual-orders` 与 `POST /api/billing/manual-orders/:id/review`，支持用户提交订单、管理员确认或拒绝。
+- [x] 管理员确认后自动发放额度，或按套餐开通 `pro/team` 并写入 `plan_expires_at`。
+- [x] AI 日限用完后可消耗已购买额度继续调用；成功调用后扣减 1 点额度。
+- [x] 云端面板新增“人工确认充值”区域，展示套餐、收款码、付款备注、凭证说明和近期订单状态。
+- [x] 独立后台账单页新增人工订单审核区，支持单笔确认或拒绝。
+- [x] 补充 JSON/PostgreSQL schema、迁移脚本、后端测试和端到端后台冒烟覆盖。
+
+后续真实支付渠道接入仍保留为独立任务；人工确认版可以先用于微信/支付宝扫码收款和灰度运营。
+
+## 2026-05-26 P2 第六轮商业化施工完成记录
+
+- [x] 收口 `/api/ops/recent-errors` 权限边界：组织后台只返回本组织事件与本组织 AI 失败记录，不暴露平台级全局事件。
+- [x] 统一系统错误与 AI 失败记录的轻量跟进契约：新增 `ops_triage`，同一入口可保存状态、优先级、负责人、备注和 SLA。
+- [x] 新增 `POST /api/feedback/batch-status`，反馈批量状态更新改为后端批量接口。
+- [x] 成本估算后端化：新增 `AI_COST_RATES`、`AI_DAILY_BUDGET_CNY`、`AI_MONTHLY_BUDGET_CNY`，`recordUsage` 写入统一 `estimated_cost`。
+- [x] 独立后台补充今日/本月成本、任务成本分布、预算摘要、SLA 筛选与一键复制运营日报。
+- [x] 后台偏好云端化：新增 `admin_preferences`，审计保存筛选、错误筛选、反馈筛选按组织与用户保存，前端保留 localStorage 兜底。
+- [x] 组织数据导出包含 `ops_triage` 与 `admin_preferences`，便于灰度运营留档。
+- [x] 补充后端测试与独立后台 E2E mock 覆盖。
+
+下一阶段优先建议：
+
+- [ ] 继续拆 PostgreSQL 写入路径，优先处理 `writer_profiles`、`writer_versions`、`admin_preferences`、`ops_triage` 的表级 repository。
+- [ ] 为管理后台补一个只读运营角色，避免 owner/admin 承担所有后台查看权限。
+- [ ] 建立真实支付渠道接入方案，选择 Stripe、Paddle、Creem 或国内支付渠道之一做签名与 webhook 适配。
+- [ ] 补充真实 Resend 域名、webhook 订阅与投递率验证记录。
+
+## 2026-05-24 后台深水区完成记录
+
+- [x] 独立后台“用量”栏目新增趋势条形图、估算成本卡片和任务类型分布，成本优先读取后端记录，缺省按默认 token 单价估算。
+- [x] 独立后台“审计”栏目新增保存筛选，支持保存当前日期/动作条件、快速套用和删除本地筛选。
+- [x] 反馈处理新增负责人、备注和 SLA 字段，保存后写回后端 `user.feedback` 系统事件元数据。
+- [x] 错误事件新增轻量工单化字段：状态、优先级、负责人、备注和 SLA，并新增后端错误事件跟进接口。
+- [x] `GET /api/ops/recent-errors` 补充事件 `id` 与 `level`，便于后台页面复制、筛选和后续工单处理。
+- [x] 端到端用例覆盖后台用量趋势、成本估算、审计保存筛选、反馈跟进、错误跟进。
+
+下一步建议：补一个真正的运营只读角色，避免所有后台查看动作都必须给到 owner/admin；同时把反馈/错误批量跟进改为后端批量接口。
+
+## 2026-05-24 下一阶段待施工重点
+
+- [ ] 收口 `/api/ops/recent-errors` 权限边界，组织管理员默认只能看本组织事件，不能看到平台级全局事件。
+- [ ] 统一 AI 失败记录与系统错误事件的跟进契约，避免“能展示但无法保存跟进”。
+- [ ] 增加反馈批量状态接口，替换前端逐条请求。
+- [ ] 将后台审计筛选从 localStorage 升级为按组织/用户隔离的云端偏好。
+- [ ] 将成本估算后端化，增加 provider/model 价格配置、月度成本汇总和预算预警。
+- [ ] 增加 SLA 即将到期/已逾期筛选和后台概览摘要。
+
+施工计划见 `P2_ROUND6_COMMERCIALIZATION_BUILD_PLAN.md`。
+
+## 2026-05-23 P0 商业化补齐完成记录
+
+- [x] 完成 `COMMERCIAL_ARCHITECTURE.md`，明确本地模式、云端模式、AI 代理、组织隔离和隐私边界。
+- [x] 完成 `DATABASE_SCHEMA.md`，覆盖用户、组织、成员、文档、执笔人、版本、API Key、用量和审计。
+- [x] 新增 `server/` 商业化后端骨架，提供健康检查、注册登录、组织、文档、执笔人、版本、API Key、AI 代理、用量和审计接口。
+- [x] API Key 后端 AES-GCM 加密存储，仅返回 `key_hint`。
+- [x] AI 调用可走后端代理，并记录基础用量、失败状态和审计日志。
+- [x] 前端新增“云端”入口，支持登录/注册、手动同步当前文档、同步当前执笔人、保存云端 API Key、启用云端 AI 代理和查看用量，并增加云端入口端到端用例。
+- [x] 保持未登录本地模式兼容，旧数据不强制上传。
+
+后续商业化优先进入 `P1_COMMERCIALIZATION_BUILD_PLAN.md`。
+
+## 2026-05-23 P1 商业化第一轮完成记录
+
+- [x] 生产环境环境变量校验：生产模式禁止默认密钥，要求强 `APP_ENCRYPTION_SECRET`、`SESSION_SECRET` 和明确 `CORS_ORIGIN`。
+- [x] 增加存储抽象层，保留 JSON Store 本地开发模式，并预留 `STORE_DRIVER=postgres` 与 `DATABASE_URL`。
+- [x] 新增 `server/migrations/001_initial.sql`，覆盖 PostgreSQL 首版迁移草案和关键索引。
+- [x] 组织协作新增成员列表、邀请、接受邀请接口；接受邀请必须匹配邀请码。
+- [x] 云端文档和云端执笔人新增 `version`，前端保存时携带同步版本，冲突时提供覆盖云端、另存副本、拉取云端三种处理。
+- [x] AI 代理支持请求超时和任务类型统计，前端文档生成、段落改写、执笔人构建、PPT 生成会携带或推断 `task_type`。
+- [x] 套餐配额按 `free/pro/team` 读取，当前用量接口返回计划和限制信息。
+- [x] 云端面板新增团队协作区，支持查看成员、查看邀请和创建成员邀请。
+- [x] 修复 JSON Store 写入队列失败后会污染后续写入的问题。
+
+下一轮商业化施工建议见 `P1_ROUND2_COMMERCIALIZATION_BUILD_PLAN.md`。
+
+## 2026-05-23 P1 商业化第二轮与第三轮完成记录
+
+- [x] 账号安全闭环：邮箱验证、忘记密码、重置密码、登录失败节流、退出所有设备。
+- [x] PostgreSQL 真实存储：接入 `pg`，启动执行迁移，并提供 JSON 到 PostgreSQL 导入脚本。
+- [x] 团队管理增强：邀请撤销、重发邀请、角色调整、成员移除和审计记录。
+- [x] 部署与可观测：Dockerfile、`/api/ready`、结构化请求日志、最近错误接口。
+- [x] 合规与数据：隐私政策草案、用户协议草案、云端数据导出、云端账号删除。
+- [x] 灰度准备：部署指南、灰度试用清单、云端面板内测反馈入口。
+- [x] 第三轮运营预埋：组织名称更新、用量/审计过滤、套餐摘要、支付 webhook 占位。
+
+下一轮建议进入 P2：正式管理后台、计费接入、组织级数据治理和企业部署增强。
+
+## 2026-05-23 P2 商业化第一轮完成记录
+
+- [x] 邮件服务接入：开发模式记录邮件，生产模式通过 HTTP webhook 发送邮箱验证和密码重置邮件。
+- [x] 邮件投递记录：新增 `email_deliveries`，记录状态、重试次数、错误和关联元数据。
+- [x] 支付 webhook 正式化：改为 HMAC 签名 + timestamp 校验，重复事件按 `provider + event_id` 幂等处理。
+- [x] 套餐事件驱动：支付成功、订阅创建、订阅更新可更新组织套餐，订阅取消会降级到 `free`。
+- [x] 管理汇总 API：新增 `GET /api/admin/dashboard`，仅 owner/admin 可访问。
+- [x] 云端面板新增“管理汇总”入口，用于查看组织、成员、邀请、用量、反馈、错误和账单摘要。
+- [x] 备份自动化：新增 `npm run server:backup`，支持备份目录和保留天数。
+- [x] Review 后修复：支付签名使用定时安全比较，并补充普通成员禁止访问管理汇总、过期 webhook 被拒绝的测试。
+
+下一轮建议进入 `P2_ROUND2_COMMERCIALIZATION_BUILD_PLAN.md`。
+
+## 2026-05-23 P2 商业化第二轮完成记录
+
+- [x] 云端管理后台二级页面：从云端面板进入独立弹窗，分区展示组织、成员、邀请、用量、审计、反馈、错误和账单事件。
+- [x] 用量和审计筛选：管理后台支持日期、任务类型、状态和审计动作筛选。
+- [x] 反馈状态流转：支持将反馈标记为待处理、处理中、已解决和关闭。
+- [x] 邮件模板与限流：邮箱验证和密码重置模板集中生成，同一邮箱短时间重复申请会被限制。
+- [x] 支付事件适配层：支付成功、订阅更新、取消订阅、支付失败和退款事件已归一处理。
+- [x] 备份恢复演练：新增 `npm run server:backup:verify -- <backup-file>` 校验备份结构。
+- [x] 组织级数据治理：新增组织数据导出接口和组织删除/停用草案接口，危险操作不做不可逆删除。
+
+下一轮建议进入 `P2_ROUND3_COMMERCIALIZATION_BUILD_PLAN.md`。
+
+## 2026-05-24 P2 商业化第三轮完成记录
+
+- [x] 邮件服务商实接说明：补充邮件 webhook 请求体、模板字段、退信/限流/失败处理建议。
+- [x] 支付价格映射：新增 `PAYMENT_PLAN_PRICE_MAP`，配置映射后仅允许渠道价格 ID 变更内部套餐。
+- [x] 备份失败告警：`server:backup` 失败时返回非 0 退出码，并可向 `BACKUP_FAILURE_WEBHOOK_URL` 发送最小告警。
+- [x] 管理后台增强：反馈状态筛选、用量 CSV 导出、审计 CSV 导出、错误/账单事件复制详情、高风险成员移除确认文案。
+- [x] PostgreSQL Store 生产级拆分方案：新增表级 repository、迁移版本、增量 SQL 与测试策略文档。
+- [x] 文档更新：部署、安全、架构、README、Review 与商业化进度同步更新。
+
+下一轮建议进入 `P2_ROUND4_COMMERCIALIZATION_BUILD_PLAN.md`。
+
+## 2026-05-24 P2 第四轮阶段 A 完成记录
+
+- [x] 新增后端 `POST /api/billing/checkout`，用于创建套餐升级入口。
+- [x] 新增 checkout 配置：`PAYMENT_CHECKOUT_MODE`、`PAYMENT_CHECKOUT_URL`、`PAYMENT_SUCCESS_URL`、`PAYMENT_CANCEL_URL`。
+- [x] checkout 创建仅允许组织 owner/admin，并继续通过 `PAYMENT_PLAN_PRICE_MAP` 解析价格 ID。
+- [x] 云端面板新增“账单与套餐”区域，展示套餐、额度、账单事件和升级入口。
+- [x] 升级按钮只调用后端接口，不直接拼接第三方支付链接。
+- [x] 补充后端 checkout 权限、配置缺失、mock URL 和 price ID 映射测试。
+
+下一步进入 P2 第四轮阶段 B：邮件投递回调与运营筛选。
+
+## 2026-05-24 P2 第四轮阶段 B 完成记录
+
+- [x] 新增 `POST /api/webhooks/email`，支持邮件服务商状态回调。
+- [x] 新增 `EMAIL_CALLBACK_TOKEN`，回调需要 header、Bearer 或 query token 鉴权。
+- [x] 邮件发送 webhook 携带 `metadata.delivery_id`，回调可优先按投递 ID 匹配。
+- [x] 回调支持 `delivered`、`bounced`、`failed`、`opened`。
+- [x] 未匹配回调只记录系统事件，不污染 `email_deliveries`。
+- [x] 管理后台新增“邮件投递”筛选区域，支持邮箱、模板、状态筛选和复制详情。
+- [x] 补充邮件回调 token、状态更新、未匹配事件测试。
+
+下一步进入 P2 第四轮阶段 C：管理后台独立页面雏形。
+
+## 2026-05-24 P2 第四轮阶段 C 完成记录
+
+- [x] 新增 `#admin` hash 路由，提供独立全屏管理后台视图。
+- [x] 原“管理汇总”入口改为进入独立管理视图，旧弹窗逻辑保留为兼容基础。
+- [x] 独立后台拆成概览、成员、用量、审计、反馈、邮件、账单、错误栏目。
+- [x] 独立后台复用现有管理 API、CSV 导出、组织导出、删除草案、反馈状态流转和详情复制能力。
+- [x] 未登录或非管理员访问 `#admin` 会被拦截并回到云端面板。
+- [x] 补充未登录访问管理后台 hash 的端到端测试。
+
+## 2026-05-24 P2 第四轮阶段 D 完成记录
+
+- [x] 修复独立管理后台“刷新”按钮加载态挂到旧弹窗按钮的问题。
+- [x] 新增 PostgreSQL 迁移执行器，按 `server/migrations/*.sql` 顺序执行并写入 `migration_versions`。
+- [x] PostgreSQL Store 启动时通过迁移执行器记录已执行版本，迁移版本表不纳入快照写回，避免被 `saveAll` 清空。
+- [x] 新增 `ai_usage` 只读 repository，提供 `listUsageByOrganization`。
+- [x] `GET /api/usage/history` 在 PostgreSQL Store 下优先走 repository，JSON Store 路径保持不变。
+- [x] 补充迁移版本记录、repository 组织隔离、limit 和行归一化测试。
+
+## 2026-05-24 P2 第四轮阶段 E 完成记录
+
+- [x] 新增 `BACKUP_ENCRYPTION_KEY`，配置后逻辑备份输出 `.json.gcm` 加密文件。
+- [x] 加密备份使用 AES-256-GCM envelope，明文备份未配置时保持 `.json` 行为。
+- [x] `server:backup:verify` 同时支持明文 `.json` 和加密 `.json.gcm`，加密校验需要同一备份密钥。
+- [x] 新增 S3-compatible 对象存储配置项，默认 `disabled`，不影响本地备份。
+- [x] 新增原生 AWS Signature V4 PUT 上传适配器，不引入额外依赖。
+- [x] 补充备份加密、对象存储配置校验、S3 签名、明文和加密备份命令路径验证。
+
+## 2026-05-24 P2 第四轮阶段 F 完成记录
+
+- [x] 统一复查阶段 A-E，未发现阻断问题。
+- [x] 完整运行构建、检查、单元测试、端到端测试、依赖审计、备份命令验证和 diff 空白检查。
+- [x] 阶段 A-E 文档与商业化进度报告已同步。
+- [x] 新增下一阶段施工文件 `P2_ROUND5_COMMERCIALIZATION_BUILD_PLAN.md`。
+
+下一步进入 P2 第五轮：真实服务商集成、PostgreSQL repository 扩面和恢复演练。
+
+## 2026-05-24 P2 第五轮阶段 A 完成记录
+
+- [x] 选择 Resend 作为首个真实邮件服务商适配对象，保留 `generic-webhook` 兼容路径。
+- [x] 新增 `EMAIL_PROVIDER`、`EMAIL_RESEND_API_KEY`、`EMAIL_RESEND_ENDPOINT` 配置和生产校验。
+- [x] 后端邮件发送支持直接调用 Resend Email API，并保存服务商返回的 `message_id`。
+- [x] 邮件投递回调支持 Resend 风格事件、标签和退信错误字段。
+- [x] `email_verification` 与 `password_reset` 模板变量、回调字段映射和退信/失败/限流运营说明已写入部署文档。
+- [x] 后端测试补充 Resend 发送适配和 Resend 风格退信回调。
+
+下一步进入 P2 第五轮阶段 B：真实支付渠道接入。
+
+## 2026-05-24 P2 第五轮阶段 B 暂缓记录
+
+- [x] 按当前施工安排先跳过真实支付渠道接入。
+- [x] 保留既有 `POST /api/billing/checkout`、`PAYMENT_PLAN_PRICE_MAP` 和 HMAC payment webhook 能力。
+
+后续需要商业化支付实接时，再回到阶段 B 选择具体支付渠道。
+
+## 2026-05-24 P2 第五轮阶段 C 完成记录
+
+- [x] 新增 `audit_logs` 只读 repository，支持组织隔离、日期、action、target_type 和 limit 筛选。
+- [x] `GET /api/audit` 在 PostgreSQL Store 下优先走 audit repository，JSON Store 路径保持原行为。
+- [x] 新增 `documents` 分页只读 repository，支持组织隔离、软删除过滤、类型、文件夹和游标分页。
+- [x] `GET /api/documents` 在 PostgreSQL Store 下优先走 documents repository，响应继续包含 `documents`，并额外提供 `page_info`。
+- [x] 评估 `ai_usage` 写入：本阶段暂不切为 insert-only，避免和现有 `ctx.store.write` 快照写回混用产生覆盖风险。
+- [x] PostgreSQL repository 测试补充 audit/documents 查询构建、组织隔离、分页、JSON/日期归一和迁移版本跳过重复执行。
+
+下一步进入 P2 第五轮阶段 D：备份恢复演练。
+
+## 2026-05-24 独立管理后台页面完成记录
+
+- [x] 新增 `admin.html`，作为与主工作台分离的后台管理网页。
+- [x] 新增 `src/admin/adminPage.js`，独立处理登录、权限检查、后台数据加载和栏目切换。
+- [x] 后台页支持概览、成员、用量、审计、反馈、邮件、账单和错误栏目。
+- [x] 后台页支持反馈状态流转、组织数据导出、用量 CSV、审计 CSV、组织删除/停用草案和详情复制。
+- [x] 主工作台“管理后台”入口改为跳转 `admin.html`，旧 `#admin` 视图保留兼容。
+- [x] 端到端测试补充独立后台页未登录门禁。
+
+## 2026-05-24 独立管理后台运营动作增强记录
+
+- [x] 独立后台概览页支持修改组织名称。
+- [x] 独立后台成员页支持创建邀请、复制邀请口令、重发邀请、撤销邀请、调整成员角色和移除成员。
+- [x] 独立后台新增“接口”栏目，支持保存组织 API Key 和删除组织接口配置；原始密钥不回显。
+- [x] 独立后台账单页支持读取后端可用套餐并发起 checkout 升级入口。
+- [x] 补充正向会话下的独立后台端到端冒烟测试，覆盖组织、成员、接口和账单核心动作。
+
+## 2026-05-24 独立管理后台运营面板增强记录
+
+- [x] 用量栏目增加匹配记录、成功请求、失败请求、总 tokens 和任务类型分布。
+- [x] 审计栏目增加动作类型、对象类型、最近记录和动作分布。
+- [x] 用量和审计记录支持逐条复制详情，便于运营留档和排查。
+- [x] 反馈栏目支持将当前反馈批量标记为处理中、已解决或关闭。
+- [x] 错误栏目支持按级别筛选，并复制当前筛选后的错误列表。
+- [x] 成员移除、邀请撤销、接口删除和组织删除/停用草稿改为统一二次确认弹窗。
+- [x] 端到端测试扩展覆盖用量摘要、审计摘要、反馈批处理、错误筛选和确认弹窗。
+
+更新时间：2026-05-23
 
 这份清单记录项目后续优化方向。当前版本已完成 MVP 和多轮 P0/P1 优化，剩余重点是继续模块化、增强执笔人协作能力和完善发布体验。
 
@@ -11,7 +253,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：78 项单元测试通过，25 项端到端测试通过。
+- 最近一次完整验证：78 项前端与核心单元测试通过，28 项后端商业化 API 测试通过，29 项端到端测试通过。
 
 ## 已完成
 
@@ -150,9 +392,9 @@
 
 ## P3：长期方向
 
-- [ ] 可选后端代理，用于统一 API Key、额度和审计
+- [x] 可选后端代理，用于统一 API Key、额度和审计
 - [ ] 执笔人仓库或市场
-- [ ] 多设备同步方案
+- [x] 多设备同步基础方案
 - [ ] 文档审稿和批注模式
 - [ ] 更完整的 Word 样式导出
 - [ ] PDF 稳定阅读与导出

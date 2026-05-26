@@ -83,6 +83,12 @@ const ui = {
   mobileView: "editor",
   pptPreviewReturnFocus: null,
   trashModalReturnFocus: null,
+  cloudAdminReturnFocus: null,
+  cloudAdminVisibleErrors: [],
+  cloudAdminVisiblePayments: [],
+  cloudAdminVisibleEmails: [],
+  cloudAdminWorkspaceView: "overview",
+  cloudAdminWorkspaceReturnHash: "",
   skillBuilderReturnFocus: null,
   generatedDraft: "",
   pptDraft: "",
@@ -91,6 +97,7 @@ const ui = {
 
 const els = {};
 const EDITOR_UNDO_LIMIT = 80;
+const DEFAULT_CLOUD_API_BASE_URL = "http://127.0.0.1:8787/api";
 const aiClient = createAiClient({
   getSettings: () => state.settings || {},
   notify: (message, tone) => toast(message, tone),
@@ -347,6 +354,7 @@ function bindElements() {
     "restoreAllTrashBtn",
     "clearTrashBtn",
     "apiTopBtn",
+    "cloudTopBtn",
     "responsiveInspectorToggle",
     "mobileWorkspaceNav",
     "responsiveBackdrop",
@@ -460,6 +468,7 @@ function bindElements() {
     "skillDetailExampleList",
     "skillDetailCloseBtn",
     "apiSavedLabel",
+    "cloudPanel",
     "providerSelect",
     "baseUrlInput",
     "endpointPathInput",
@@ -469,6 +478,96 @@ function bindElements() {
     "saveApiBtn",
     "testApiBtn",
     "clearApiBtn",
+    "cloudStatusLabel",
+    "cloudBaseUrlInput",
+    "cloudRefreshBtn",
+    "cloudLogoutBtn",
+    "cloudAccountCard",
+    "cloudEmailInput",
+    "cloudPasswordInput",
+    "cloudNameInput",
+    "cloudLoginBtn",
+    "cloudRegisterBtn",
+    "cloudEmailTokenInput",
+    "cloudRequestVerifyBtn",
+    "cloudVerifyEmailBtn",
+    "cloudResetTokenInput",
+    "cloudNewPasswordInput",
+    "cloudRequestResetBtn",
+    "cloudConfirmResetBtn",
+    "cloudLogoutAllBtn",
+    "cloudInviteEmailInput",
+    "cloudInviteRoleSelect",
+    "cloudInviteBtn",
+    "cloudMembersList",
+    "cloudInvitationsList",
+    "cloudSaveDocBtn",
+    "cloudPullDocsBtn",
+    "cloudSaveWriterBtn",
+    "cloudPullWritersBtn",
+    "cloudModelInput",
+    "cloudApiKeyInput",
+    "cloudSaveApiKeyBtn",
+    "cloudUseAiProxyBtn",
+    "cloudUsageLabel",
+    "cloudUsageReport",
+    "cloudBillingLabel",
+    "cloudCheckoutPlanSelect",
+    "cloudCheckoutBtn",
+    "cloudManualRechargeCard",
+    "cloudCreditBalanceLabel",
+    "cloudManualPackageSelect",
+    "cloudManualPaymentMethodSelect",
+    "cloudManualPaymentMethods",
+    "cloudManualOrderNoteInput",
+    "cloudManualProofInput",
+    "cloudManualOrderBtn",
+    "cloudBillingReport",
+    "cloudExportDataBtn",
+    "cloudDeleteAccountBtn",
+    "cloudRecentErrorsBtn",
+    "cloudAdminDashboardBtn",
+    "cloudFeedbackInput",
+    "cloudSendFeedbackBtn",
+    "cloudOpsReport",
+    "cloudAdminModal",
+    "closeCloudAdminModalBtn",
+    "cloudAdminRefreshBtn",
+    "cloudAdminExportOrgBtn",
+    "cloudAdminExportUsageCsvBtn",
+    "cloudAdminExportAuditCsvBtn",
+    "cloudAdminDeletionRequestBtn",
+    "cloudAdminOverview",
+    "cloudAdminMembers",
+    "cloudAdminUsageFrom",
+    "cloudAdminUsageTo",
+    "cloudAdminUsageTask",
+    "cloudAdminUsageStatus",
+    "cloudAdminUsageList",
+    "cloudAdminAuditFrom",
+    "cloudAdminAuditTo",
+    "cloudAdminAuditAction",
+    "cloudAdminAuditList",
+    "cloudAdminFeedbackStatusFilter",
+    "cloudAdminFeedbackList",
+    "cloudAdminEmailInput",
+    "cloudAdminEmailTemplate",
+    "cloudAdminEmailStatus",
+    "cloudAdminEmailList",
+    "cloudAdminOpsList",
+    "cloudAdminWorkspace",
+    "cloudAdminWorkspaceTitle",
+    "cloudAdminWorkspaceSubtitle",
+    "cloudAdminWorkspaceRefreshBtn",
+    "cloudAdminWorkspaceOrgExportBtn",
+    "cloudAdminWorkspaceExportUsageCsvBtn",
+    "cloudAdminWorkspaceExportAuditCsvBtn",
+    "closeCloudAdminWorkspaceBtn",
+    "cloudAdminWorkspaceSummary",
+    "cloudAdminWorkspaceNav",
+    "cloudAdminWorkspacePanelTitle",
+    "cloudAdminWorkspaceDeletionRequestBtn",
+    "cloudAdminWorkspaceContent",
     "toastRegion",
   ].forEach((id) => {
     els[id] = document.getElementById(id);
@@ -560,6 +659,26 @@ function initializeMissingData() {
     state.settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
   }
 
+  state.cloud = {
+    apiBaseUrl: DEFAULT_CLOUD_API_BASE_URL,
+    authenticated: false,
+    user: null,
+    organizations: [],
+    activeOrganization: null,
+    membership: null,
+    members: [],
+    invitations: [],
+    usage: null,
+    billing: null,
+    model: "",
+    ...(state.cloud || {}),
+  };
+  state.cloud.apiBaseUrl = normalizeCloudBaseUrl(state.cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL);
+  state.cloud.organizations = Array.isArray(state.cloud.organizations) ? state.cloud.organizations : [];
+  state.cloud.members = Array.isArray(state.cloud.members) ? state.cloud.members : [];
+  state.cloud.invitations = Array.isArray(state.cloud.invitations) ? state.cloud.invitations : [];
+  state.cloud.authenticated = Boolean(state.cloud.authenticated && state.cloud.user);
+
   ui.editingStyle = clone(state.styles[0]);
   persist();
 }
@@ -623,6 +742,11 @@ function bindEvents() {
     switchTab("api");
     layoutController.openResponsiveTools();
   });
+  els.cloudTopBtn.addEventListener("click", () => {
+    switchTab("cloud");
+    layoutController.openResponsiveTools();
+    renderCloudPanel();
+  });
   layoutController.bindEvents();
   preventWindowFileNavigation();
 
@@ -671,6 +795,8 @@ function bindEvents() {
     if (event.key === "Escape") {
       hideEditorMenu({ restoreFocus: true });
       hideSkillMentionPanel();
+      if (els.cloudAdminWorkspace && !els.cloudAdminWorkspace.hidden) closeCloudAdminWorkspace();
+      if (els.cloudAdminModal && !els.cloudAdminModal.hidden) closeCloudAdminModal();
       if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
       layoutController.closeResponsiveInspector();
     }
@@ -788,6 +914,77 @@ function bindEvents() {
   els.saveApiBtn.addEventListener("click", saveApiSettings);
   els.testApiBtn.addEventListener("click", testApiSettings);
   els.clearApiBtn.addEventListener("click", clearApiSettings);
+  els.cloudBaseUrlInput.addEventListener("change", saveCloudBaseUrlFromInput);
+  els.cloudRefreshBtn.addEventListener("click", refreshCloudStatus);
+  els.cloudLoginBtn.addEventListener("click", cloudLogin);
+  els.cloudRegisterBtn.addEventListener("click", cloudRegister);
+  els.cloudLogoutBtn.addEventListener("click", cloudLogout);
+  els.cloudRequestVerifyBtn.addEventListener("click", cloudRequestEmailVerification);
+  els.cloudVerifyEmailBtn.addEventListener("click", cloudVerifyEmail);
+  els.cloudRequestResetBtn.addEventListener("click", cloudRequestPasswordReset);
+  els.cloudConfirmResetBtn.addEventListener("click", cloudConfirmPasswordReset);
+  els.cloudLogoutAllBtn.addEventListener("click", cloudLogoutAllDevices);
+  els.cloudInviteBtn.addEventListener("click", cloudInviteMember);
+  els.cloudPanel.addEventListener("click", handleCloudPanelAction);
+  els.cloudSaveDocBtn.addEventListener("click", cloudSaveCurrentDocument);
+  els.cloudPullDocsBtn.addEventListener("click", cloudPullDocuments);
+  els.cloudSaveWriterBtn.addEventListener("click", cloudSaveCurrentWriter);
+  els.cloudPullWritersBtn.addEventListener("click", cloudPullWriters);
+  els.cloudModelInput.addEventListener("change", () => {
+    state.cloud.model = els.cloudModelInput.value.trim();
+    persist();
+    renderCloudPanel();
+  });
+  els.cloudSaveApiKeyBtn.addEventListener("click", cloudSaveApiKey);
+  els.cloudUseAiProxyBtn.addEventListener("click", enableCloudAiProxy);
+  els.cloudCheckoutBtn?.addEventListener("click", cloudCreateCheckout);
+  els.cloudManualOrderBtn?.addEventListener("click", cloudSubmitManualOrder);
+  els.cloudManualPaymentMethodSelect?.addEventListener("change", renderCloudManualPaymentMethods);
+  els.cloudExportDataBtn.addEventListener("click", cloudExportMyData);
+  els.cloudDeleteAccountBtn.addEventListener("click", cloudDeleteAccount);
+  els.cloudRecentErrorsBtn.addEventListener("click", cloudLoadRecentErrors);
+  els.cloudAdminDashboardBtn.addEventListener("click", openStandaloneAdminPage);
+  els.cloudSendFeedbackBtn.addEventListener("click", cloudSendFeedback);
+  els.closeCloudAdminModalBtn?.addEventListener("click", () => closeCloudAdminModal());
+  els.cloudAdminModal?.addEventListener("click", (event) => {
+    if (event.target === els.cloudAdminModal) closeCloudAdminModal();
+  });
+  els.cloudAdminModal?.addEventListener("click", handleCloudAdminAction);
+  [
+    els.cloudAdminUsageFrom,
+    els.cloudAdminUsageTo,
+    els.cloudAdminUsageTask,
+    els.cloudAdminUsageStatus,
+    els.cloudAdminAuditFrom,
+    els.cloudAdminAuditTo,
+    els.cloudAdminAuditAction,
+  ].forEach((input) => input?.addEventListener("change", () => cloudLoadAdminDashboard({ silent: true })));
+  els.cloudAdminFeedbackStatusFilter?.addEventListener("change", renderCloudAdminModal);
+  els.cloudAdminEmailTemplate?.addEventListener("change", renderCloudAdminModal);
+  els.cloudAdminEmailStatus?.addEventListener("change", renderCloudAdminModal);
+  els.cloudAdminEmailInput?.addEventListener("input", debounce(renderCloudAdminModal, 250));
+  els.cloudAdminUsageTask?.addEventListener("input", debounce(() => cloudLoadAdminDashboard({ silent: true }), 250));
+  els.cloudAdminAuditAction?.addEventListener("input", debounce(() => cloudLoadAdminDashboard({ silent: true }), 250));
+  els.cloudAdminRefreshBtn?.addEventListener("click", () => cloudLoadAdminDashboard());
+  els.cloudAdminExportOrgBtn?.addEventListener("click", cloudExportOrganizationData);
+  els.cloudAdminExportUsageCsvBtn?.addEventListener("click", cloudExportUsageCsv);
+  els.cloudAdminExportAuditCsvBtn?.addEventListener("click", cloudExportAuditCsv);
+  els.cloudAdminDeletionRequestBtn?.addEventListener("click", cloudRequestOrganizationDeletion);
+  els.closeCloudAdminWorkspaceBtn?.addEventListener("click", closeCloudAdminWorkspace);
+  els.cloudAdminWorkspaceRefreshBtn?.addEventListener("click", () => cloudLoadAdminDashboard({ button: els.cloudAdminWorkspaceRefreshBtn }));
+  els.cloudAdminWorkspaceOrgExportBtn?.addEventListener("click", cloudExportOrganizationData);
+  els.cloudAdminWorkspaceExportUsageCsvBtn?.addEventListener("click", cloudExportUsageCsv);
+  els.cloudAdminWorkspaceExportAuditCsvBtn?.addEventListener("click", cloudExportAuditCsv);
+  els.cloudAdminWorkspaceDeletionRequestBtn?.addEventListener("click", cloudRequestOrganizationDeletion);
+  els.cloudAdminWorkspaceNav?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-admin-workspace-view]");
+    if (!button) return;
+    ui.cloudAdminWorkspaceView = button.dataset.adminWorkspaceView || "overview";
+    renderCloudAdminWorkspace();
+  });
+  els.cloudAdminWorkspace?.addEventListener("click", handleCloudAdminAction);
+  window.addEventListener("hashchange", handleHashRoute);
+  handleHashRoute();
 }
 
 function setupFileDrop(target, handler) {
@@ -930,6 +1127,7 @@ function render() {
   renderTypeSelect();
   renderEditor();
   renderApiSettings();
+  renderCloudPanel();
   renderStyleEditor();
   renderStyleList();
   updateAiStatus();
@@ -980,6 +1178,1480 @@ function renderApiSettings() {
   els.modelInput.value = settings.model || "";
   els.apiKeyInput.value = settings.apiKey || "";
   els.systemPromptInput.value = settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+}
+
+function renderCloudPanel() {
+  if (!els.cloudBaseUrlInput) return;
+  const cloud = state.cloud || {};
+  const authenticated = Boolean(cloud.authenticated && cloud.user);
+  const emailVerified = Boolean(cloud.user?.email_verified_at);
+  const canAdmin = authenticated && ["owner", "admin"].includes(cloud.membership?.role || "");
+  const orgName = cloud.activeOrganization?.name || "未选择组织";
+  els.cloudBaseUrlInput.value = cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL;
+  els.cloudModelInput.value = cloud.model || state.settings?.model || "gpt-4.1-mini";
+  els.cloudStatusLabel.textContent = authenticated ? "已登录" : "本地模式";
+  els.cloudStatusLabel.className = `status-pill ${authenticated ? "ready" : ""}`;
+  els.cloudLogoutBtn.disabled = !authenticated;
+  els.cloudAccountCard.innerHTML = authenticated
+    ? `<strong>${escapeHtml(cloud.user.email || "")}</strong><span>${escapeHtml(orgName)} · ${escapeHtml(cloud.membership?.role || "owner")} · ${emailVerified ? "邮箱已验证" : "邮箱未验证"}</span>`
+    : "<strong>未连接云端</strong><span>本地数据仍可正常使用，登录后可启用团队同步和云端 AI 代理。</span>";
+
+  [
+    els.cloudSaveDocBtn,
+    els.cloudPullDocsBtn,
+    els.cloudSaveWriterBtn,
+    els.cloudPullWritersBtn,
+    els.cloudRequestVerifyBtn,
+    els.cloudVerifyEmailBtn,
+    els.cloudLogoutAllBtn,
+    els.cloudExportDataBtn,
+    els.cloudDeleteAccountBtn,
+    els.cloudRecentErrorsBtn,
+    els.cloudAdminDashboardBtn,
+    els.cloudSendFeedbackBtn,
+    els.cloudCheckoutBtn,
+    els.cloudManualOrderBtn,
+  ].forEach((button) => {
+    if (button) button.disabled = !authenticated;
+  });
+  [
+    els.cloudManualPackageSelect,
+    els.cloudManualPaymentMethodSelect,
+    els.cloudManualOrderNoteInput,
+    els.cloudManualProofInput,
+  ].forEach((field) => {
+    if (field) field.disabled = !authenticated;
+  });
+  if (els.cloudAdminDashboardBtn) {
+    els.cloudAdminDashboardBtn.hidden = authenticated && !canAdmin;
+    els.cloudAdminDashboardBtn.disabled = !authenticated || !canAdmin;
+  }
+
+  [
+    els.cloudInviteBtn,
+    els.cloudSaveApiKeyBtn,
+    els.cloudUseAiProxyBtn,
+  ].forEach((button) => {
+    if (button) button.disabled = !authenticated || !emailVerified;
+  });
+
+  if (els.cloudMembersList) {
+    els.cloudMembersList.innerHTML = authenticated && cloud.members?.length
+      ? cloud.members.map((member) => `
+        <div>
+          <strong>${escapeHtml(member.user?.name || member.user?.email || "")}</strong>
+          <span>${escapeHtml(member.role || "member")}</span>
+          <span class="cloud-row-actions">
+            ${member.role !== "owner" ? `<button type="button" data-cloud-action="member-role" data-member-id="${escapeHtml(member.id)}" data-role="${member.role === "admin" ? "member" : "admin"}">${member.role === "admin" ? "设为成员" : "设为管理员"}</button>` : ""}
+            ${member.role !== "owner" ? `<button type="button" data-cloud-action="member-remove" data-member-id="${escapeHtml(member.id)}">移除</button>` : ""}
+          </span>
+        </div>`).join("")
+      : "登录后显示成员。";
+  }
+  if (els.cloudInvitationsList) {
+    els.cloudInvitationsList.innerHTML = authenticated && cloud.invitations?.length
+      ? cloud.invitations.map((invitation) => `
+        <div>
+          <strong>${escapeHtml(invitation.email)}</strong>
+          <span>${escapeHtml(invitation.role)} · ${invitation.accepted_at ? "已接受" : "待接受"}</span>
+          <span class="cloud-row-actions">
+            ${!invitation.accepted_at && !invitation.revoked_at ? `<button type="button" data-cloud-action="invite-resend" data-invite-id="${escapeHtml(invitation.id)}">重发</button><button type="button" data-cloud-action="invite-revoke" data-invite-id="${escapeHtml(invitation.id)}">撤销</button>` : ""}
+          </span>
+        </div>`).join("")
+      : "暂无邀请。";
+  }
+
+  const usage = cloud.usage;
+  if (usage) {
+    els.cloudUsageLabel.textContent = `${usage.request_count || usage.requests || 0} 次请求`;
+    const limits = cloud.limits;
+    const taskRows = Object.entries(usage.by_task_type || {})
+      .map(([task, item]) => `<div>${escapeHtml(task)}：${item.request_count || 0} 次 · ${Number(item.total_tokens || 0).toLocaleString("zh-CN")} 字数估算</div>`)
+      .join("");
+    els.cloudUsageReport.innerHTML = [
+      limits ? `<div>套餐：${escapeHtml(limits.plan || "free")} · 个人日限 ${limits.user_daily} · 组织日限 ${limits.org_daily}</div>` : "",
+      `<div>总字数：${Number(usage.total_tokens || 0).toLocaleString("zh-CN")}</div>`,
+      `<div>预估成本：${Number(usage.estimated_cost || usage.estimated_cost_cents || 0)} 元</div>`,
+      taskRows,
+    ].join("");
+  } else {
+    els.cloudUsageLabel.textContent = authenticated ? "等待统计" : "未登录";
+    els.cloudUsageReport.textContent = authenticated ? "暂无本月用量记录。" : "登录云端后显示本月 AI 调用用量。";
+  }
+
+  renderCloudBilling(authenticated, canAdmin);
+}
+
+function renderCloudBilling(authenticated, canAdmin) {
+  if (!els.cloudBillingReport) return;
+  const billing = state.cloud?.billing || null;
+  const options = billing?.checkout?.available_plans?.length
+    ? billing.checkout.available_plans
+    : [
+      { plan: "pro", price_id: "" },
+      { plan: "team", price_id: "" },
+    ];
+  const currentValue = els.cloudCheckoutPlanSelect?.value || "pro";
+  if (els.cloudCheckoutPlanSelect) {
+    els.cloudCheckoutPlanSelect.innerHTML = options.map((item) => {
+      const label = item.plan === "team" ? "Team" : item.plan === "pro" ? "Pro" : item.plan;
+      return `<option value="${escapeHtml(item.plan)}">${escapeHtml(label)}</option>`;
+    }).join("");
+    els.cloudCheckoutPlanSelect.value = options.some((item) => item.plan === currentValue) ? currentValue : options[0]?.plan || "pro";
+    els.cloudCheckoutPlanSelect.disabled = !authenticated || !canAdmin;
+  }
+  if (els.cloudCheckoutBtn) {
+    els.cloudCheckoutBtn.disabled = !authenticated || !canAdmin;
+  }
+  renderCloudManualRecharge(authenticated, billing);
+  if (!authenticated) {
+    els.cloudBillingLabel.textContent = "未登录";
+    els.cloudBillingReport.textContent = "登录云端后显示套餐、账单事件和升级入口。";
+    return;
+  }
+  if (!canAdmin && !billing) {
+    els.cloudBillingLabel.textContent = "无权限";
+    els.cloudBillingReport.textContent = "只有组织所有者或管理员可以查看账单与发起升级。";
+    return;
+  }
+  if (!billing) {
+    els.cloudBillingLabel.textContent = "等待统计";
+    els.cloudBillingReport.textContent = "刷新云端状态后显示套餐与账单事件。";
+    return;
+  }
+  const plan = billing.organization?.plan || "free";
+  const checkout = billing.checkout || {};
+  const paymentRows = Array.isArray(billing.payment_webhooks) && billing.payment_webhooks.length
+    ? billing.payment_webhooks.slice(-5).reverse().map((item) => `${item.event_type || "billing.event"} · ${item.provider || "provider"} · ${item.created_at || ""}`).join("\n")
+    : "暂无账单事件。";
+  const manualOrderRows = Array.isArray(billing.manual_orders) && billing.manual_orders.length
+    ? billing.manual_orders.slice(-5).reverse().map((item) =>
+      `${formatManualOrderStatus(item.status)} · ${item.title || item.package_id} · ¥${Number(item.amount_cny || 0)} · ${item.created_at || ""}`).join("\n")
+    : "暂无人工充值订单。";
+  els.cloudBillingLabel.textContent = `套餐：${plan}`;
+  els.cloudBillingReport.textContent = [
+    `当前套餐：${plan}`,
+    `个人日限：${billing.limits?.user_daily ?? "-"} · 组织日限：${billing.limits?.org_daily ?? "-"}`,
+    `今日请求：${billing.usage?.request_count || 0} 次 · 失败：${billing.usage?.failed_count || 0} 次`,
+    `升级通道：${checkout.enabled ? checkout.mode || "已配置" : "未配置"}`,
+    `AI 额度：${Number(billing.credits?.balance || 0).toLocaleString("zh-CN")} 点`,
+    "",
+    "人工充值订单：",
+    manualOrderRows,
+    "",
+    "最近账单事件：",
+    paymentRows,
+  ].join("\n");
+}
+
+function renderCloudManualRecharge(authenticated, billing) {
+  const manual = billing?.manual_payment || {};
+  const packages = Array.isArray(manual.packages) && manual.packages.length
+    ? manual.packages
+    : [
+      { id: "pro_month", title: "Pro 月度会员", amount_cny: 29, plan: "pro", duration_days: 30, credits: 0 },
+      { id: "credits_1000", title: "1000 点 AI 额度", amount_cny: 50, plan: "", duration_days: 0, credits: 1000 },
+    ];
+  const currentPackage = els.cloudManualPackageSelect?.value || packages[0]?.id || "";
+  if (els.cloudManualPackageSelect) {
+    els.cloudManualPackageSelect.innerHTML = packages.map((item) =>
+      `<option value="${escapeHtml(item.id)}">${escapeHtml(formatManualPaymentPackage(item))}</option>`).join("");
+    els.cloudManualPackageSelect.value = packages.some((item) => item.id === currentPackage) ? currentPackage : packages[0]?.id || "";
+    els.cloudManualPackageSelect.disabled = !authenticated;
+  }
+  if (els.cloudManualPaymentMethodSelect) {
+    const methods = Array.isArray(manual.methods) && manual.methods.length ? manual.methods : [
+      { channel: "wechat", label: "微信", qr_url: "" },
+      { channel: "alipay", label: "支付宝", qr_url: "" },
+    ];
+    const currentMethod = els.cloudManualPaymentMethodSelect.value || "wechat";
+    els.cloudManualPaymentMethodSelect.innerHTML = methods.map((item) =>
+      `<option value="${escapeHtml(item.channel)}">${escapeHtml(item.label || item.channel)}</option>`).join("");
+    els.cloudManualPaymentMethodSelect.value = methods.some((item) => item.channel === currentMethod) ? currentMethod : methods[0]?.channel || "wechat";
+    els.cloudManualPaymentMethodSelect.disabled = !authenticated;
+  }
+  if (els.cloudCreditBalanceLabel) {
+    els.cloudCreditBalanceLabel.textContent = `额度：${Number(billing?.credits?.balance || 0).toLocaleString("zh-CN")} 点`;
+  }
+  if (els.cloudManualOrderBtn) els.cloudManualOrderBtn.disabled = !authenticated;
+  if (els.cloudManualOrderNoteInput) els.cloudManualOrderNoteInput.disabled = !authenticated;
+  if (els.cloudManualProofInput) els.cloudManualProofInput.disabled = !authenticated;
+  renderCloudManualPaymentMethods();
+}
+
+function renderCloudManualPaymentMethods() {
+  if (!els.cloudManualPaymentMethods) return;
+  const billing = state.cloud?.billing || null;
+  const manual = billing?.manual_payment || {};
+  const methods = Array.isArray(manual.methods) ? manual.methods : [];
+  const selected = els.cloudManualPaymentMethodSelect?.value || methods[0]?.channel || "wechat";
+  const method = methods.find((item) => item.channel === selected) || methods[0] || { channel: selected, label: selected, qr_url: "" };
+  const receiver = manual.receiver_name ? `<span>收款方：${escapeHtml(manual.receiver_name)}</span>` : "";
+  const qr = method.qr_url
+    ? `<img src="${escapeHtml(method.qr_url)}" alt="${escapeHtml(method.label || method.channel)} 收款码">`
+    : `<div class="manual-payment-placeholder">未配置收款码，请向管理员索取。</div>`;
+  els.cloudManualPaymentMethods.innerHTML = `
+    <div class="manual-payment-method">
+      ${qr}
+      <div>
+        <strong>${escapeHtml(method.label || method.channel || "支付方式")}</strong>
+        ${receiver}
+        <span>付款后提交订单，管理员核对后生效。</span>
+      </div>
+    </div>`;
+}
+
+function formatManualPaymentPackage(item = {}) {
+  const amount = Number(item.amount_cny || 0);
+  const parts = [`${item.title || item.id || "充值套餐"}`];
+  if (amount > 0) parts.push(`¥${amount}`);
+  if (item.plan) parts.push(`${String(item.plan).toUpperCase()} ${Number(item.duration_days || 0) || ""}天`.trim());
+  if (Number(item.credits || 0) > 0) parts.push(`${Number(item.credits).toLocaleString("zh-CN")} 点`);
+  return parts.join(" · ");
+}
+
+function formatManualOrderStatus(status) {
+  const value = String(status || "pending");
+  if (value === "approved") return "已确认";
+  if (value === "rejected") return "已拒绝";
+  if (value === "cancelled") return "已取消";
+  return "待确认";
+}
+
+function normalizeCloudBaseUrl(value) {
+  return String(value || DEFAULT_CLOUD_API_BASE_URL).trim().replace(/\/+$/, "") || DEFAULT_CLOUD_API_BASE_URL;
+}
+
+function saveCloudBaseUrlFromInput() {
+  state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+  persist();
+  renderCloudPanel();
+  toast(`云端地址已保存到：${getCloudSettingsLocation()}`);
+}
+
+async function cloudRequest(path, options = {}) {
+  const baseUrl = normalizeCloudBaseUrl(state.cloud?.apiBaseUrl || els.cloudBaseUrlInput?.value);
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  const orgId = state.cloud?.activeOrganization?.id;
+  if (orgId) headers["x-organization-id"] = orgId;
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...options,
+    headers,
+    credentials: "include",
+  });
+  const text = await response.text();
+  const data = text ? parseJsonSafely(text) : {};
+  if (!response.ok) {
+    const message = data?.error?.message || data?.message || text || response.statusText;
+    const error = new Error(message);
+    error.status = response.status;
+    error.payload = data;
+    throw error;
+  }
+  return data;
+}
+
+function parseJsonSafely(text, fallback = {}) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
+
+function debounce(fn, delay = 250) {
+  let timer = null;
+  return (...args) => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => fn(...args), delay);
+  };
+}
+
+function applyCloudSession(data) {
+  const organization = data.organization || data.activeOrganization || data.organizations?.[0] || null;
+  state.cloud = {
+    ...(state.cloud || {}),
+    authenticated: Boolean(data.authenticated ?? data.user),
+    user: data.user || null,
+    organizations: Array.isArray(data.organizations) ? data.organizations : organization ? [organization] : [],
+    activeOrganization: organization,
+    membership: data.membership || null,
+  };
+}
+
+async function refreshCloudStatus() {
+  await withLoading(els.cloudRefreshBtn, "刷新中", async () => {
+    try {
+      state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+      const data = await cloudRequest("/me", { method: "GET" });
+      applyCloudSession(data);
+      if (state.cloud.authenticated) {
+        await refreshCloudTeam({ silent: true });
+        await refreshCloudUsage({ silent: true });
+        await refreshCloudBilling({ silent: true });
+      }
+      persist();
+      renderCloudPanel();
+      toast(state.cloud.authenticated ? "云端状态已刷新" : "当前为本地模式");
+    } catch (error) {
+      state.cloud.authenticated = false;
+      state.cloud.user = null;
+      state.cloud.usage = null;
+      state.cloud.billing = null;
+      persist();
+      renderCloudPanel();
+      toast(`云端连接失败：${error.message}`, "error");
+    }
+  });
+}
+
+async function cloudLogin() {
+  await withLoading(els.cloudLoginBtn, "登录中", async () => {
+    state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+    const data = await cloudRequest("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        email: els.cloudEmailInput.value.trim(),
+        password: els.cloudPasswordInput.value,
+      }),
+    });
+    applyCloudSession(data);
+    if (data.email_verification_token && els.cloudEmailTokenInput) {
+      els.cloudEmailTokenInput.value = data.email_verification_token;
+    }
+    await refreshCloudTeam({ silent: true });
+    await refreshCloudUsage({ silent: true });
+    await refreshCloudBilling({ silent: true });
+    persist();
+    renderCloudPanel();
+    toast(`已登录云端：${getCloudSettingsLocation()}`);
+  });
+}
+
+async function cloudRegister() {
+  await withLoading(els.cloudRegisterBtn, "注册中", async () => {
+    state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+    const data = await cloudRequest("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({
+        email: els.cloudEmailInput.value.trim(),
+        password: els.cloudPasswordInput.value,
+        name: els.cloudNameInput.value.trim() || els.cloudEmailInput.value.trim(),
+        organizationName: `${els.cloudNameInput.value.trim() || "我的"}工作区`,
+      }),
+    });
+    applyCloudSession(data);
+    await refreshCloudTeam({ silent: true });
+    await refreshCloudUsage({ silent: true });
+    await refreshCloudBilling({ silent: true });
+    persist();
+    renderCloudPanel();
+    toast(`云端账号已创建：${getCloudSettingsLocation()}`);
+  });
+}
+
+async function cloudLogout() {
+  await withLoading(els.cloudLogoutBtn, "退出中", async () => {
+    await cloudRequest("/auth/logout", { method: "POST", body: JSON.stringify({}) }).catch(() => null);
+    state.cloud = {
+      ...(state.cloud || {}),
+      authenticated: false,
+      user: null,
+      activeOrganization: null,
+      membership: null,
+      members: [],
+      invitations: [],
+      usage: null,
+      limits: null,
+      billing: null,
+    };
+    persist();
+    renderCloudPanel();
+    toast("已退出云端账号", "warn");
+  });
+}
+
+async function cloudLogoutAllDevices() {
+  if (!window.confirm("确定要退出所有云端设备吗？当前页面也会退出。")) return;
+  await withLoading(els.cloudLogoutAllBtn, "退出中", async () => {
+    await cloudRequest("/auth/logout-all", { method: "POST", body: JSON.stringify({}) });
+    state.cloud = {
+      ...(state.cloud || {}),
+      authenticated: false,
+      user: null,
+      activeOrganization: null,
+      membership: null,
+      members: [],
+      invitations: [],
+      usage: null,
+      limits: null,
+      billing: null,
+    };
+    persist();
+    renderCloudPanel();
+    toast("已退出所有云端设备", "warn");
+  });
+}
+
+async function cloudRequestEmailVerification() {
+  const email = els.cloudEmailInput.value.trim() || state.cloud?.user?.email || "";
+  await withLoading(els.cloudRequestVerifyBtn, "申请中", async () => {
+    const data = await cloudRequest("/auth/request-email-verification", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+    if (data.email_verification_token) {
+      els.cloudEmailTokenInput.value = data.email_verification_token;
+      toast("邮箱验证码已生成，灰度环境可直接复制使用");
+    } else {
+      toast(data.verified ? "邮箱已验证" : "验证请求已提交");
+    }
+  });
+}
+
+async function cloudVerifyEmail() {
+  const email = els.cloudEmailInput.value.trim() || state.cloud?.user?.email || "";
+  const token = els.cloudEmailTokenInput.value.trim();
+  if (!token) {
+    toast("请先填写邮箱验证码", "warn");
+    return;
+  }
+  await withLoading(els.cloudVerifyEmailBtn, "验证中", async () => {
+    const data = await cloudRequest("/auth/verify-email", {
+      method: "POST",
+      body: JSON.stringify({ email, token }),
+    });
+    state.cloud.user = data.user || state.cloud.user;
+    els.cloudEmailTokenInput.value = "";
+    persist();
+    renderCloudPanel();
+    toast("邮箱已验证");
+  });
+}
+
+async function cloudRequestPasswordReset() {
+  const email = els.cloudEmailInput.value.trim();
+  if (!email) {
+    toast("请先填写邮箱", "warn");
+    return;
+  }
+  await withLoading(els.cloudRequestResetBtn, "申请中", async () => {
+    const data = await cloudRequest("/auth/request-password-reset", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+    if (data.reset_token) {
+      els.cloudResetTokenInput.value = data.reset_token;
+      toast("重置码已生成，灰度环境可直接复制使用");
+    } else {
+      toast("如果账号存在，重置请求已提交");
+    }
+  });
+}
+
+async function cloudConfirmPasswordReset() {
+  const email = els.cloudEmailInput.value.trim();
+  const token = els.cloudResetTokenInput.value.trim();
+  const password = els.cloudNewPasswordInput.value;
+  if (!email || !token || !password) {
+    toast("请填写邮箱、重置码和新密码", "warn");
+    return;
+  }
+  await withLoading(els.cloudConfirmResetBtn, "重置中", async () => {
+    await cloudRequest("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ email, token, password }),
+    });
+    els.cloudResetTokenInput.value = "";
+    els.cloudNewPasswordInput.value = "";
+    toast("密码已重置，请重新登录");
+  });
+}
+
+async function refreshCloudUsage(options = {}) {
+  if (!state.cloud?.authenticated) return;
+  const data = await cloudRequest("/usage/current", { method: "GET" });
+  state.cloud.usage = data.usage || null;
+  state.cloud.limits = data.limits || null;
+  if (!options.silent) toast("云端用量已刷新");
+}
+
+async function refreshCloudBilling(options = {}) {
+  if (!state.cloud?.authenticated) return;
+  try {
+    const data = await cloudRequest("/billing/summary", { method: "GET" });
+    state.cloud.billing = data || null;
+    if (!options.silent) toast("账单与套餐已刷新");
+  } catch (error) {
+    if (error.status === 403) {
+      try {
+        const data = await cloudRequest("/billing/manual-orders", { method: "GET" });
+        state.cloud.billing = {
+          organization: state.cloud.activeOrganization || null,
+          checkout: { enabled: false, available_plans: [] },
+          manual_payment: data.manual_payment || {},
+          manual_orders: data.orders || [],
+          credits: data.credits || null,
+        };
+        return;
+      } catch {
+        state.cloud.billing = null;
+      }
+    }
+    state.cloud.billing = null;
+    if (error.status !== 403 && !options.silent) {
+      toast(`账单信息读取失败：${error.message}`, "warn");
+    }
+  }
+}
+
+async function cloudCreateCheckout() {
+  const plan = els.cloudCheckoutPlanSelect?.value || "pro";
+  await withLoading(els.cloudCheckoutBtn, "创建中", async () => {
+    const data = await cloudRequest("/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan }),
+    });
+    const checkoutUrl = data.checkout?.checkout_url;
+    if (!checkoutUrl) {
+      toast("支付升级入口未返回，请联系管理员", "warn");
+      return;
+    }
+    window.open(checkoutUrl, "_blank", "noopener");
+    await refreshCloudBilling({ silent: true });
+    persist();
+    renderCloudPanel();
+    toast("升级入口已打开");
+  });
+}
+
+async function cloudSubmitManualOrder() {
+  const packageId = els.cloudManualPackageSelect?.value || "";
+  const paymentChannel = els.cloudManualPaymentMethodSelect?.value || "wechat";
+  if (!packageId) {
+    toast("请选择充值套餐", "warn");
+    return;
+  }
+  await withLoading(els.cloudManualOrderBtn, "提交中", async () => {
+    const data = await cloudRequest("/billing/manual-orders", {
+      method: "POST",
+      body: JSON.stringify({
+        package_id: packageId,
+        payment_channel: paymentChannel,
+        payer_note: els.cloudManualOrderNoteInput?.value || "",
+        proof_text: els.cloudManualProofInput?.value || "",
+      }),
+    });
+    if (els.cloudManualOrderNoteInput) els.cloudManualOrderNoteInput.value = "";
+    if (els.cloudManualProofInput) els.cloudManualProofInput.value = "";
+    await refreshCloudBilling({ silent: true });
+    renderCloudPanel();
+    toast(`充值订单已提交：${data.order?.title || packageId}`);
+  });
+}
+
+async function refreshCloudTeam(options = {}) {
+  const orgId = state.cloud?.activeOrganization?.id;
+  if (!state.cloud?.authenticated || !orgId) return;
+  const [members, invitations] = await Promise.all([
+    cloudRequest(`/orgs/${orgId}/members`, { method: "GET" }),
+    cloudRequest(`/orgs/${orgId}/invitations`, { method: "GET" }).catch(() => ({ invitations: [] })),
+  ]);
+  state.cloud.members = Array.isArray(members.members) ? members.members : [];
+  state.cloud.invitations = Array.isArray(invitations.invitations) ? invitations.invitations : [];
+  if (!options.silent) toast("团队信息已刷新");
+}
+
+async function cloudInviteMember() {
+  const orgId = state.cloud?.activeOrganization?.id;
+  const email = els.cloudInviteEmailInput.value.trim();
+  if (!orgId || !email) {
+    toast("请先填写邀请邮箱", "warn");
+    return;
+  }
+  await withLoading(els.cloudInviteBtn, "生成中", async () => {
+    const data = await cloudRequest(`/orgs/${orgId}/invitations`, {
+      method: "POST",
+      body: JSON.stringify({
+        email,
+        role: els.cloudInviteRoleSelect.value || "member",
+      }),
+    });
+    els.cloudInviteEmailInput.value = "";
+    await refreshCloudTeam({ silent: true });
+    persist();
+    renderCloudPanel();
+    const tokenText = data.invitation?.token ? `，邀请码：${data.invitation.token}` : "";
+    toast(`邀请已生成${tokenText}`);
+  });
+}
+
+async function handleCloudPanelAction(event) {
+  const button = event.target.closest("[data-cloud-action]");
+  if (!button) return;
+  const action = button.dataset.cloudAction;
+  const orgId = state.cloud?.activeOrganization?.id;
+  if (!orgId) return;
+  if (action === "invite-revoke") {
+    await cloudRevokeInvitation(button.dataset.inviteId);
+  } else if (action === "invite-resend") {
+    await cloudResendInvitation(button.dataset.inviteId);
+  } else if (action === "member-role") {
+    await cloudUpdateMemberRole(button.dataset.memberId, button.dataset.role);
+  } else if (action === "member-remove") {
+    await cloudRemoveMember(button.dataset.memberId);
+  }
+}
+
+async function cloudRevokeInvitation(inviteId) {
+  const orgId = state.cloud?.activeOrganization?.id;
+  await cloudRequest(`/orgs/${orgId}/invitations/${inviteId}/revoke`, { method: "POST", body: JSON.stringify({}) });
+  await refreshCloudTeam({ silent: true });
+  persist();
+  renderCloudPanel();
+  toast("邀请已撤销");
+}
+
+async function cloudResendInvitation(inviteId) {
+  const orgId = state.cloud?.activeOrganization?.id;
+  const data = await cloudRequest(`/orgs/${orgId}/invitations/${inviteId}/resend`, { method: "POST", body: JSON.stringify({}) });
+  await refreshCloudTeam({ silent: true });
+  persist();
+  renderCloudPanel();
+  const tokenText = data.invitation?.token ? `，邀请码：${data.invitation.token}` : "";
+  toast(`邀请已重发${tokenText}`);
+}
+
+async function cloudUpdateMemberRole(memberId, role) {
+  const orgId = state.cloud?.activeOrganization?.id;
+  await cloudRequest(`/orgs/${orgId}/members/${memberId}`, {
+    method: "PUT",
+    body: JSON.stringify({ role }),
+  });
+  await refreshCloudTeam({ silent: true });
+  persist();
+  renderCloudPanel();
+  toast("成员角色已更新");
+}
+
+async function cloudRemoveMember(memberId) {
+  if (!window.confirm("确定移除该成员吗？该成员会立即失去云端访问权限，现有云端会话会被清理。请确认已经处理其负责的文档和执笔人。")) return;
+  const orgId = state.cloud?.activeOrganization?.id;
+  await cloudRequest(`/orgs/${orgId}/members/${memberId}`, { method: "DELETE" });
+  await refreshCloudTeam({ silent: true });
+  persist();
+  renderCloudPanel();
+  toast("成员已移除", "warn");
+}
+
+async function cloudExportMyData() {
+  await withLoading(els.cloudExportDataBtn, "导出中", async () => {
+    const data = await cloudRequest("/me/export", { method: "GET" });
+    downloadBlob(`mowen-cloud-export-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
+    toast("我的云端数据已导出");
+  });
+}
+
+async function cloudDeleteAccount() {
+  if (!window.confirm("确定删除云端账号吗？这会退出云端并停用当前账号。")) return;
+  await withLoading(els.cloudDeleteAccountBtn, "删除中", async () => {
+    await cloudRequest("/me", { method: "DELETE" });
+    state.cloud = {
+      ...(state.cloud || {}),
+      authenticated: false,
+      user: null,
+      activeOrganization: null,
+      membership: null,
+      members: [],
+      invitations: [],
+      usage: null,
+      limits: null,
+    };
+    persist();
+    renderCloudPanel();
+    toast("云端账号已删除，本地数据仍保留", "warn");
+  });
+}
+
+async function cloudLoadRecentErrors() {
+  await withLoading(els.cloudRecentErrorsBtn, "读取中", async () => {
+    const data = await cloudRequest("/ops/recent-errors", { method: "GET" });
+    const errors = Array.isArray(data.errors) ? data.errors : [];
+    els.cloudOpsReport.textContent = errors.length
+      ? errors.map((item) => `${item.created_at || ""} ${item.type || "error"}：${item.message || ""}`).join("\n")
+      : "暂无最近错误。";
+  });
+}
+
+async function openCloudAdminModal() {
+  if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
+    toast("只有管理员可以查看管理后台", "warn");
+    return;
+  }
+  ui.cloudAdminReturnFocus = document.activeElement;
+  els.cloudAdminModal.hidden = false;
+  document.body.classList.add("modal-open");
+  els.cloudAdminModal.querySelector(".cloud-admin-modal")?.focus();
+  await cloudLoadAdminDashboard();
+}
+
+function closeCloudAdminModal({ restoreFocus = true } = {}) {
+  if (!els.cloudAdminModal) return;
+  els.cloudAdminModal.hidden = true;
+  document.body.classList.remove("modal-open");
+  if (restoreFocus) ui.cloudAdminReturnFocus?.focus?.();
+  ui.cloudAdminReturnFocus = null;
+}
+
+function openStandaloneAdminPage() {
+  if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
+    toast("只有管理员可以查看管理后台", "warn");
+    switchTab("cloud");
+    return;
+  }
+  window.location.href = "./admin.html";
+}
+
+function handleHashRoute() {
+  if (window.location.hash === "#admin") {
+    openCloudAdminWorkspace({ fromHash: true });
+  } else if (els.cloudAdminWorkspace && !els.cloudAdminWorkspace.hidden) {
+    closeCloudAdminWorkspace({ updateHash: false });
+  }
+}
+
+async function openCloudAdminWorkspace(options = {}) {
+  if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
+    toast("只有管理员可以查看管理后台", "warn");
+    switchTab("cloud");
+    if (window.location.hash === "#admin") {
+      const url = new URL(window.location.href);
+      url.hash = "";
+      window.history.replaceState(null, "", url.toString());
+    }
+    return;
+  }
+  if (!options.fromHash && window.location.hash !== "#admin") {
+    window.location.hash = "admin";
+    return;
+  }
+  closeCloudAdminModal({ restoreFocus: false });
+  els.cloudAdminWorkspace.hidden = false;
+  document.body.classList.add("modal-open");
+  switchTab("cloud");
+  await cloudLoadAdminDashboard({ button: els.cloudAdminWorkspaceRefreshBtn });
+  renderCloudAdminWorkspace();
+  els.closeCloudAdminWorkspaceBtn?.focus();
+}
+
+function closeCloudAdminWorkspace(options = {}) {
+  if (!els.cloudAdminWorkspace) return;
+  els.cloudAdminWorkspace.hidden = true;
+  if (els.cloudAdminModal?.hidden !== false && els.skillBuilderModal?.hidden !== false && els.trashModal?.hidden !== false) {
+    document.body.classList.remove("modal-open");
+  }
+  if (options.updateHash !== false && window.location.hash === "#admin") {
+    const url = new URL(window.location.href);
+    url.hash = "";
+    window.history.replaceState(null, "", url.toString());
+  }
+}
+
+async function cloudLoadAdminDashboard(options = {}) {
+  if (!state.cloud?.authenticated) return;
+  const targetButton = options.silent ? null : options.button || els.cloudAdminRefreshBtn || els.cloudAdminDashboardBtn;
+  const runner = async () => {
+    const [dashboard, usage, audit] = await Promise.all([
+      cloudRequest("/admin/dashboard", { method: "GET" }),
+      cloudRequest(`/usage/history${buildAdminUsageQuery()}`, { method: "GET" }).catch(() => ({ usage: [] })),
+      cloudRequest(`/audit${buildAdminAuditQuery()}`, { method: "GET" }).catch(() => ({ audit_logs: [] })),
+    ]);
+    state.cloud.adminDashboard = dashboard;
+    state.cloud.adminUsage = usage.usage || [];
+    state.cloud.adminAudit = audit.audit_logs || [];
+    renderCloudAdminModal();
+    renderCloudAdminWorkspace();
+    const currentUsage = dashboard.usage || {};
+    els.cloudOpsReport.textContent = [
+      `组织：${dashboard.organization?.name || ""}（${dashboard.organization?.plan || "free"}）`,
+      `成员：${dashboard.members?.length || 0} 人，待处理邀请：${dashboard.invitations?.filter((item) => !item.accepted_at).length || 0} 个`,
+      `今日请求：${currentUsage.request_count || 0} 次，失败：${currentUsage.failed_count || 0} 次`,
+      `反馈：${dashboard.feedbacks?.length || 0} 条，最近错误：${dashboard.recent_errors?.length || 0} 条`,
+    ].join("\n");
+  };
+  if (targetButton) {
+    await withLoading(targetButton, "读取中", runner);
+  } else {
+    await runner();
+  }
+}
+
+function renderCloudAdminModal() {
+  const dashboard = state.cloud?.adminDashboard || {};
+  const usage = Array.isArray(state.cloud?.adminUsage) ? state.cloud.adminUsage : [];
+  const audit = Array.isArray(state.cloud?.adminAudit) ? state.cloud.adminAudit : [];
+  const org = dashboard.organization || {};
+  if (els.cloudAdminOverview) {
+    els.cloudAdminOverview.innerHTML = [
+      `<div><strong>${escapeHtml(org.name || "未命名组织")}</strong><span>套餐：${escapeHtml(org.plan || "free")}</span></div>`,
+      `<div><strong>${dashboard.usage?.request_count || 0}</strong><span>今日请求</span></div>`,
+      `<div><strong>${dashboard.limits?.org_daily || 0}</strong><span>组织日限</span></div>`,
+      `<div><strong>${dashboard.email_deliveries?.length || 0}</strong><span>最近邮件投递</span></div>`,
+    ].join("");
+  }
+  if (els.cloudAdminMembers) {
+    const members = dashboard.members || [];
+    const invitations = dashboard.invitations || [];
+    els.cloudAdminMembers.innerHTML = [
+      ...members.slice(-8).map((member) => `<div><strong>${escapeHtml(member.user?.email || member.user_id || "")}</strong><span>${escapeHtml(member.role || "member")}</span></div>`),
+      ...invitations.slice(-6).map((invitation) => `<div><strong>${escapeHtml(invitation.email || "")}</strong><span>${escapeHtml(invitation.role || "member")} · ${invitation.accepted_at ? "已接受" : "待接受"}</span></div>`),
+    ].join("") || "暂无成员或邀请。";
+  }
+  if (els.cloudAdminUsageList) {
+    els.cloudAdminUsageList.innerHTML = usage.length
+      ? usage.slice(-12).reverse().map((item) => `<div><strong>${escapeHtml(item.task_type || "chat")}</strong><span>${escapeHtml(item.status || "")} · ${Number(item.total_tokens || 0).toLocaleString("zh-CN")} · ${escapeHtml(item.created_at || "")}</span></div>`).join("")
+      : "暂无匹配用量。";
+  }
+  if (els.cloudAdminAuditList) {
+    els.cloudAdminAuditList.innerHTML = audit.length
+      ? audit.slice(-12).reverse().map((item) => `<div><strong>${escapeHtml(item.action || "")}</strong><span>${escapeHtml(item.target_type || "")} · ${escapeHtml(item.created_at || "")}</span></div>`).join("")
+      : "暂无匹配审计。";
+  }
+  if (els.cloudAdminFeedbackList) {
+    const feedbacks = dashboard.feedbacks || [];
+    const statusFilter = els.cloudAdminFeedbackStatusFilter?.value || "";
+    const filteredFeedbacks = statusFilter
+      ? feedbacks.filter((item) => (item.metadata?.status || "pending") === statusFilter)
+      : feedbacks;
+    els.cloudAdminFeedbackList.innerHTML = filteredFeedbacks.length
+      ? filteredFeedbacks.slice(-10).reverse().map((item) => {
+        const status = item.metadata?.status || "pending";
+        return `<div class="cloud-admin-feedback-row">
+          <strong>${escapeHtml(item.message || "")}</strong>
+          <span>${escapeHtml(status)} · ${escapeHtml(item.created_at || "")}</span>
+          <span class="cloud-row-actions">
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="processing">处理中</button>
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="resolved">已解决</button>
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="closed">关闭</button>
+          </span>
+        </div>`;
+      }).join("")
+      : "暂无匹配反馈。";
+  }
+  if (els.cloudAdminEmailList) {
+    const emailText = (els.cloudAdminEmailInput?.value || "").trim().toLowerCase();
+    const template = els.cloudAdminEmailTemplate?.value || "";
+    const status = els.cloudAdminEmailStatus?.value || "";
+    const emails = Array.isArray(dashboard.email_deliveries) ? dashboard.email_deliveries : [];
+    ui.cloudAdminVisibleEmails = emails
+      .filter((item) => !emailText || String(item.email || "").toLowerCase().includes(emailText))
+      .filter((item) => !template || item.template === template)
+      .filter((item) => !status || item.status === status)
+      .slice(-12)
+      .reverse();
+    els.cloudAdminEmailList.innerHTML = ui.cloudAdminVisibleEmails.length
+      ? ui.cloudAdminVisibleEmails.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.email || "")}</strong><span>${escapeHtml(item.template || "")} · ${escapeHtml(item.status || "")} · ${escapeHtml(item.updated_at || item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-email" data-email-index="${index}">复制详情</button></div>`).join("")
+      : "暂无匹配邮件。";
+  }
+  if (els.cloudAdminOpsList) {
+    const errors = dashboard.recent_errors || [];
+    const payments = dashboard.billing?.payment_webhooks || [];
+    ui.cloudAdminVisibleErrors = errors.slice(-6).reverse();
+    ui.cloudAdminVisiblePayments = payments.slice(-6).reverse();
+    els.cloudAdminOpsList.innerHTML = [
+      ...ui.cloudAdminVisibleErrors.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.type || item.level || "error")}</strong><span>${escapeHtml(item.message || "")}</span><button type="button" data-cloud-admin-action="copy-error" data-error-index="${index}">复制详情</button></div>`),
+      ...ui.cloudAdminVisiblePayments.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.event_type || "")}</strong><span>${escapeHtml(item.provider || "")} · ${escapeHtml(item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-payment" data-payment-index="${index}">复制事件</button></div>`),
+    ].join("") || "暂无错误或账单事件。";
+  }
+}
+
+function renderCloudAdminWorkspace() {
+  if (!els.cloudAdminWorkspace || els.cloudAdminWorkspace.hidden) return;
+  const dashboard = state.cloud?.adminDashboard || {};
+  const usage = Array.isArray(state.cloud?.adminUsage) ? state.cloud.adminUsage : [];
+  const audit = Array.isArray(state.cloud?.adminAudit) ? state.cloud.adminAudit : [];
+  const org = dashboard.organization || {};
+  const members = Array.isArray(dashboard.members) ? dashboard.members : [];
+  const invitations = Array.isArray(dashboard.invitations) ? dashboard.invitations : [];
+  const feedbacks = Array.isArray(dashboard.feedbacks) ? dashboard.feedbacks : [];
+  const emails = Array.isArray(dashboard.email_deliveries) ? dashboard.email_deliveries : [];
+  const payments = Array.isArray(dashboard.billing?.payment_webhooks) ? dashboard.billing.payment_webhooks : [];
+  const errors = Array.isArray(dashboard.recent_errors) ? dashboard.recent_errors : [];
+  const currentUsage = dashboard.usage || {};
+  els.cloudAdminWorkspaceSubtitle.textContent = `${org.name || "未命名组织"} · ${org.plan || "free"}`;
+  els.cloudAdminWorkspaceSummary.innerHTML = [
+    `<div><strong>${escapeHtml(org.plan || "free")}</strong><span>当前套餐</span></div>`,
+    `<div><strong>${members.length}</strong><span>组织成员</span></div>`,
+    `<div><strong>${currentUsage.request_count || 0}</strong><span>今日请求</span></div>`,
+    `<div><strong>${feedbacks.length}</strong><span>反馈记录</span></div>`,
+  ].join("");
+
+  const view = ui.cloudAdminWorkspaceView || "overview";
+  els.cloudAdminWorkspaceNav?.querySelectorAll("[data-admin-workspace-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.adminWorkspaceView === view);
+  });
+  const titles = {
+    overview: "概览",
+    members: "成员",
+    usage: "用量",
+    audit: "审计",
+    feedback: "反馈",
+    email: "邮件投递",
+    billing: "账单",
+    errors: "错误",
+  };
+  els.cloudAdminWorkspacePanelTitle.textContent = titles[view] || "概览";
+  els.cloudAdminWorkspaceDeletionRequestBtn.hidden = view !== "overview";
+
+  if (view === "members") {
+    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${[
+      ...members.map((member) => `<div><strong>${escapeHtml(member.user?.email || member.user_id || "")}</strong><span>${escapeHtml(member.role || "member")}</span></div>`),
+      ...invitations.map((invitation) => `<div><strong>${escapeHtml(invitation.email || "")}</strong><span>${escapeHtml(invitation.role || "member")} · ${invitation.accepted_at ? "已接受" : "待接受"}</span></div>`),
+    ].join("") || "暂无成员或邀请。"}</div>`;
+    return;
+  }
+  if (view === "usage") {
+    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${usage.length
+      ? usage.slice().reverse().map((item) => `<div><strong>${escapeHtml(item.task_type || "chat")}</strong><span>${escapeHtml(item.status || "")} · ${Number(item.total_tokens || 0).toLocaleString("zh-CN")} · ${escapeHtml(item.created_at || "")}</span></div>`).join("")
+      : "暂无匹配用量。"}</div>`;
+    return;
+  }
+  if (view === "audit") {
+    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${audit.length
+      ? audit.slice().reverse().map((item) => `<div><strong>${escapeHtml(item.action || "")}</strong><span>${escapeHtml(item.target_type || "")} · ${escapeHtml(item.created_at || "")}</span></div>`).join("")
+      : "暂无匹配审计。"}</div>`;
+    return;
+  }
+  if (view === "feedback") {
+    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${feedbacks.length
+      ? feedbacks.slice().reverse().map((item) => {
+        const status = item.metadata?.status || "pending";
+        return `<div class="cloud-admin-feedback-row">
+          <strong>${escapeHtml(item.message || "")}</strong>
+          <span>${escapeHtml(status)} · ${escapeHtml(item.created_at || "")}</span>
+          <span class="cloud-row-actions">
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="processing">处理中</button>
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="resolved">已解决</button>
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="closed">关闭</button>
+          </span>
+        </div>`;
+      }).join("")
+      : "暂无反馈。"}</div>`;
+    return;
+  }
+  if (view === "email") {
+    ui.cloudAdminVisibleEmails = emails.slice(-50).reverse();
+    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${ui.cloudAdminVisibleEmails.length
+      ? ui.cloudAdminVisibleEmails.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.email || "")}</strong><span>${escapeHtml(item.template || "")} · ${escapeHtml(item.status || "")} · ${escapeHtml(item.updated_at || item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-email" data-email-index="${index}">复制详情</button></div>`).join("")
+      : "暂无邮件投递。"}</div>`;
+    return;
+  }
+  if (view === "billing") {
+    ui.cloudAdminVisiblePayments = payments.slice(-50).reverse();
+    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${ui.cloudAdminVisiblePayments.length
+      ? ui.cloudAdminVisiblePayments.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.event_type || "")}</strong><span>${escapeHtml(item.provider || "")} · ${escapeHtml(item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-payment" data-payment-index="${index}">复制事件</button></div>`).join("")
+      : "暂无账单事件。"}</div>`;
+    return;
+  }
+  if (view === "errors") {
+    ui.cloudAdminVisibleErrors = errors.slice(-50).reverse();
+    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${ui.cloudAdminVisibleErrors.length
+      ? ui.cloudAdminVisibleErrors.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.type || item.level || "error")}</strong><span>${escapeHtml(item.message || "")}</span><button type="button" data-cloud-admin-action="copy-error" data-error-index="${index}">复制详情</button></div>`).join("")
+      : "暂无错误事件。"}</div>`;
+    return;
+  }
+  els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-grid">
+    <section class="cloud-admin-card"><h3>组织</h3><div class="cloud-admin-list"><div><strong>${escapeHtml(org.name || "未命名组织")}</strong><span>${escapeHtml(org.plan || "free")}</span></div></div></section>
+    <section class="cloud-admin-card"><h3>运营状态</h3><div class="cloud-admin-list">
+      <div><strong>${currentUsage.request_count || 0}</strong><span>今日请求</span></div>
+      <div><strong>${currentUsage.failed_count || 0}</strong><span>今日失败</span></div>
+      <div><strong>${emails.length}</strong><span>邮件投递</span></div>
+      <div><strong>${errors.length}</strong><span>错误事件</span></div>
+    </div></section>
+  </div>`;
+}
+
+function buildAdminUsageQuery() {
+  const params = new URLSearchParams();
+  if (els.cloudAdminUsageFrom?.value) params.set("from", els.cloudAdminUsageFrom.value);
+  if (els.cloudAdminUsageTo?.value) params.set("to", els.cloudAdminUsageTo.value);
+  if (els.cloudAdminUsageTask?.value.trim()) params.set("task_type", els.cloudAdminUsageTask.value.trim());
+  if (els.cloudAdminUsageStatus?.value) params.set("status", els.cloudAdminUsageStatus.value);
+  params.set("limit", "80");
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+function buildAdminAuditQuery() {
+  const params = new URLSearchParams();
+  if (els.cloudAdminAuditFrom?.value) params.set("from", els.cloudAdminAuditFrom.value);
+  if (els.cloudAdminAuditTo?.value) params.set("to", els.cloudAdminAuditTo.value);
+  if (els.cloudAdminAuditAction?.value.trim()) params.set("action", els.cloudAdminAuditAction.value.trim());
+  params.set("limit", "80");
+  const text = params.toString();
+  return text ? `?${text}` : "";
+}
+
+async function handleCloudAdminAction(event) {
+  const button = event.target.closest("[data-cloud-admin-action]");
+  if (!button) return;
+  const action = button.dataset.cloudAdminAction;
+  if (action === "feedback-status") {
+    await withLoading(button, "更新中", async () => {
+      await cloudRequest(`/feedback/${button.dataset.feedbackId}/status`, {
+        method: "POST",
+        body: JSON.stringify({ status: button.dataset.status }),
+      });
+      await cloudLoadAdminDashboard({ silent: true });
+      toast("反馈状态已更新");
+    });
+  } else if (action === "copy-error") {
+    const item = ui.cloudAdminVisibleErrors?.[Number(button.dataset.errorIndex)];
+    await copyTextToClipboard(JSON.stringify(item || {}, null, 2));
+    toast("错误详情已复制");
+  } else if (action === "copy-payment") {
+    const item = ui.cloudAdminVisiblePayments?.[Number(button.dataset.paymentIndex)];
+    await copyTextToClipboard(JSON.stringify(item || {}, null, 2));
+    toast("账单事件已复制");
+  } else if (action === "copy-email") {
+    const item = ui.cloudAdminVisibleEmails?.[Number(button.dataset.emailIndex)];
+    await copyTextToClipboard(JSON.stringify(item || {}, null, 2));
+    toast("邮件投递详情已复制");
+  }
+}
+
+async function cloudExportOrganizationData() {
+  const orgId = state.cloud?.activeOrganization?.id;
+  if (!orgId) return;
+  await withLoading(els.cloudAdminExportOrgBtn, "导出中", async () => {
+    const data = await cloudRequest(`/orgs/${orgId}/export`, { method: "GET" });
+    downloadBlob(`mowen-org-export-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
+    toast("组织数据已导出");
+  });
+}
+
+function cloudExportUsageCsv() {
+  const rows = Array.isArray(state.cloud?.adminUsage) ? state.cloud.adminUsage : [];
+  if (!rows.length) {
+    toast("没有可导出的用量记录", "warn");
+    return;
+  }
+  downloadCsv(`mowen-usage-${new Date().toISOString().slice(0, 10)}.csv`, [
+    ["created_at", "task_type", "status", "prompt_tokens", "completion_tokens", "total_tokens", "model", "error"],
+    ...rows.map((item) => [
+      item.created_at || "",
+      item.task_type || "",
+      item.status || "",
+      item.prompt_tokens || 0,
+      item.completion_tokens || 0,
+      item.total_tokens || 0,
+      item.model || "",
+      item.error || "",
+    ]),
+  ]);
+  toast("用量 CSV 已导出");
+}
+
+function cloudExportAuditCsv() {
+  const rows = Array.isArray(state.cloud?.adminAudit) ? state.cloud.adminAudit : [];
+  if (!rows.length) {
+    toast("没有可导出的审计记录", "warn");
+    return;
+  }
+  downloadCsv(`mowen-audit-${new Date().toISOString().slice(0, 10)}.csv`, [
+    ["created_at", "action", "actor_user_id", "target_type", "target_id", "details"],
+    ...rows.map((item) => [
+      item.created_at || "",
+      item.action || "",
+      item.actor_user_id || "",
+      item.target_type || "",
+      item.target_id || "",
+      JSON.stringify(item.details || {}),
+    ]),
+  ]);
+  toast("审计 CSV 已导出");
+}
+
+async function cloudRequestOrganizationDeletion() {
+  const orgId = state.cloud?.activeOrganization?.id;
+  if (!orgId) return;
+  const reason = window.prompt("请填写创建删除/停用草案的原因。该操作不会立即删除数据。", "管理员发起组织数据治理评估");
+  if (!reason) return;
+  await withLoading(els.cloudAdminDeletionRequestBtn, "创建中", async () => {
+    await cloudRequest(`/orgs/${orgId}/deletion-request`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+    await cloudLoadAdminDashboard({ silent: true });
+    toast("组织删除/停用草案已创建", "warn");
+  });
+}
+
+async function cloudSendFeedback() {
+  const message = els.cloudFeedbackInput.value.trim();
+  if (!message) {
+    toast("请先填写反馈内容", "warn");
+    return;
+  }
+  await withLoading(els.cloudSendFeedbackBtn, "提交中", async () => {
+    await cloudRequest("/feedback", {
+      method: "POST",
+      body: JSON.stringify({ message, source: "cloud_panel" }),
+    });
+    els.cloudFeedbackInput.value = "";
+    toast("反馈已提交");
+  });
+}
+
+async function cloudSaveCurrentDocument() {
+  const doc = getCurrentDoc();
+  if (!doc || doc.deletedAt) {
+    toast("请先选择要同步的文档", "warn");
+    return;
+  }
+  await withLoading(els.cloudSaveDocBtn, "同步中", async () => {
+    const payload = {
+      title: doc.title || "未命名文档",
+      type: doc.type || "custom",
+      folder_id: doc.folderId || "",
+      local_id: doc.id,
+      content: doc.content || "",
+      metadata: {
+        localId: doc.id,
+        type: doc.type || "",
+        folderId: doc.folderId || "",
+        styleId: doc.styleId || "",
+      },
+      expected_version: doc.cloudVersion || undefined,
+    };
+    const data = await saveCloudResourceWithConflict({
+      localName: doc.title || "当前文档",
+      endpoint: doc.cloudId ? `/documents/${doc.cloudId}` : "/documents",
+      method: doc.cloudId ? "PUT" : "POST",
+      payload,
+      remoteKey: "document",
+      applyRemote: (remoteDoc) => applyRemoteDocumentToLocal(doc, remoteDoc),
+      createLocalCopy: (remoteDoc) => createDocumentCopyFromRemote(remoteDoc),
+    });
+    doc.cloudId = data.document.id;
+    doc.cloudUpdatedAt = data.document.updated_at || now();
+    doc.cloudVersion = data.document.version || 1;
+    persist();
+    renderEditor();
+    toast(`当前文档已同步到云端：${getCloudDocumentLocation(data.document)}`);
+  });
+}
+
+async function cloudPullDocuments() {
+  await withLoading(els.cloudPullDocsBtn, "拉取中", async () => {
+    const data = await cloudRequest("/documents", { method: "GET" });
+    const documents = Array.isArray(data.documents) ? data.documents : [];
+    let imported = 0;
+    documents.forEach((remoteDoc) => {
+      const existing = state.docs.find((doc) => doc.cloudId === remoteDoc.id);
+      const metadata = remoteDoc.metadata || {};
+      if (existing) {
+        existing.title = remoteDoc.title || existing.title;
+        existing.content = remoteDoc.content || "";
+        existing.type = remoteDoc.type || metadata.type || existing.type || "custom";
+        existing.folderId = metadata.folderId || existing.folderId || state.folders[0]?.id || "";
+        existing.styleId = metadata.styleId || existing.styleId || state.styles[0]?.id || "";
+        existing.cloudUpdatedAt = remoteDoc.updated_at || now();
+        existing.cloudVersion = remoteDoc.version || 1;
+        existing.updatedAt = now();
+        existing.deletedAt = remoteDoc.deleted_at || "";
+        return;
+      }
+      state.docs.push({
+        id: createId(),
+        title: remoteDoc.title || "云端文档",
+        type: remoteDoc.type || metadata.type || "custom",
+        folderId: metadata.folderId || state.folders[0]?.id || "",
+        styleId: metadata.styleId || state.styles[0]?.id || "",
+        content: remoteDoc.content || "",
+        createdAt: remoteDoc.created_at || now(),
+        updatedAt: remoteDoc.updated_at || now(),
+        deletedAt: remoteDoc.deleted_at || "",
+        deletedFromFolderId: "",
+        cloudId: remoteDoc.id,
+        cloudUpdatedAt: remoteDoc.updated_at || now(),
+        cloudVersion: remoteDoc.version || 1,
+      });
+      imported += 1;
+    });
+    persist();
+    eventBus.emit(EVENTS.RENDER_DOC_LIST);
+    eventBus.emit(EVENTS.RENDER_EDITOR);
+    toast(`已从云端拉取 ${documents.length} 份文档，新增 ${imported} 份`);
+  });
+}
+
+async function saveCloudResourceWithConflict({ localName, endpoint, method, payload, remoteKey, applyRemote, createLocalCopy }) {
+  try {
+    return await cloudRequest(endpoint, { method, body: JSON.stringify(payload) });
+  } catch (error) {
+    if (error.status !== 409 || error.payload?.error?.code !== "version_conflict") throw error;
+    const remote = error.payload?.error?.details?.remote;
+    const currentVersion = error.payload?.error?.details?.current_version || remote?.version || "未知";
+    const choice = window.prompt(
+      `检测到云端版本冲突：${localName}\n云端版本：v${currentVersion}\n输入 1 覆盖云端；输入 2 另存本地副本后拉取云端；输入 3 仅拉取云端。`,
+      "3",
+    );
+    if (choice === "1") {
+      return cloudRequest(endpoint, {
+        method,
+        body: JSON.stringify({ ...payload, expected_version: undefined, force: true }),
+      });
+    }
+    if (choice === "2") {
+      createLocalCopy?.(remote);
+      applyRemote?.(remote);
+      persist();
+      toast("已保留本地副本，并拉取云端版本", "warn");
+      return { [remoteKey]: remote };
+    }
+    applyRemote?.(remote);
+    persist();
+    toast("已拉取云端版本，本地改动未覆盖云端", "warn");
+    return { [remoteKey]: remote };
+  }
+}
+
+function applyRemoteDocumentToLocal(doc, remoteDoc) {
+  if (!remoteDoc) return;
+  const metadata = remoteDoc.metadata || {};
+  doc.title = remoteDoc.title || doc.title;
+  doc.content = remoteDoc.content || "";
+  doc.type = remoteDoc.type || metadata.type || doc.type || "custom";
+  doc.folderId = metadata.folderId || doc.folderId || state.folders[0]?.id || "";
+  doc.styleId = metadata.styleId || doc.styleId || state.styles[0]?.id || "";
+  doc.cloudId = remoteDoc.id;
+  doc.cloudUpdatedAt = remoteDoc.updated_at || now();
+  doc.cloudVersion = remoteDoc.version || 1;
+  doc.updatedAt = now();
+  eventBus.emit(EVENTS.RENDER_DOC_LIST);
+  eventBus.emit(EVENTS.RENDER_EDITOR);
+}
+
+function createDocumentCopyFromRemote(remoteDoc) {
+  const current = getCurrentDoc();
+  if (!current) return remoteDoc;
+  state.docs.push({
+    ...current,
+    id: createId(),
+    title: `${current.title || "本地副本"}（冲突副本）`,
+    cloudId: "",
+    cloudUpdatedAt: "",
+    cloudVersion: "",
+    createdAt: now(),
+    updatedAt: now(),
+  });
+  eventBus.emit(EVENTS.RENDER_DOC_LIST);
+  return remoteDoc;
+}
+
+async function cloudSaveCurrentWriter() {
+  const style = getCurrentCloudWriter();
+  if (!style) {
+    toast("请先选择要同步的执笔人", "warn");
+    return;
+  }
+  await withLoading(els.cloudSaveWriterBtn, "同步中", async () => {
+    const payload = {
+      name: style.name || "未命名执笔人",
+      handle: normalizeHandle(style.handle || style.name),
+      category: style.category || "自定义",
+      description: style.description || "",
+      enabled: style.enabled !== false,
+      summary_md: style.summary || "",
+      skill_json: parseJsonSafely(style.skillJson || "{}", {}),
+      quality_report: style.qualityReport || {},
+      expected_version: style.cloudVersion || undefined,
+    };
+    const data = await saveCloudResourceWithConflict({
+      localName: style.name || "当前执笔人",
+      endpoint: style.cloudId ? `/writers/${style.cloudId}` : "/writers",
+      method: style.cloudId ? "PUT" : "POST",
+      payload,
+      remoteKey: "writer",
+      applyRemote: (remoteWriter) => applyRemoteWriterToLocal(style, remoteWriter),
+      createLocalCopy: (remoteWriter) => createWriterCopyFromRemote(remoteWriter),
+    });
+    style.cloudId = data.writer.id;
+    style.cloudUpdatedAt = data.writer.updated_at || now();
+    style.cloudVersion = data.writer.version || 1;
+    style.updatedAt = now();
+    persist();
+    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+    toast(`执笔人已同步到云端：${getCloudWriterLocation(data.writer)}`);
+  });
+}
+
+function applyRemoteWriterToLocal(style, remoteWriter) {
+  if (!remoteWriter) return;
+  const next = normalizeSkill({
+    ...style,
+    name: remoteWriter.name || style.name,
+    handle: remoteWriter.handle || style.handle,
+    category: remoteWriter.category || style.category || "自定义",
+    description: remoteWriter.description || style.description || "",
+    enabled: remoteWriter.enabled !== false,
+    summary: remoteWriter.summary_md || style.summary || "",
+    skillJson: JSON.stringify(remoteWriter.skill_json || {}, null, 2),
+    qualityReport: remoteWriter.quality_report || style.qualityReport || null,
+    versions: style.versions || [],
+    cloudId: remoteWriter.id,
+    cloudUpdatedAt: remoteWriter.updated_at || now(),
+    cloudVersion: remoteWriter.version || 1,
+    updatedAt: now(),
+  });
+  Object.assign(style, next);
+  if (ui.editingStyle?.id === style.id) ui.editingStyle = clone(style);
+  eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
+  eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+  eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+}
+
+function createWriterCopyFromRemote(remoteWriter) {
+  const style = getCurrentCloudWriter();
+  if (!style) return remoteWriter;
+  state.styles.push(normalizeSkill({
+    ...style,
+    id: createId(),
+    name: `${style.name || "本地副本"}（冲突副本）`,
+    handle: normalizeHandle(`${style.handle || style.name || "copy"}${state.styles.length + 1}`),
+    cloudId: "",
+    cloudUpdatedAt: "",
+    cloudVersion: "",
+    createdAt: now(),
+    updatedAt: now(),
+  }));
+  eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+  return remoteWriter;
+}
+
+async function cloudPullWriters() {
+  await withLoading(els.cloudPullWritersBtn, "拉取中", async () => {
+    const data = await cloudRequest("/writers", { method: "GET" });
+    const writers = Array.isArray(data.writers) ? data.writers : [];
+    let imported = 0;
+    writers.forEach((remoteWriter) => {
+      const existing = state.styles.find((style) => style.cloudId === remoteWriter.id || style.handle === remoteWriter.handle);
+      const next = normalizeSkill({
+        ...(existing || {}),
+        id: existing?.id || createId(),
+        name: remoteWriter.name || existing?.name || "云端执笔人",
+        handle: remoteWriter.handle || existing?.handle || "",
+        category: remoteWriter.category || existing?.category || "自定义",
+        description: remoteWriter.description || existing?.description || "",
+        enabled: remoteWriter.enabled !== false,
+        summary: remoteWriter.summary_md || existing?.summary || "",
+        skillJson: JSON.stringify(remoteWriter.skill_json || {}, null, 2),
+        qualityReport: remoteWriter.quality_report || existing?.qualityReport || null,
+        versions: Array.isArray(remoteWriter.versions) ? remoteWriter.versions.map(mapRemoteWriterVersion) : existing?.versions || [],
+        examples: existing?.examples || [],
+        createdAt: remoteWriter.created_at || existing?.createdAt || now(),
+        updatedAt: remoteWriter.updated_at || now(),
+        cloudId: remoteWriter.id,
+        cloudUpdatedAt: remoteWriter.updated_at || now(),
+        cloudVersion: remoteWriter.version || 1,
+      });
+      if (existing) Object.assign(existing, next);
+      else {
+        state.styles.push(next);
+        imported += 1;
+      }
+    });
+    if (!ui.editingStyle && state.styles[0]) ui.editingStyle = clone(state.styles[0]);
+    persist();
+    eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
+    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+    toast(`已从云端拉取 ${writers.length} 个执笔人，新增 ${imported} 个`);
+  });
+}
+
+function mapRemoteWriterVersion(version) {
+  return {
+    id: version.id || createId(),
+    version: Number(version.version || 1),
+    createdAt: version.created_at || now(),
+    summary: version.summary_md || "",
+    skillJson: JSON.stringify(version.skill_json || {}, null, 2),
+    qualityReport: version.quality_report || null,
+    sourceExamples: [],
+    analyses: [],
+    analysis: "",
+    aggregation: "",
+    aggregationData: null,
+    testDoc: "",
+    testReport: "",
+  };
+}
+
+function getCurrentCloudWriter() {
+  return (
+    state.styles.find((style) => style.id === ui.selectedSkillCardId) ||
+    state.styles.find((style) => style.id === ui.editingStyle?.id) ||
+    state.styles[0] ||
+    null
+  );
+}
+
+async function cloudSaveApiKey() {
+  const apiKey = els.cloudApiKeyInput.value.trim();
+  if (!apiKey) {
+    toast("请先填写要保存的 API Key", "warn");
+    return;
+  }
+  await withLoading(els.cloudSaveApiKeyBtn, "保存中", async () => {
+    const data = await cloudRequest("/api-keys", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: "openai-compatible",
+        name: "默认接口",
+        api_key: apiKey,
+      }),
+    });
+    els.cloudApiKeyInput.value = "";
+    toast(`API Key 已加密保存到云端：${data.api_key?.key_hint || "已保存"}`);
+  });
+}
+
+function enableCloudAiProxy() {
+  if (!state.cloud?.authenticated) {
+    toast("请先登录云端账号", "warn");
+    return;
+  }
+  state.cloud.model = els.cloudModelInput.value.trim() || state.cloud.model || "gpt-4.1-mini";
+  state.settings = {
+    provider: "openai-compatible",
+    baseUrl: normalizeCloudBaseUrl(state.cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL),
+    endpointPath: "/ai/chat",
+    model: state.cloud.model,
+    apiKey: "",
+    credentials: "include",
+    systemPrompt: state.settings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+  };
+  persist();
+  renderApiSettings();
+  updateAiStatus();
+  toast("已启用云端 AI 代理，后续生成将通过云端接口调用");
+}
+
+function getCloudSettingsLocation() {
+  return `${normalizeCloudBaseUrl(state.cloud?.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL)} / 当前工作区`;
+}
+
+function getCloudDocumentLocation(document) {
+  return `${state.cloud?.activeOrganization?.name || "云端工作区"} / 文档 / ${document.title || document.id}`;
+}
+
+function getCloudWriterLocation(writer) {
+  return `${state.cloud?.activeOrganization?.name || "云端工作区"} / 执笔人 / @${writer.handle || writer.id}`;
 }
 
 function renderStyleEditor() {
@@ -2427,9 +4099,10 @@ function clearApiSettings() {
 
 function updateAiStatus() {
   const ready = Boolean(state.settings?.baseUrl && state.settings?.model);
-  els.aiStatus.textContent = ready ? "已配置" : "未配置";
+  const cloudProxy = ready && state.settings?.credentials === "include" && state.settings?.endpointPath === "/ai/chat";
+  els.aiStatus.textContent = cloudProxy ? "云端代理" : ready ? "已配置" : "未配置";
   els.aiStatus.className = `status-pill ${ready ? "ready" : ""}`;
-  els.apiSavedLabel.textContent = ready ? "本机已保存" : "待配置";
+  els.apiSavedLabel.textContent = cloudProxy ? "云端代理已启用" : ready ? "本机已保存" : "待配置";
 }
 
 async function withLoading(button, text, task) {
@@ -2594,6 +4267,11 @@ function switchTab(tabName) {
     const apiActive = tabName === "api";
     els.apiTopBtn.classList.toggle("active", apiActive);
     els.apiTopBtn.setAttribute("aria-pressed", String(apiActive));
+  }
+  if (els.cloudTopBtn) {
+    const cloudActive = tabName === "cloud";
+    els.cloudTopBtn.classList.toggle("active", cloudActive);
+    els.cloudTopBtn.setAttribute("aria-pressed", String(cloudActive));
   }
   if (window.lucide) window.lucide.createIcons();
 }
@@ -2783,6 +4461,32 @@ function downloadBlob(fileName, content, type) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function downloadCsv(fileName, rows) {
+  const content = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+  downloadBlob(fileName, `\ufeff${content}\n`, "text/csv;charset=utf-8");
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  input.remove();
 }
 
 function toast(message, tone = "info") {

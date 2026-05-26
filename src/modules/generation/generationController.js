@@ -72,7 +72,7 @@ export function createGenerationController({
       const content = await callAiWithRetry([
         { role: "system", content: state.settings.systemPrompt || defaultSystemPrompt },
         { role: "user", content: prompt },
-      ], { signal });
+      ], { signal, taskType: "document_generation" });
       throwIfTaskAborted(signal);
       progress.update("步骤 3/3：正在写入文档", 82);
 
@@ -147,7 +147,7 @@ export function createGenerationController({
       const rewritten = await callAiWithRetry([
         { role: "system", content: state.settings.systemPrompt || defaultSystemPrompt },
         { role: "user", content: prompt },
-      ], { signal });
+      ], { signal, taskType: "paragraph_rewrite" });
       throwIfTaskAborted(signal);
       progress.update("步骤 3/3：正在替换选中段落", 85);
       const content = els.contentEditor.value;

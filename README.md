@@ -14,7 +14,8 @@
 | 执笔人工作台 | 以卡片方式展示可用执笔人，支持调用、启用、详情、测试、导入导出与重训 |
 | 执笔人生成 | 从多篇同类样本中提取结构、文风、句式、禁忌和审稿标准，生成可编辑、可测试、可迭代的写作能力 |
 | PPT 生成 | 从文本和资料生成原生 `.pptx`，支持公文汇报、校园培训、瑞士风、归藏风格和自定义风格 |
-| AI 接口 | 接入 OpenAI 兼容的 Chat Completions 接口，配置保存在本机浏览器 |
+| AI 接口 | 接入 OpenAI 兼容的 Chat Completions 接口；可本机直连，也可登录后走云端 AI 代理 |
+| 云端模式 | 可选商业化后端，支持账号安全、组织、团队邀请、文档/执笔人同步、版本冲突提示、API Key 加密、用量统计、审计日志和灰度反馈 |
 
 ## 为什么是“执笔人”
 
@@ -55,6 +56,26 @@ node e2e/serve-static.mjs
 http://127.0.0.1:4173/index.html
 ```
 
+### 可选云端后端
+
+P0 商业化底座已提供最小后端服务。另开一个终端运行：
+
+```bash
+npm run server:dev
+```
+
+默认后端地址：
+
+```text
+http://127.0.0.1:8787/api
+```
+
+然后在右上角“云端”面板注册或登录。未登录时仍然是完整本地工作台；登录后可以完成邮箱验证、手动同步当前文档、当前执笔人，保存组织 API Key，把 AI 调用切换到云端代理，并通过团队协作区邀请和管理成员。owner/admin 可以查看账单与套餐、创建升级入口，也可以进入独立后台页 `admin.html`，管理组织名称、成员邀请、成员角色、组织接口密钥、套餐升级入口和人工确认充值订单，观察用量趋势与成本估算、审计摘要与保存筛选、反馈批处理、反馈/错误负责人备注 SLA、邮件投递、错误筛选和账单事件，导出用量/审计 CSV，并复制详情。
+
+最新后台能力还包括：AI 失败记录可与系统错误使用同一跟进入口保存负责人、备注、优先级和 SLA；审计筛选与后台筛选偏好会按组织和用户保存到云端，并保留本地兜底；成本估算可由后端 `AI_COST_RATES` 统一计算，并在后台展示今日/本月预算摘要；人工确认版充值支持微信/支付宝收款码、用户提交付款备注/凭证、管理员确认后开通会员或发放 AI 额度。
+
+云端开发模式默认使用 `server/.data/db.json`。设置 `STORE_DRIVER=postgres` 和 `DATABASE_URL` 后，后端会使用 PostgreSQL，按 `server/migrations/*.sql` 执行迁移并记录 `migration_versions`。当前已把 `ai_usage` 历史查询、`audit_logs` 审计查询和 `documents` 文档列表作为表级只读 repository 试点，JSON Store 路径保持不变。生产模式会校验强密钥、`CORS_ORIGIN` 和邮件投递模式，避免默认配置直接上线。邮件发送可选择通用 HTTP webhook 或 Resend 适配，邮件服务商状态可通过 `POST /api/webhooks/email` 回调更新；支付渠道价格 ID 可通过 `PAYMENT_PLAN_PRICE_MAP` 映射到内部套餐；人工确认充值可配置 `MANUAL_PAYMENT_WECHAT_QR_URL`、`MANUAL_PAYMENT_ALIPAY_QR_URL`、`MANUAL_PAYMENT_PACKAGES`；备份可运行 `npm run server:backup`，配置 `BACKUP_ENCRYPTION_KEY` 后会输出 `.json.gcm` 加密备份，也可以配置 S3-compatible 对象存储上传副本。`npm run server:backup:verify -- <backup-file>` 可校验明文或加密备份结构，失败告警可接 `BACKUP_FAILURE_WEBHOOK_URL`。
+
 ## 基本流程
 
 1. 在右上角“接口”中配置 AI 服务。
@@ -78,7 +99,7 @@ http://127.0.0.1:4173/index.html
 
 ## AI 接口
 
-项目不内置后端，也不保存作者方 API Key。你需要在浏览器里配置自己的 OpenAI 兼容接口：
+默认可以在浏览器里配置自己的 OpenAI 兼容接口：
 
 - Base URL
 - Endpoint Path，通常是 `/chat/completions`
@@ -86,7 +107,7 @@ http://127.0.0.1:4173/index.html
 - API Key
 - 可选系统提示词
 
-接口配置保存在本机浏览器。AI 请求失败时，工作台会给出友好错误提示，并对超时、限流、JSON 解析问题做重试和容错。
+接口配置默认保存在本机浏览器。若启用云端模式，组织 API Key 会提交给后端加密保存，只返回 `key_hint`，后续 AI 请求可通过 `/api/ai/chat` 代理完成，并写入用量统计和审计日志。AI 代理会记录文档生成、段落改写、执笔人构建、PPT 生成等任务类型，便于后续做套餐配额和成本分析。AI 请求失败时，工作台会给出友好错误提示，并对超时、限流、JSON 解析问题做重试和容错。
 
 ## 开发命令
 
@@ -100,8 +121,9 @@ npm run test:e2e
 
 当前测试覆盖：
 
-- 单元测试：78 项
-- 端到端测试：25 项
+- 前端与核心单元测试：78 项
+- 后端商业化 API 测试：29 项
+- 端到端测试：29 项
 - GitHub Actions：自动运行 `npm run check` 和 `npm test`
 
 ## 项目结构
@@ -109,12 +131,15 @@ npm run test:e2e
 ```text
 school-doc-manager/
 ├─ index.html              # 页面结构
+├─ admin.html              # 独立管理后台页面
 ├─ styles.css              # 设计 token 与界面样式
 ├─ app.js                  # 兼容层与页面装配
 ├─ src/
 │  ├─ main.js              # 打包入口
+│  ├─ admin/               # 独立后台页面脚本
 │  ├─ modules/             # 文档、执笔人、PPT、AI、存储等模块
 │  └─ utils/               # 事件、DOM、拖拽路由、通用工具
+├─ server/                 # 商业化后端：账号安全、组织、团队、同步、AI 代理、用量、审计、邮件、支付、备份
 ├─ test/                   # 单元测试
 ├─ e2e/                    # Playwright 端到端测试与静态服务
 └─ build/bundle.js         # 构建产物，index.html 直接加载它
@@ -129,7 +154,8 @@ school-doc-manager/
 - 文档内容、执笔人、版本和配置主要存放在浏览器 IndexedDB。
 - localStorage 只作为轻量启动与兼容兜底。
 - 只有你主动调用 AI 时，相关提示词、样本摘要或生成内容才会发送到你配置的 AI 服务。
-- API Key 保存在本机浏览器，不会提交到仓库。
+- 本机直连模式下，API Key 保存在本机浏览器，不会提交到仓库。
+- 云端模式下，API Key 只在后端加密存储，前端和 API 响应只显示 `key_hint`。
 
 使用真实敏感材料前，请先确认你配置的 AI 服务与单位数据规范相符。更多说明见 [SECURITY.md](SECURITY.md)。
 
@@ -142,6 +168,21 @@ school-doc-manager/
 - [REVIEW.md](REVIEW.md)：当前代码评审记录
 - [SECURITY.md](SECURITY.md)：安全与隐私说明
 - [CHANGELOG.md](CHANGELOG.md)：更新记录
+- [COMMERCIALIZATION_PLAN.md](COMMERCIALIZATION_PLAN.md)：商业化总体规划
+- [COMMERCIALIZATION_PROGRESS_REPORT.md](COMMERCIALIZATION_PROGRESS_REPORT.md)：商业化阶段总结与未完成清单
+- [P2_ROUND1_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND1_COMMERCIALIZATION_BUILD_PLAN.md)：邮件、签名支付 webhook、管理汇总和备份施工记录
+- [P2_ROUND2_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND2_COMMERCIALIZATION_BUILD_PLAN.md)：管理后台、支付适配、备份校验和组织治理施工记录
+- [P2_ROUND3_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND3_COMMERCIALIZATION_BUILD_PLAN.md)：邮件/支付实接、备份告警、管理后台增强施工记录
+- [P2_ROUND4_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND4_COMMERCIALIZATION_BUILD_PLAN.md)：支付入口、邮件回调、独立后台、PostgreSQL repository 试点和备份加固施工记录
+- [P2_ROUND6_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND6_COMMERCIALIZATION_BUILD_PLAN.md)：后台权限边界、AI 失败跟进、成本预算、后台偏好与 SLA 运营闭环施工记录
+- [P2_ROUND7_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND7_COMMERCIALIZATION_BUILD_PLAN.md)：下一轮 PostgreSQL 写入拆分、后台角色细分和真实服务商联调计划
+- [P2_ROUND4_EXECUTION_PLAN.md](P2_ROUND4_EXECUTION_PLAN.md)：P2 第四轮阶段 A-F 执行记录
+- [P2_ROUND5_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND5_COMMERCIALIZATION_BUILD_PLAN.md)：真实服务商集成、PostgreSQL repository 扩面和恢复演练施工计划与阶段 A 记录
+- [P1_ROUND2_COMMERCIALIZATION_BUILD_PLAN.md](P1_ROUND2_COMMERCIALIZATION_BUILD_PLAN.md)：灰度能力施工记录
+- [P1_ROUND3_COMMERCIALIZATION_BUILD_PLAN.md](P1_ROUND3_COMMERCIALIZATION_BUILD_PLAN.md)：运营与计费预埋施工记录
+- [DEPLOYMENT.md](DEPLOYMENT.md)：灰度部署指南
+- [PRIVACY_POLICY.md](PRIVACY_POLICY.md)：隐私政策草案
+- [TERMS_OF_SERVICE.md](TERMS_OF_SERVICE.md)：用户协议草案
 
 ## 许可证
 

@@ -4,6 +4,19 @@
 
 ## 总览
 
+P0 商业化补齐后，项目包含两个运行面：
+
+```text
+Browser App
+  - index.html / build/bundle.js
+  - 本地文档、执笔人、PPT、编辑器和 AI 调用入口
+
+Commercial API
+  - server/src/app.js
+  - 账号安全、组织、团队邀请、云端文档、云端执笔人、AI 代理、用量、审计、邮件、支付、备份和灰度反馈
+  - 开发模式使用 server/.data/db.json，云端部署可切换到 PostgreSQL
+```
+
 ```text
 index.html
   ↓
@@ -23,15 +36,18 @@ src/modules/*
 | 路径 | 作用 |
 | --- | --- |
 | `index.html` | 页面结构、主要面板和弹窗容器 |
+| `admin.html` | 独立管理后台页面，用于 owner/admin 查看运营数据 |
 | `styles.css` | 设计 token、响应式布局、组件样式 |
 | `app.js` | 旧逻辑兼容层、页面装配和部分控制器入口 |
 | `src/main.js` | 打包入口，注册模块能力 |
+| `src/admin/` | 独立后台页面脚本，不依赖主工作台 DOM |
 | `src/modules/ai/` | AI 调用、重试、取消、JSON 容错和接口配置 |
 | `src/modules/documents/` | 文档导入、阅读、导出、垃圾箱、真实文件夹关联 |
 | `src/modules/skills/` | 执笔人解析、聚合、生成、渲染、导入导出、版本和测试 |
 | `src/modules/ppt/` | PPT 素材整理、HTML 预览和原生 `.pptx` 生成 |
 | `src/modules/storage/` | IndexedDB 与 localStorage 兼容存储 |
 | `src/utils/` | EventBus、DOM 工具、拖拽路由、通用函数 |
+| `server/` | 商业化后端，包含账号安全、组织、团队邀请、云端同步、AI 代理、用量、审计、邮件投递、支付 webhook、备份脚本和管理汇总 |
 | `test/` | Node 单元测试 |
 | `e2e/` | Playwright 端到端测试与静态服务 |
 
@@ -45,6 +61,7 @@ src/modules/*
 - `state.folders`：真实文件夹与自定义标签信息
 - `state.styles`：执笔人列表，内部仍沿用部分历史 `skill/style` 命名
 - `state.aiConfig`：AI 接口配置
+- `state.cloud`：云端登录态、组织、团队成员/邀请、同步入口和云端 AI 代理状态
 - `state.trash`：删除后的文档缓存
 - `state.pptProjects`：PPT 生成项目与预览信息
 
@@ -144,7 +161,99 @@ AI 客户端面向 OpenAI 兼容 Chat Completions 接口。
 - JSON 解析失败后的修复尝试
 - 长耗时操作进度反馈
 
-项目没有后端代理。生产或团队部署时，如果需要统一密钥、审计和限流，建议增加独立后端代理层。
+P0 已新增可选后端代理层：`POST /api/ai/chat`。本地模式仍可直连 OpenAI 兼容接口；云端模式下，组织 API Key 在后端加密存储，AI 请求经后端代理并记录用量和审计。
+
+P1 第一轮已补充：
+
+- 生产环境强密钥和 CORS 校验。
+- JSON Store / PostgreSQL Store 抽象，PostgreSQL 迁移草案位于 `server/migrations/001_initial.sql`。
+- 组织成员邀请接口和前端团队协作入口。
+- 文档与执笔人云端 `version`，用于冲突检测。
+- AI 请求超时和任务类型统计。
+- `free/pro/team` 套餐配额读取。
+
+P1 第二轮和第三轮已补充：
+
+- 邮箱验证、密码重置、登录失败节流和退出所有设备。
+- PostgreSQL Store、迁移执行和 JSON 导入脚本。
+- 邀请撤销、邀请重发、成员角色调整和成员移除。
+- `/api/ready`、结构化请求日志、最近错误接口和 Dockerfile。
+- 云端数据导出、账号删除、隐私政策草案、用户协议草案和灰度试用清单。
+- 用量/审计过滤、套餐摘要、支付 webhook 占位和内测反馈入口。
+
+P2 第一轮已补充：
+
+- 邮件投递适配层，生产环境必须通过 HTTP webhook 邮件服务发送验证和重置邮件。
+- `email_deliveries` 投递记录，保存邮件状态、重试次数和错误。
+- 支付 webhook HMAC 签名、timestamp 校验、幂等处理和套餐变更。
+- `GET /api/admin/dashboard` 管理汇总接口，以及前端“管理汇总”入口。
+- `npm run server:backup` 逻辑备份脚本。
+
+P2 第二轮已补充：
+
+- 云端管理后台二级页面，用于查看组织、成员、邀请、用量、审计、反馈、错误和账单事件。
+- 邮件模板集中生成和验证码/重置码申请限流。
+- 支付事件适配层，区分套餐变更、取消订阅、支付失败和退款。
+- 反馈状态流转。
+- 组织级数据导出和组织删除/停用草案。
+- `npm run server:backup:verify -- <backup-file>` 备份结构校验脚本。
+
+P2 第三轮已补充：
+
+- 邮件 webhook 请求体、模板字段和投递失败处理建议文档化。
+- 支付事件增加渠道价格 ID 到内部套餐的 `PAYMENT_PLAN_PRICE_MAP` 映射，配置映射后不再信任 webhook 里的原始 `plan` 字段。
+- 备份脚本失败时返回非 0 退出码，并支持 `BACKUP_FAILURE_WEBHOOK_URL` 告警。
+- 管理后台增加反馈状态筛选、用量/审计 CSV 导出、最近错误和账单事件详情复制。
+- 新增 PostgreSQL 表级 repository 拆分方案，为 P3 生产级存储改造做准备。
+
+P2 第四轮阶段 A/B 已补充：
+
+- `POST /api/billing/checkout`，由后端创建套餐升级入口，前端不直接拼接支付链接。
+- 云端面板“账单与套餐”区域，展示当前套餐、额度、今日用量、账单事件和升级入口。
+- `POST /api/webhooks/email`，通过 `EMAIL_CALLBACK_TOKEN` 接收邮件服务商投递状态回调。
+- 管理后台“邮件投递”区域，支持邮箱、模板、状态筛选和复制详情。
+
+P2 第四轮阶段 C 已补充：
+
+- `#admin` 独立管理后台视图，保留旧管理弹窗作为兼容基础。
+- 管理后台拆分为概览、成员、用量、审计、反馈、邮件、账单和错误栏目。
+- 管理后台 hash 路由具备登录态和 owner/admin 权限守卫。
+
+后续增强已补充：
+
+- 新增 `admin.html` 独立后台页，主工作台“管理后台”入口会跳转到该页面。
+- `src/admin/adminPage.js` 直接调用云端 API，支持登录、刷新、分栏查看、组织名称更新、成员邀请/重发/撤销、成员角色调整、组织接口密钥保存/删除、套餐升级入口、用量摘要、审计摘要、反馈批处理、错误级别筛选、统一二次确认、导出组织数据、导出用量/审计 CSV 和创建组织删除草案。
+- 旧 `#admin` hash 视图保留，作为兼容入口。
+
+P2 第四轮阶段 D 已补充：
+
+- PostgreSQL 迁移执行器，按 `server/migrations/*.sql` 顺序执行并记录 `migration_versions`。
+- `migration_versions` 独立于兼容快照表，不参与 `PostgresStore.saveAllWithClient` 的整库写回。
+- `ai_usage` 只读 repository，作为表级 repository 改造试点。
+- `GET /api/usage/history` 在 PostgreSQL Store 下可走 repository，JSON Store 行为保持不变。
+
+P2 第四轮阶段 E 已补充：
+
+- `server:backup` 支持 `BACKUP_ENCRYPTION_KEY`，配置后输出 AES-256-GCM 加密的 `.json.gcm` 备份。
+- `server:backup:verify` 可识别明文 JSON 和加密备份；加密备份必须提供同一备份密钥才能做只读结构校验。
+- 新增 S3-compatible 对象存储上传适配器，默认关闭，配置后使用 AWS Signature V4 上传本地备份副本。
+- 未配置加密和对象存储时，原本地明文备份路径保持不变。
+
+P2 第五轮阶段 A 已补充：
+
+- `EMAIL_PROVIDER` 支持 `generic-webhook` 和 `resend` 两种邮件发送路径。
+- Resend 适配器会直接调用 Email API，并把服务商返回的 `id` 写入投递记录 `metadata.message_id`。
+- 邮件回调可识别 Resend 风格的事件名、`data.tags`、`data.email_id` 和退信错误字段。
+- 部署文档补充了 `email_verification`、`password_reset` 模板变量、回调映射和运营处理建议。
+
+P2 第五轮阶段 C 已补充：
+
+- `audit_logs` 只读 repository，`GET /api/audit` 在 PostgreSQL Store 下优先走表级查询。
+- `documents` 分页只读 repository，`GET /api/documents` 在 PostgreSQL Store 下优先走表级查询，并返回可选 `page_info`。
+- `ai_usage` 写入暂不切为 insert-only；在审计写入和快照事务边界拆清前，继续避免增量写被快照写覆盖。
+- Repository 测试覆盖组织隔离、limit、筛选、游标分页、JSON/日期归一和迁移版本跳过重复执行。
+
+仍需继续完成真实支付服务商 SDK、备份恢复演练、更多表的增量写 repository 和企业部署增强。
 
 ## PPT 链路
 
@@ -182,8 +291,9 @@ npm run test:e2e
 
 当前覆盖：
 
-- 单元测试：78 项
-- 端到端测试：25 项
+- 前端与核心单元测试：78 项
+- 后端商业化 API 测试：28 项
+- 端到端测试：29 项
 
 重点测试对象：
 
@@ -194,6 +304,16 @@ npm run test:e2e
 - PPT 原生导出
 - 垃圾箱恢复
 - 响应式和关键交互
+
+## 后台运营闭环
+
+独立后台 `admin.html` 直接调用商业化 API，不依赖主工作台 DOM。当前后台运营链路包括：
+
+- 用量：`ai_usage` 记录任务类型、token、状态和后端统一估算成本；`AI_COST_RATES` 可按 provider/model 配置价格。
+- 错误：`system_events` 保存组织归属的系统事件；`ai_usage` 失败记录通过 `ops_triage` 保存跟进状态，避免污染原始用量事实。
+- 反馈：`user.feedback` 仍保存在 `system_events`，单条和批量状态流转都会写审计。
+- 偏好：`admin_preferences` 保存后台审计筛选、错误筛选和反馈筛选，按 `organization_id + user_id` 隔离。
+- 权限：组织后台只返回当前组织事件，平台级 `organization_id === null` 事件预留给未来平台管理后台。
 
 ## 当前技术债
 

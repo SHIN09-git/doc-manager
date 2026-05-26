@@ -24074,11 +24074,14 @@ ${formatListItems(items)}`;
         response = await fetch(url, {
           method: "POST",
           headers,
+          credentials: settings.credentials || "same-origin",
           signal: controller.signal,
           body: JSON.stringify({
             model: settings.model,
             messages,
-            temperature: options.temperature ?? 0.35
+            temperature: options.temperature ?? 0.35,
+            task_type: options.taskType || settings.taskType || "chat",
+            metadata: options.metadata || {}
           })
         });
       } catch (error) {
@@ -24111,7 +24114,7 @@ ${formatListItems(items)}`;
         throw error;
       }
       const data = await response.json();
-      const content = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || data?.output_text || data?.content;
+      const content = data?.choices?.[0]?.message?.content || data?.choices?.[0]?.text || data?.reply || data?.output_text || data?.content;
       if (!content) {
         throw new Error("AI \u63A5\u53E3\u672A\u8FD4\u56DE\u53EF\u7528\u6587\u672C\u3002");
       }
@@ -24141,8 +24144,10 @@ ${formatListItems(items)}`;
       throw new Error(friendlyAiErrorMessage(lastError));
     }
     async function callAiJsonWithRepair2(messages, label, options = {}) {
+      const taskType = options.taskType || inferTaskTypeFromLabel(label);
       const first2 = await callAiWithRetry2(messages, {
         ...options,
+        taskType,
         temperature: options.temperature ?? 0.15
       });
       const parsed = parseLooseJson(first2);
@@ -24156,7 +24161,7 @@ ${formatListItems(items)}`;
           content: `\u4E0A\u4E00\u6B21\u201C${label}\u201D\u4E0D\u662F\u6709\u6548 JSON\u3002\u8BF7\u4FEE\u590D\u4E3A\u4E25\u683C JSON\uFF1A\u4E0D\u52A0 Markdown\u3001\u4E0D\u52A0\u89E3\u91CA\u3001\u4E0D\u8981\u5C3E\u968F\u9017\u53F7\u3001\u5B57\u7B26\u4E32\u5FC5\u987B\u7528\u53CC\u5F15\u53F7\u3002`
         }
       ];
-      const second = await callAiWithRetry2(repairMessages, { ...options, temperature: 0 });
+      const second = await callAiWithRetry2(repairMessages, { ...options, taskType, temperature: 0 });
       const repaired = parseLooseJson(second);
       if (repaired.ok) return repaired.value;
       throw new Error(`${label} \u89E3\u6790\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5\u6216\u68C0\u67E5\u6A21\u578B\u8F93\u51FA\u683C\u5F0F\u3002`);
@@ -24169,6 +24174,11 @@ ${formatListItems(items)}`;
       isAbortError,
       sleep
     };
+  }
+  function inferTaskTypeFromLabel(label = "") {
+    if (/PPT|ppt/i.test(label)) return "ppt_generation";
+    if (/执笔人|skill|样本|聚合|草案|测试|反馈|文档分析/i.test(label)) return "writer_build";
+    return "json_generation";
   }
   function friendlyAiErrorMessage(error) {
     const message = String(error?.message || "");
@@ -25404,7 +25414,7 @@ ${userPrompt}`,
         const content = await callAiWithRetry2([
           { role: "system", content: state2.settings.systemPrompt || defaultSystemPrompt },
           { role: "user", content: prompt }
-        ], { signal });
+        ], { signal, taskType: "document_generation" });
         throwIfTaskAborted2(signal);
         progress.update("\u6B65\u9AA4 3/3\uFF1A\u6B63\u5728\u5199\u5165\u6587\u6863", 82);
         if (mode === "insert") {
@@ -25474,7 +25484,7 @@ ${selection.text}`
         const rewritten = await callAiWithRetry2([
           { role: "system", content: state2.settings.systemPrompt || defaultSystemPrompt },
           { role: "user", content: prompt }
-        ], { signal });
+        ], { signal, taskType: "paragraph_rewrite" });
         throwIfTaskAborted2(signal);
         progress.update("\u6B65\u9AA4 3/3\uFF1A\u6B63\u5728\u66FF\u6362\u9009\u4E2D\u6BB5\u843D", 85);
         const content = els2.contentEditor.value;
@@ -34786,6 +34796,12 @@ ${JSON.stringify(payload, null, 2)}`
     mobileView: "editor",
     pptPreviewReturnFocus: null,
     trashModalReturnFocus: null,
+    cloudAdminReturnFocus: null,
+    cloudAdminVisibleErrors: [],
+    cloudAdminVisiblePayments: [],
+    cloudAdminVisibleEmails: [],
+    cloudAdminWorkspaceView: "overview",
+    cloudAdminWorkspaceReturnHash: "",
     skillBuilderReturnFocus: null,
     generatedDraft: "",
     pptDraft: "",
@@ -34793,6 +34809,7 @@ ${JSON.stringify(payload, null, 2)}`
   };
   var els = {};
   var EDITOR_UNDO_LIMIT = 80;
+  var DEFAULT_CLOUD_API_BASE_URL = "http://127.0.0.1:8787/api";
   var aiClient = createAiClient({
     getSettings: () => state.settings || {},
     notify: (message, tone) => toast(message, tone)
@@ -35046,6 +35063,7 @@ ${JSON.stringify(payload, null, 2)}`
       "restoreAllTrashBtn",
       "clearTrashBtn",
       "apiTopBtn",
+      "cloudTopBtn",
       "responsiveInspectorToggle",
       "mobileWorkspaceNav",
       "responsiveBackdrop",
@@ -35159,6 +35177,7 @@ ${JSON.stringify(payload, null, 2)}`
       "skillDetailExampleList",
       "skillDetailCloseBtn",
       "apiSavedLabel",
+      "cloudPanel",
       "providerSelect",
       "baseUrlInput",
       "endpointPathInput",
@@ -35168,6 +35187,96 @@ ${JSON.stringify(payload, null, 2)}`
       "saveApiBtn",
       "testApiBtn",
       "clearApiBtn",
+      "cloudStatusLabel",
+      "cloudBaseUrlInput",
+      "cloudRefreshBtn",
+      "cloudLogoutBtn",
+      "cloudAccountCard",
+      "cloudEmailInput",
+      "cloudPasswordInput",
+      "cloudNameInput",
+      "cloudLoginBtn",
+      "cloudRegisterBtn",
+      "cloudEmailTokenInput",
+      "cloudRequestVerifyBtn",
+      "cloudVerifyEmailBtn",
+      "cloudResetTokenInput",
+      "cloudNewPasswordInput",
+      "cloudRequestResetBtn",
+      "cloudConfirmResetBtn",
+      "cloudLogoutAllBtn",
+      "cloudInviteEmailInput",
+      "cloudInviteRoleSelect",
+      "cloudInviteBtn",
+      "cloudMembersList",
+      "cloudInvitationsList",
+      "cloudSaveDocBtn",
+      "cloudPullDocsBtn",
+      "cloudSaveWriterBtn",
+      "cloudPullWritersBtn",
+      "cloudModelInput",
+      "cloudApiKeyInput",
+      "cloudSaveApiKeyBtn",
+      "cloudUseAiProxyBtn",
+      "cloudUsageLabel",
+      "cloudUsageReport",
+      "cloudBillingLabel",
+      "cloudCheckoutPlanSelect",
+      "cloudCheckoutBtn",
+      "cloudManualRechargeCard",
+      "cloudCreditBalanceLabel",
+      "cloudManualPackageSelect",
+      "cloudManualPaymentMethodSelect",
+      "cloudManualPaymentMethods",
+      "cloudManualOrderNoteInput",
+      "cloudManualProofInput",
+      "cloudManualOrderBtn",
+      "cloudBillingReport",
+      "cloudExportDataBtn",
+      "cloudDeleteAccountBtn",
+      "cloudRecentErrorsBtn",
+      "cloudAdminDashboardBtn",
+      "cloudFeedbackInput",
+      "cloudSendFeedbackBtn",
+      "cloudOpsReport",
+      "cloudAdminModal",
+      "closeCloudAdminModalBtn",
+      "cloudAdminRefreshBtn",
+      "cloudAdminExportOrgBtn",
+      "cloudAdminExportUsageCsvBtn",
+      "cloudAdminExportAuditCsvBtn",
+      "cloudAdminDeletionRequestBtn",
+      "cloudAdminOverview",
+      "cloudAdminMembers",
+      "cloudAdminUsageFrom",
+      "cloudAdminUsageTo",
+      "cloudAdminUsageTask",
+      "cloudAdminUsageStatus",
+      "cloudAdminUsageList",
+      "cloudAdminAuditFrom",
+      "cloudAdminAuditTo",
+      "cloudAdminAuditAction",
+      "cloudAdminAuditList",
+      "cloudAdminFeedbackStatusFilter",
+      "cloudAdminFeedbackList",
+      "cloudAdminEmailInput",
+      "cloudAdminEmailTemplate",
+      "cloudAdminEmailStatus",
+      "cloudAdminEmailList",
+      "cloudAdminOpsList",
+      "cloudAdminWorkspace",
+      "cloudAdminWorkspaceTitle",
+      "cloudAdminWorkspaceSubtitle",
+      "cloudAdminWorkspaceRefreshBtn",
+      "cloudAdminWorkspaceOrgExportBtn",
+      "cloudAdminWorkspaceExportUsageCsvBtn",
+      "cloudAdminWorkspaceExportAuditCsvBtn",
+      "closeCloudAdminWorkspaceBtn",
+      "cloudAdminWorkspaceSummary",
+      "cloudAdminWorkspaceNav",
+      "cloudAdminWorkspacePanelTitle",
+      "cloudAdminWorkspaceDeletionRequestBtn",
+      "cloudAdminWorkspaceContent",
       "toastRegion"
     ].forEach((id) => {
       els[id] = document.getElementById(id);
@@ -35248,6 +35357,25 @@ ${JSON.stringify(payload, null, 2)}`
     if (state.settings.systemPrompt === "\u4F60\u662F\u5B66\u6821\u529E\u516C\u5BA4\u6587\u4E66\u52A9\u624B\uFF0C\u64C5\u957F\u64B0\u5199\u4E2D\u6587\u6821\u52A1\u3001\u516C\u6587\u3001\u901A\u77E5\u3001\u603B\u7ED3\u3001\u4F1A\u8BAE\u7EAA\u8981\u548C\u8BF7\u793A\u6750\u6599\u3002\u8F93\u51FA\u8981\u51C6\u786E\u3001\u7A33\u59A5\u3001\u6761\u7406\u6E05\u6670\uFF0C\u907F\u514D\u7F16\u9020\u4E8B\u5B9E\uFF1B\u7F3A\u5C11\u4FE1\u606F\u65F6\u7528\u53EF\u66FF\u6362\u5360\u4F4D\u8868\u8FBE\u3002") {
       state.settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
     }
+    state.cloud = {
+      apiBaseUrl: DEFAULT_CLOUD_API_BASE_URL,
+      authenticated: false,
+      user: null,
+      organizations: [],
+      activeOrganization: null,
+      membership: null,
+      members: [],
+      invitations: [],
+      usage: null,
+      billing: null,
+      model: "",
+      ...state.cloud || {}
+    };
+    state.cloud.apiBaseUrl = normalizeCloudBaseUrl(state.cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL);
+    state.cloud.organizations = Array.isArray(state.cloud.organizations) ? state.cloud.organizations : [];
+    state.cloud.members = Array.isArray(state.cloud.members) ? state.cloud.members : [];
+    state.cloud.invitations = Array.isArray(state.cloud.invitations) ? state.cloud.invitations : [];
+    state.cloud.authenticated = Boolean(state.cloud.authenticated && state.cloud.user);
     ui.editingStyle = clone(state.styles[0]);
     persist();
   }
@@ -35302,6 +35430,11 @@ ${JSON.stringify(payload, null, 2)}`
       switchTab("api");
       layoutController.openResponsiveTools();
     });
+    els.cloudTopBtn.addEventListener("click", () => {
+      switchTab("cloud");
+      layoutController.openResponsiveTools();
+      renderCloudPanel();
+    });
     layoutController.bindEvents();
     preventWindowFileNavigation();
     els.linkFolderBtn.addEventListener("click", linkRealFolder);
@@ -35348,6 +35481,8 @@ ${JSON.stringify(payload, null, 2)}`
       if (event.key === "Escape") {
         hideEditorMenu({ restoreFocus: true });
         hideSkillMentionPanel();
+        if (els.cloudAdminWorkspace && !els.cloudAdminWorkspace.hidden) closeCloudAdminWorkspace();
+        if (els.cloudAdminModal && !els.cloudAdminModal.hidden) closeCloudAdminModal();
         if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
         layoutController.closeResponsiveInspector();
       }
@@ -35461,6 +35596,77 @@ ${JSON.stringify(payload, null, 2)}`
     els.saveApiBtn.addEventListener("click", saveApiSettings);
     els.testApiBtn.addEventListener("click", testApiSettings);
     els.clearApiBtn.addEventListener("click", clearApiSettings);
+    els.cloudBaseUrlInput.addEventListener("change", saveCloudBaseUrlFromInput);
+    els.cloudRefreshBtn.addEventListener("click", refreshCloudStatus);
+    els.cloudLoginBtn.addEventListener("click", cloudLogin);
+    els.cloudRegisterBtn.addEventListener("click", cloudRegister);
+    els.cloudLogoutBtn.addEventListener("click", cloudLogout);
+    els.cloudRequestVerifyBtn.addEventListener("click", cloudRequestEmailVerification);
+    els.cloudVerifyEmailBtn.addEventListener("click", cloudVerifyEmail);
+    els.cloudRequestResetBtn.addEventListener("click", cloudRequestPasswordReset);
+    els.cloudConfirmResetBtn.addEventListener("click", cloudConfirmPasswordReset);
+    els.cloudLogoutAllBtn.addEventListener("click", cloudLogoutAllDevices);
+    els.cloudInviteBtn.addEventListener("click", cloudInviteMember);
+    els.cloudPanel.addEventListener("click", handleCloudPanelAction);
+    els.cloudSaveDocBtn.addEventListener("click", cloudSaveCurrentDocument);
+    els.cloudPullDocsBtn.addEventListener("click", cloudPullDocuments);
+    els.cloudSaveWriterBtn.addEventListener("click", cloudSaveCurrentWriter);
+    els.cloudPullWritersBtn.addEventListener("click", cloudPullWriters);
+    els.cloudModelInput.addEventListener("change", () => {
+      state.cloud.model = els.cloudModelInput.value.trim();
+      persist();
+      renderCloudPanel();
+    });
+    els.cloudSaveApiKeyBtn.addEventListener("click", cloudSaveApiKey);
+    els.cloudUseAiProxyBtn.addEventListener("click", enableCloudAiProxy);
+    els.cloudCheckoutBtn?.addEventListener("click", cloudCreateCheckout);
+    els.cloudManualOrderBtn?.addEventListener("click", cloudSubmitManualOrder);
+    els.cloudManualPaymentMethodSelect?.addEventListener("change", renderCloudManualPaymentMethods);
+    els.cloudExportDataBtn.addEventListener("click", cloudExportMyData);
+    els.cloudDeleteAccountBtn.addEventListener("click", cloudDeleteAccount);
+    els.cloudRecentErrorsBtn.addEventListener("click", cloudLoadRecentErrors);
+    els.cloudAdminDashboardBtn.addEventListener("click", openStandaloneAdminPage);
+    els.cloudSendFeedbackBtn.addEventListener("click", cloudSendFeedback);
+    els.closeCloudAdminModalBtn?.addEventListener("click", () => closeCloudAdminModal());
+    els.cloudAdminModal?.addEventListener("click", (event) => {
+      if (event.target === els.cloudAdminModal) closeCloudAdminModal();
+    });
+    els.cloudAdminModal?.addEventListener("click", handleCloudAdminAction);
+    [
+      els.cloudAdminUsageFrom,
+      els.cloudAdminUsageTo,
+      els.cloudAdminUsageTask,
+      els.cloudAdminUsageStatus,
+      els.cloudAdminAuditFrom,
+      els.cloudAdminAuditTo,
+      els.cloudAdminAuditAction
+    ].forEach((input) => input?.addEventListener("change", () => cloudLoadAdminDashboard({ silent: true })));
+    els.cloudAdminFeedbackStatusFilter?.addEventListener("change", renderCloudAdminModal);
+    els.cloudAdminEmailTemplate?.addEventListener("change", renderCloudAdminModal);
+    els.cloudAdminEmailStatus?.addEventListener("change", renderCloudAdminModal);
+    els.cloudAdminEmailInput?.addEventListener("input", debounce2(renderCloudAdminModal, 250));
+    els.cloudAdminUsageTask?.addEventListener("input", debounce2(() => cloudLoadAdminDashboard({ silent: true }), 250));
+    els.cloudAdminAuditAction?.addEventListener("input", debounce2(() => cloudLoadAdminDashboard({ silent: true }), 250));
+    els.cloudAdminRefreshBtn?.addEventListener("click", () => cloudLoadAdminDashboard());
+    els.cloudAdminExportOrgBtn?.addEventListener("click", cloudExportOrganizationData);
+    els.cloudAdminExportUsageCsvBtn?.addEventListener("click", cloudExportUsageCsv);
+    els.cloudAdminExportAuditCsvBtn?.addEventListener("click", cloudExportAuditCsv);
+    els.cloudAdminDeletionRequestBtn?.addEventListener("click", cloudRequestOrganizationDeletion);
+    els.closeCloudAdminWorkspaceBtn?.addEventListener("click", closeCloudAdminWorkspace);
+    els.cloudAdminWorkspaceRefreshBtn?.addEventListener("click", () => cloudLoadAdminDashboard({ button: els.cloudAdminWorkspaceRefreshBtn }));
+    els.cloudAdminWorkspaceOrgExportBtn?.addEventListener("click", cloudExportOrganizationData);
+    els.cloudAdminWorkspaceExportUsageCsvBtn?.addEventListener("click", cloudExportUsageCsv);
+    els.cloudAdminWorkspaceExportAuditCsvBtn?.addEventListener("click", cloudExportAuditCsv);
+    els.cloudAdminWorkspaceDeletionRequestBtn?.addEventListener("click", cloudRequestOrganizationDeletion);
+    els.cloudAdminWorkspaceNav?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-admin-workspace-view]");
+      if (!button) return;
+      ui.cloudAdminWorkspaceView = button.dataset.adminWorkspaceView || "overview";
+      renderCloudAdminWorkspace();
+    });
+    els.cloudAdminWorkspace?.addEventListener("click", handleCloudAdminAction);
+    window.addEventListener("hashchange", handleHashRoute);
+    handleHashRoute();
   }
   function setupFileDrop(target, handler) {
     if (!target) return;
@@ -35587,6 +35793,7 @@ ${JSON.stringify(payload, null, 2)}`
     renderTypeSelect();
     renderEditor();
     renderApiSettings();
+    renderCloudPanel();
     renderStyleEditor();
     renderStyleList();
     updateAiStatus();
@@ -35630,6 +35837,1341 @@ ${JSON.stringify(payload, null, 2)}`
     els.modelInput.value = settings.model || "";
     els.apiKeyInput.value = settings.apiKey || "";
     els.systemPromptInput.value = settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
+  }
+  function renderCloudPanel() {
+    if (!els.cloudBaseUrlInput) return;
+    const cloud = state.cloud || {};
+    const authenticated = Boolean(cloud.authenticated && cloud.user);
+    const emailVerified = Boolean(cloud.user?.email_verified_at);
+    const canAdmin = authenticated && ["owner", "admin"].includes(cloud.membership?.role || "");
+    const orgName = cloud.activeOrganization?.name || "\u672A\u9009\u62E9\u7EC4\u7EC7";
+    els.cloudBaseUrlInput.value = cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL;
+    els.cloudModelInput.value = cloud.model || state.settings?.model || "gpt-4.1-mini";
+    els.cloudStatusLabel.textContent = authenticated ? "\u5DF2\u767B\u5F55" : "\u672C\u5730\u6A21\u5F0F";
+    els.cloudStatusLabel.className = `status-pill ${authenticated ? "ready" : ""}`;
+    els.cloudLogoutBtn.disabled = !authenticated;
+    els.cloudAccountCard.innerHTML = authenticated ? `<strong>${escapeHtml(cloud.user.email || "")}</strong><span>${escapeHtml(orgName)} \xB7 ${escapeHtml(cloud.membership?.role || "owner")} \xB7 ${emailVerified ? "\u90AE\u7BB1\u5DF2\u9A8C\u8BC1" : "\u90AE\u7BB1\u672A\u9A8C\u8BC1"}</span>` : "<strong>\u672A\u8FDE\u63A5\u4E91\u7AEF</strong><span>\u672C\u5730\u6570\u636E\u4ECD\u53EF\u6B63\u5E38\u4F7F\u7528\uFF0C\u767B\u5F55\u540E\u53EF\u542F\u7528\u56E2\u961F\u540C\u6B65\u548C\u4E91\u7AEF AI \u4EE3\u7406\u3002</span>";
+    [
+      els.cloudSaveDocBtn,
+      els.cloudPullDocsBtn,
+      els.cloudSaveWriterBtn,
+      els.cloudPullWritersBtn,
+      els.cloudRequestVerifyBtn,
+      els.cloudVerifyEmailBtn,
+      els.cloudLogoutAllBtn,
+      els.cloudExportDataBtn,
+      els.cloudDeleteAccountBtn,
+      els.cloudRecentErrorsBtn,
+      els.cloudAdminDashboardBtn,
+      els.cloudSendFeedbackBtn,
+      els.cloudCheckoutBtn,
+      els.cloudManualOrderBtn
+    ].forEach((button) => {
+      if (button) button.disabled = !authenticated;
+    });
+    [
+      els.cloudManualPackageSelect,
+      els.cloudManualPaymentMethodSelect,
+      els.cloudManualOrderNoteInput,
+      els.cloudManualProofInput
+    ].forEach((field) => {
+      if (field) field.disabled = !authenticated;
+    });
+    if (els.cloudAdminDashboardBtn) {
+      els.cloudAdminDashboardBtn.hidden = authenticated && !canAdmin;
+      els.cloudAdminDashboardBtn.disabled = !authenticated || !canAdmin;
+    }
+    [
+      els.cloudInviteBtn,
+      els.cloudSaveApiKeyBtn,
+      els.cloudUseAiProxyBtn
+    ].forEach((button) => {
+      if (button) button.disabled = !authenticated || !emailVerified;
+    });
+    if (els.cloudMembersList) {
+      els.cloudMembersList.innerHTML = authenticated && cloud.members?.length ? cloud.members.map((member) => `
+        <div>
+          <strong>${escapeHtml(member.user?.name || member.user?.email || "")}</strong>
+          <span>${escapeHtml(member.role || "member")}</span>
+          <span class="cloud-row-actions">
+            ${member.role !== "owner" ? `<button type="button" data-cloud-action="member-role" data-member-id="${escapeHtml(member.id)}" data-role="${member.role === "admin" ? "member" : "admin"}">${member.role === "admin" ? "\u8BBE\u4E3A\u6210\u5458" : "\u8BBE\u4E3A\u7BA1\u7406\u5458"}</button>` : ""}
+            ${member.role !== "owner" ? `<button type="button" data-cloud-action="member-remove" data-member-id="${escapeHtml(member.id)}">\u79FB\u9664</button>` : ""}
+          </span>
+        </div>`).join("") : "\u767B\u5F55\u540E\u663E\u793A\u6210\u5458\u3002";
+    }
+    if (els.cloudInvitationsList) {
+      els.cloudInvitationsList.innerHTML = authenticated && cloud.invitations?.length ? cloud.invitations.map((invitation) => `
+        <div>
+          <strong>${escapeHtml(invitation.email)}</strong>
+          <span>${escapeHtml(invitation.role)} \xB7 ${invitation.accepted_at ? "\u5DF2\u63A5\u53D7" : "\u5F85\u63A5\u53D7"}</span>
+          <span class="cloud-row-actions">
+            ${!invitation.accepted_at && !invitation.revoked_at ? `<button type="button" data-cloud-action="invite-resend" data-invite-id="${escapeHtml(invitation.id)}">\u91CD\u53D1</button><button type="button" data-cloud-action="invite-revoke" data-invite-id="${escapeHtml(invitation.id)}">\u64A4\u9500</button>` : ""}
+          </span>
+        </div>`).join("") : "\u6682\u65E0\u9080\u8BF7\u3002";
+    }
+    const usage = cloud.usage;
+    if (usage) {
+      els.cloudUsageLabel.textContent = `${usage.request_count || usage.requests || 0} \u6B21\u8BF7\u6C42`;
+      const limits = cloud.limits;
+      const taskRows = Object.entries(usage.by_task_type || {}).map(([task, item]) => `<div>${escapeHtml(task)}\uFF1A${item.request_count || 0} \u6B21 \xB7 ${Number(item.total_tokens || 0).toLocaleString("zh-CN")} \u5B57\u6570\u4F30\u7B97</div>`).join("");
+      els.cloudUsageReport.innerHTML = [
+        limits ? `<div>\u5957\u9910\uFF1A${escapeHtml(limits.plan || "free")} \xB7 \u4E2A\u4EBA\u65E5\u9650 ${limits.user_daily} \xB7 \u7EC4\u7EC7\u65E5\u9650 ${limits.org_daily}</div>` : "",
+        `<div>\u603B\u5B57\u6570\uFF1A${Number(usage.total_tokens || 0).toLocaleString("zh-CN")}</div>`,
+        `<div>\u9884\u4F30\u6210\u672C\uFF1A${Number(usage.estimated_cost || usage.estimated_cost_cents || 0)} \u5143</div>`,
+        taskRows
+      ].join("");
+    } else {
+      els.cloudUsageLabel.textContent = authenticated ? "\u7B49\u5F85\u7EDF\u8BA1" : "\u672A\u767B\u5F55";
+      els.cloudUsageReport.textContent = authenticated ? "\u6682\u65E0\u672C\u6708\u7528\u91CF\u8BB0\u5F55\u3002" : "\u767B\u5F55\u4E91\u7AEF\u540E\u663E\u793A\u672C\u6708 AI \u8C03\u7528\u7528\u91CF\u3002";
+    }
+    renderCloudBilling(authenticated, canAdmin);
+  }
+  function renderCloudBilling(authenticated, canAdmin) {
+    if (!els.cloudBillingReport) return;
+    const billing = state.cloud?.billing || null;
+    const options = billing?.checkout?.available_plans?.length ? billing.checkout.available_plans : [
+      { plan: "pro", price_id: "" },
+      { plan: "team", price_id: "" }
+    ];
+    const currentValue = els.cloudCheckoutPlanSelect?.value || "pro";
+    if (els.cloudCheckoutPlanSelect) {
+      els.cloudCheckoutPlanSelect.innerHTML = options.map((item) => {
+        const label = item.plan === "team" ? "Team" : item.plan === "pro" ? "Pro" : item.plan;
+        return `<option value="${escapeHtml(item.plan)}">${escapeHtml(label)}</option>`;
+      }).join("");
+      els.cloudCheckoutPlanSelect.value = options.some((item) => item.plan === currentValue) ? currentValue : options[0]?.plan || "pro";
+      els.cloudCheckoutPlanSelect.disabled = !authenticated || !canAdmin;
+    }
+    if (els.cloudCheckoutBtn) {
+      els.cloudCheckoutBtn.disabled = !authenticated || !canAdmin;
+    }
+    renderCloudManualRecharge(authenticated, billing);
+    if (!authenticated) {
+      els.cloudBillingLabel.textContent = "\u672A\u767B\u5F55";
+      els.cloudBillingReport.textContent = "\u767B\u5F55\u4E91\u7AEF\u540E\u663E\u793A\u5957\u9910\u3001\u8D26\u5355\u4E8B\u4EF6\u548C\u5347\u7EA7\u5165\u53E3\u3002";
+      return;
+    }
+    if (!canAdmin && !billing) {
+      els.cloudBillingLabel.textContent = "\u65E0\u6743\u9650";
+      els.cloudBillingReport.textContent = "\u53EA\u6709\u7EC4\u7EC7\u6240\u6709\u8005\u6216\u7BA1\u7406\u5458\u53EF\u4EE5\u67E5\u770B\u8D26\u5355\u4E0E\u53D1\u8D77\u5347\u7EA7\u3002";
+      return;
+    }
+    if (!billing) {
+      els.cloudBillingLabel.textContent = "\u7B49\u5F85\u7EDF\u8BA1";
+      els.cloudBillingReport.textContent = "\u5237\u65B0\u4E91\u7AEF\u72B6\u6001\u540E\u663E\u793A\u5957\u9910\u4E0E\u8D26\u5355\u4E8B\u4EF6\u3002";
+      return;
+    }
+    const plan = billing.organization?.plan || "free";
+    const checkout = billing.checkout || {};
+    const paymentRows = Array.isArray(billing.payment_webhooks) && billing.payment_webhooks.length ? billing.payment_webhooks.slice(-5).reverse().map((item) => `${item.event_type || "billing.event"} \xB7 ${item.provider || "provider"} \xB7 ${item.created_at || ""}`).join("\n") : "\u6682\u65E0\u8D26\u5355\u4E8B\u4EF6\u3002";
+    const manualOrderRows = Array.isArray(billing.manual_orders) && billing.manual_orders.length ? billing.manual_orders.slice(-5).reverse().map((item) => `${formatManualOrderStatus(item.status)} \xB7 ${item.title || item.package_id} \xB7 \xA5${Number(item.amount_cny || 0)} \xB7 ${item.created_at || ""}`).join("\n") : "\u6682\u65E0\u4EBA\u5DE5\u5145\u503C\u8BA2\u5355\u3002";
+    els.cloudBillingLabel.textContent = `\u5957\u9910\uFF1A${plan}`;
+    els.cloudBillingReport.textContent = [
+      `\u5F53\u524D\u5957\u9910\uFF1A${plan}`,
+      `\u4E2A\u4EBA\u65E5\u9650\uFF1A${billing.limits?.user_daily ?? "-"} \xB7 \u7EC4\u7EC7\u65E5\u9650\uFF1A${billing.limits?.org_daily ?? "-"}`,
+      `\u4ECA\u65E5\u8BF7\u6C42\uFF1A${billing.usage?.request_count || 0} \u6B21 \xB7 \u5931\u8D25\uFF1A${billing.usage?.failed_count || 0} \u6B21`,
+      `\u5347\u7EA7\u901A\u9053\uFF1A${checkout.enabled ? checkout.mode || "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"}`,
+      `AI \u989D\u5EA6\uFF1A${Number(billing.credits?.balance || 0).toLocaleString("zh-CN")} \u70B9`,
+      "",
+      "\u4EBA\u5DE5\u5145\u503C\u8BA2\u5355\uFF1A",
+      manualOrderRows,
+      "",
+      "\u6700\u8FD1\u8D26\u5355\u4E8B\u4EF6\uFF1A",
+      paymentRows
+    ].join("\n");
+  }
+  function renderCloudManualRecharge(authenticated, billing) {
+    const manual = billing?.manual_payment || {};
+    const packages = Array.isArray(manual.packages) && manual.packages.length ? manual.packages : [
+      { id: "pro_month", title: "Pro \u6708\u5EA6\u4F1A\u5458", amount_cny: 29, plan: "pro", duration_days: 30, credits: 0 },
+      { id: "credits_1000", title: "1000 \u70B9 AI \u989D\u5EA6", amount_cny: 50, plan: "", duration_days: 0, credits: 1e3 }
+    ];
+    const currentPackage = els.cloudManualPackageSelect?.value || packages[0]?.id || "";
+    if (els.cloudManualPackageSelect) {
+      els.cloudManualPackageSelect.innerHTML = packages.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(formatManualPaymentPackage(item))}</option>`).join("");
+      els.cloudManualPackageSelect.value = packages.some((item) => item.id === currentPackage) ? currentPackage : packages[0]?.id || "";
+      els.cloudManualPackageSelect.disabled = !authenticated;
+    }
+    if (els.cloudManualPaymentMethodSelect) {
+      const methods = Array.isArray(manual.methods) && manual.methods.length ? manual.methods : [
+        { channel: "wechat", label: "\u5FAE\u4FE1", qr_url: "" },
+        { channel: "alipay", label: "\u652F\u4ED8\u5B9D", qr_url: "" }
+      ];
+      const currentMethod = els.cloudManualPaymentMethodSelect.value || "wechat";
+      els.cloudManualPaymentMethodSelect.innerHTML = methods.map((item) => `<option value="${escapeHtml(item.channel)}">${escapeHtml(item.label || item.channel)}</option>`).join("");
+      els.cloudManualPaymentMethodSelect.value = methods.some((item) => item.channel === currentMethod) ? currentMethod : methods[0]?.channel || "wechat";
+      els.cloudManualPaymentMethodSelect.disabled = !authenticated;
+    }
+    if (els.cloudCreditBalanceLabel) {
+      els.cloudCreditBalanceLabel.textContent = `\u989D\u5EA6\uFF1A${Number(billing?.credits?.balance || 0).toLocaleString("zh-CN")} \u70B9`;
+    }
+    if (els.cloudManualOrderBtn) els.cloudManualOrderBtn.disabled = !authenticated;
+    if (els.cloudManualOrderNoteInput) els.cloudManualOrderNoteInput.disabled = !authenticated;
+    if (els.cloudManualProofInput) els.cloudManualProofInput.disabled = !authenticated;
+    renderCloudManualPaymentMethods();
+  }
+  function renderCloudManualPaymentMethods() {
+    if (!els.cloudManualPaymentMethods) return;
+    const billing = state.cloud?.billing || null;
+    const manual = billing?.manual_payment || {};
+    const methods = Array.isArray(manual.methods) ? manual.methods : [];
+    const selected = els.cloudManualPaymentMethodSelect?.value || methods[0]?.channel || "wechat";
+    const method = methods.find((item) => item.channel === selected) || methods[0] || { channel: selected, label: selected, qr_url: "" };
+    const receiver = manual.receiver_name ? `<span>\u6536\u6B3E\u65B9\uFF1A${escapeHtml(manual.receiver_name)}</span>` : "";
+    const qr = method.qr_url ? `<img src="${escapeHtml(method.qr_url)}" alt="${escapeHtml(method.label || method.channel)} \u6536\u6B3E\u7801">` : `<div class="manual-payment-placeholder">\u672A\u914D\u7F6E\u6536\u6B3E\u7801\uFF0C\u8BF7\u5411\u7BA1\u7406\u5458\u7D22\u53D6\u3002</div>`;
+    els.cloudManualPaymentMethods.innerHTML = `
+    <div class="manual-payment-method">
+      ${qr}
+      <div>
+        <strong>${escapeHtml(method.label || method.channel || "\u652F\u4ED8\u65B9\u5F0F")}</strong>
+        ${receiver}
+        <span>\u4ED8\u6B3E\u540E\u63D0\u4EA4\u8BA2\u5355\uFF0C\u7BA1\u7406\u5458\u6838\u5BF9\u540E\u751F\u6548\u3002</span>
+      </div>
+    </div>`;
+  }
+  function formatManualPaymentPackage(item = {}) {
+    const amount = Number(item.amount_cny || 0);
+    const parts = [`${item.title || item.id || "\u5145\u503C\u5957\u9910"}`];
+    if (amount > 0) parts.push(`\xA5${amount}`);
+    if (item.plan) parts.push(`${String(item.plan).toUpperCase()} ${Number(item.duration_days || 0) || ""}\u5929`.trim());
+    if (Number(item.credits || 0) > 0) parts.push(`${Number(item.credits).toLocaleString("zh-CN")} \u70B9`);
+    return parts.join(" \xB7 ");
+  }
+  function formatManualOrderStatus(status) {
+    const value = String(status || "pending");
+    if (value === "approved") return "\u5DF2\u786E\u8BA4";
+    if (value === "rejected") return "\u5DF2\u62D2\u7EDD";
+    if (value === "cancelled") return "\u5DF2\u53D6\u6D88";
+    return "\u5F85\u786E\u8BA4";
+  }
+  function normalizeCloudBaseUrl(value) {
+    return String(value || DEFAULT_CLOUD_API_BASE_URL).trim().replace(/\/+$/, "") || DEFAULT_CLOUD_API_BASE_URL;
+  }
+  function saveCloudBaseUrlFromInput() {
+    state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+    persist();
+    renderCloudPanel();
+    toast(`\u4E91\u7AEF\u5730\u5740\u5DF2\u4FDD\u5B58\u5230\uFF1A${getCloudSettingsLocation()}`);
+  }
+  async function cloudRequest(path, options = {}) {
+    const baseUrl = normalizeCloudBaseUrl(state.cloud?.apiBaseUrl || els.cloudBaseUrlInput?.value);
+    const headers = {
+      "Content-Type": "application/json",
+      ...options.headers || {}
+    };
+    const orgId = state.cloud?.activeOrganization?.id;
+    if (orgId) headers["x-organization-id"] = orgId;
+    const response = await fetch(`${baseUrl}${path}`, {
+      ...options,
+      headers,
+      credentials: "include"
+    });
+    const text = await response.text();
+    const data = text ? parseJsonSafely(text) : {};
+    if (!response.ok) {
+      const message = data?.error?.message || data?.message || text || response.statusText;
+      const error = new Error(message);
+      error.status = response.status;
+      error.payload = data;
+      throw error;
+    }
+    return data;
+  }
+  function parseJsonSafely(text, fallback = {}) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return fallback;
+    }
+  }
+  function debounce2(fn, delay = 250) {
+    let timer = null;
+    return (...args) => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => fn(...args), delay);
+    };
+  }
+  function applyCloudSession(data) {
+    const organization = data.organization || data.activeOrganization || data.organizations?.[0] || null;
+    state.cloud = {
+      ...state.cloud || {},
+      authenticated: Boolean(data.authenticated ?? data.user),
+      user: data.user || null,
+      organizations: Array.isArray(data.organizations) ? data.organizations : organization ? [organization] : [],
+      activeOrganization: organization,
+      membership: data.membership || null
+    };
+  }
+  async function refreshCloudStatus() {
+    await withLoading(els.cloudRefreshBtn, "\u5237\u65B0\u4E2D", async () => {
+      try {
+        state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+        const data = await cloudRequest("/me", { method: "GET" });
+        applyCloudSession(data);
+        if (state.cloud.authenticated) {
+          await refreshCloudTeam({ silent: true });
+          await refreshCloudUsage({ silent: true });
+          await refreshCloudBilling({ silent: true });
+        }
+        persist();
+        renderCloudPanel();
+        toast(state.cloud.authenticated ? "\u4E91\u7AEF\u72B6\u6001\u5DF2\u5237\u65B0" : "\u5F53\u524D\u4E3A\u672C\u5730\u6A21\u5F0F");
+      } catch (error) {
+        state.cloud.authenticated = false;
+        state.cloud.user = null;
+        state.cloud.usage = null;
+        state.cloud.billing = null;
+        persist();
+        renderCloudPanel();
+        toast(`\u4E91\u7AEF\u8FDE\u63A5\u5931\u8D25\uFF1A${error.message}`, "error");
+      }
+    });
+  }
+  async function cloudLogin() {
+    await withLoading(els.cloudLoginBtn, "\u767B\u5F55\u4E2D", async () => {
+      state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+      const data = await cloudRequest("/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          email: els.cloudEmailInput.value.trim(),
+          password: els.cloudPasswordInput.value
+        })
+      });
+      applyCloudSession(data);
+      if (data.email_verification_token && els.cloudEmailTokenInput) {
+        els.cloudEmailTokenInput.value = data.email_verification_token;
+      }
+      await refreshCloudTeam({ silent: true });
+      await refreshCloudUsage({ silent: true });
+      await refreshCloudBilling({ silent: true });
+      persist();
+      renderCloudPanel();
+      toast(`\u5DF2\u767B\u5F55\u4E91\u7AEF\uFF1A${getCloudSettingsLocation()}`);
+    });
+  }
+  async function cloudRegister() {
+    await withLoading(els.cloudRegisterBtn, "\u6CE8\u518C\u4E2D", async () => {
+      state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+      const data = await cloudRequest("/auth/register", {
+        method: "POST",
+        body: JSON.stringify({
+          email: els.cloudEmailInput.value.trim(),
+          password: els.cloudPasswordInput.value,
+          name: els.cloudNameInput.value.trim() || els.cloudEmailInput.value.trim(),
+          organizationName: `${els.cloudNameInput.value.trim() || "\u6211\u7684"}\u5DE5\u4F5C\u533A`
+        })
+      });
+      applyCloudSession(data);
+      await refreshCloudTeam({ silent: true });
+      await refreshCloudUsage({ silent: true });
+      await refreshCloudBilling({ silent: true });
+      persist();
+      renderCloudPanel();
+      toast(`\u4E91\u7AEF\u8D26\u53F7\u5DF2\u521B\u5EFA\uFF1A${getCloudSettingsLocation()}`);
+    });
+  }
+  async function cloudLogout() {
+    await withLoading(els.cloudLogoutBtn, "\u9000\u51FA\u4E2D", async () => {
+      await cloudRequest("/auth/logout", { method: "POST", body: JSON.stringify({}) }).catch(() => null);
+      state.cloud = {
+        ...state.cloud || {},
+        authenticated: false,
+        user: null,
+        activeOrganization: null,
+        membership: null,
+        members: [],
+        invitations: [],
+        usage: null,
+        limits: null,
+        billing: null
+      };
+      persist();
+      renderCloudPanel();
+      toast("\u5DF2\u9000\u51FA\u4E91\u7AEF\u8D26\u53F7", "warn");
+    });
+  }
+  async function cloudLogoutAllDevices() {
+    if (!window.confirm("\u786E\u5B9A\u8981\u9000\u51FA\u6240\u6709\u4E91\u7AEF\u8BBE\u5907\u5417\uFF1F\u5F53\u524D\u9875\u9762\u4E5F\u4F1A\u9000\u51FA\u3002")) return;
+    await withLoading(els.cloudLogoutAllBtn, "\u9000\u51FA\u4E2D", async () => {
+      await cloudRequest("/auth/logout-all", { method: "POST", body: JSON.stringify({}) });
+      state.cloud = {
+        ...state.cloud || {},
+        authenticated: false,
+        user: null,
+        activeOrganization: null,
+        membership: null,
+        members: [],
+        invitations: [],
+        usage: null,
+        limits: null,
+        billing: null
+      };
+      persist();
+      renderCloudPanel();
+      toast("\u5DF2\u9000\u51FA\u6240\u6709\u4E91\u7AEF\u8BBE\u5907", "warn");
+    });
+  }
+  async function cloudRequestEmailVerification() {
+    const email = els.cloudEmailInput.value.trim() || state.cloud?.user?.email || "";
+    await withLoading(els.cloudRequestVerifyBtn, "\u7533\u8BF7\u4E2D", async () => {
+      const data = await cloudRequest("/auth/request-email-verification", {
+        method: "POST",
+        body: JSON.stringify({ email })
+      });
+      if (data.email_verification_token) {
+        els.cloudEmailTokenInput.value = data.email_verification_token;
+        toast("\u90AE\u7BB1\u9A8C\u8BC1\u7801\u5DF2\u751F\u6210\uFF0C\u7070\u5EA6\u73AF\u5883\u53EF\u76F4\u63A5\u590D\u5236\u4F7F\u7528");
+      } else {
+        toast(data.verified ? "\u90AE\u7BB1\u5DF2\u9A8C\u8BC1" : "\u9A8C\u8BC1\u8BF7\u6C42\u5DF2\u63D0\u4EA4");
+      }
+    });
+  }
+  async function cloudVerifyEmail() {
+    const email = els.cloudEmailInput.value.trim() || state.cloud?.user?.email || "";
+    const token = els.cloudEmailTokenInput.value.trim();
+    if (!token) {
+      toast("\u8BF7\u5148\u586B\u5199\u90AE\u7BB1\u9A8C\u8BC1\u7801", "warn");
+      return;
+    }
+    await withLoading(els.cloudVerifyEmailBtn, "\u9A8C\u8BC1\u4E2D", async () => {
+      const data = await cloudRequest("/auth/verify-email", {
+        method: "POST",
+        body: JSON.stringify({ email, token })
+      });
+      state.cloud.user = data.user || state.cloud.user;
+      els.cloudEmailTokenInput.value = "";
+      persist();
+      renderCloudPanel();
+      toast("\u90AE\u7BB1\u5DF2\u9A8C\u8BC1");
+    });
+  }
+  async function cloudRequestPasswordReset() {
+    const email = els.cloudEmailInput.value.trim();
+    if (!email) {
+      toast("\u8BF7\u5148\u586B\u5199\u90AE\u7BB1", "warn");
+      return;
+    }
+    await withLoading(els.cloudRequestResetBtn, "\u7533\u8BF7\u4E2D", async () => {
+      const data = await cloudRequest("/auth/request-password-reset", {
+        method: "POST",
+        body: JSON.stringify({ email })
+      });
+      if (data.reset_token) {
+        els.cloudResetTokenInput.value = data.reset_token;
+        toast("\u91CD\u7F6E\u7801\u5DF2\u751F\u6210\uFF0C\u7070\u5EA6\u73AF\u5883\u53EF\u76F4\u63A5\u590D\u5236\u4F7F\u7528");
+      } else {
+        toast("\u5982\u679C\u8D26\u53F7\u5B58\u5728\uFF0C\u91CD\u7F6E\u8BF7\u6C42\u5DF2\u63D0\u4EA4");
+      }
+    });
+  }
+  async function cloudConfirmPasswordReset() {
+    const email = els.cloudEmailInput.value.trim();
+    const token = els.cloudResetTokenInput.value.trim();
+    const password = els.cloudNewPasswordInput.value;
+    if (!email || !token || !password) {
+      toast("\u8BF7\u586B\u5199\u90AE\u7BB1\u3001\u91CD\u7F6E\u7801\u548C\u65B0\u5BC6\u7801", "warn");
+      return;
+    }
+    await withLoading(els.cloudConfirmResetBtn, "\u91CD\u7F6E\u4E2D", async () => {
+      await cloudRequest("/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({ email, token, password })
+      });
+      els.cloudResetTokenInput.value = "";
+      els.cloudNewPasswordInput.value = "";
+      toast("\u5BC6\u7801\u5DF2\u91CD\u7F6E\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
+    });
+  }
+  async function refreshCloudUsage(options = {}) {
+    if (!state.cloud?.authenticated) return;
+    const data = await cloudRequest("/usage/current", { method: "GET" });
+    state.cloud.usage = data.usage || null;
+    state.cloud.limits = data.limits || null;
+    if (!options.silent) toast("\u4E91\u7AEF\u7528\u91CF\u5DF2\u5237\u65B0");
+  }
+  async function refreshCloudBilling(options = {}) {
+    if (!state.cloud?.authenticated) return;
+    try {
+      const data = await cloudRequest("/billing/summary", { method: "GET" });
+      state.cloud.billing = data || null;
+      if (!options.silent) toast("\u8D26\u5355\u4E0E\u5957\u9910\u5DF2\u5237\u65B0");
+    } catch (error) {
+      if (error.status === 403) {
+        try {
+          const data = await cloudRequest("/billing/manual-orders", { method: "GET" });
+          state.cloud.billing = {
+            organization: state.cloud.activeOrganization || null,
+            checkout: { enabled: false, available_plans: [] },
+            manual_payment: data.manual_payment || {},
+            manual_orders: data.orders || [],
+            credits: data.credits || null
+          };
+          return;
+        } catch {
+          state.cloud.billing = null;
+        }
+      }
+      state.cloud.billing = null;
+      if (error.status !== 403 && !options.silent) {
+        toast(`\u8D26\u5355\u4FE1\u606F\u8BFB\u53D6\u5931\u8D25\uFF1A${error.message}`, "warn");
+      }
+    }
+  }
+  async function cloudCreateCheckout() {
+    const plan = els.cloudCheckoutPlanSelect?.value || "pro";
+    await withLoading(els.cloudCheckoutBtn, "\u521B\u5EFA\u4E2D", async () => {
+      const data = await cloudRequest("/billing/checkout", {
+        method: "POST",
+        body: JSON.stringify({ plan })
+      });
+      const checkoutUrl = data.checkout?.checkout_url;
+      if (!checkoutUrl) {
+        toast("\u652F\u4ED8\u5347\u7EA7\u5165\u53E3\u672A\u8FD4\u56DE\uFF0C\u8BF7\u8054\u7CFB\u7BA1\u7406\u5458", "warn");
+        return;
+      }
+      window.open(checkoutUrl, "_blank", "noopener");
+      await refreshCloudBilling({ silent: true });
+      persist();
+      renderCloudPanel();
+      toast("\u5347\u7EA7\u5165\u53E3\u5DF2\u6253\u5F00");
+    });
+  }
+  async function cloudSubmitManualOrder() {
+    const packageId = els.cloudManualPackageSelect?.value || "";
+    const paymentChannel = els.cloudManualPaymentMethodSelect?.value || "wechat";
+    if (!packageId) {
+      toast("\u8BF7\u9009\u62E9\u5145\u503C\u5957\u9910", "warn");
+      return;
+    }
+    await withLoading(els.cloudManualOrderBtn, "\u63D0\u4EA4\u4E2D", async () => {
+      const data = await cloudRequest("/billing/manual-orders", {
+        method: "POST",
+        body: JSON.stringify({
+          package_id: packageId,
+          payment_channel: paymentChannel,
+          payer_note: els.cloudManualOrderNoteInput?.value || "",
+          proof_text: els.cloudManualProofInput?.value || ""
+        })
+      });
+      if (els.cloudManualOrderNoteInput) els.cloudManualOrderNoteInput.value = "";
+      if (els.cloudManualProofInput) els.cloudManualProofInput.value = "";
+      await refreshCloudBilling({ silent: true });
+      renderCloudPanel();
+      toast(`\u5145\u503C\u8BA2\u5355\u5DF2\u63D0\u4EA4\uFF1A${data.order?.title || packageId}`);
+    });
+  }
+  async function refreshCloudTeam(options = {}) {
+    const orgId = state.cloud?.activeOrganization?.id;
+    if (!state.cloud?.authenticated || !orgId) return;
+    const [members, invitations] = await Promise.all([
+      cloudRequest(`/orgs/${orgId}/members`, { method: "GET" }),
+      cloudRequest(`/orgs/${orgId}/invitations`, { method: "GET" }).catch(() => ({ invitations: [] }))
+    ]);
+    state.cloud.members = Array.isArray(members.members) ? members.members : [];
+    state.cloud.invitations = Array.isArray(invitations.invitations) ? invitations.invitations : [];
+    if (!options.silent) toast("\u56E2\u961F\u4FE1\u606F\u5DF2\u5237\u65B0");
+  }
+  async function cloudInviteMember() {
+    const orgId = state.cloud?.activeOrganization?.id;
+    const email = els.cloudInviteEmailInput.value.trim();
+    if (!orgId || !email) {
+      toast("\u8BF7\u5148\u586B\u5199\u9080\u8BF7\u90AE\u7BB1", "warn");
+      return;
+    }
+    await withLoading(els.cloudInviteBtn, "\u751F\u6210\u4E2D", async () => {
+      const data = await cloudRequest(`/orgs/${orgId}/invitations`, {
+        method: "POST",
+        body: JSON.stringify({
+          email,
+          role: els.cloudInviteRoleSelect.value || "member"
+        })
+      });
+      els.cloudInviteEmailInput.value = "";
+      await refreshCloudTeam({ silent: true });
+      persist();
+      renderCloudPanel();
+      const tokenText = data.invitation?.token ? `\uFF0C\u9080\u8BF7\u7801\uFF1A${data.invitation.token}` : "";
+      toast(`\u9080\u8BF7\u5DF2\u751F\u6210${tokenText}`);
+    });
+  }
+  async function handleCloudPanelAction(event) {
+    const button = event.target.closest("[data-cloud-action]");
+    if (!button) return;
+    const action = button.dataset.cloudAction;
+    const orgId = state.cloud?.activeOrganization?.id;
+    if (!orgId) return;
+    if (action === "invite-revoke") {
+      await cloudRevokeInvitation(button.dataset.inviteId);
+    } else if (action === "invite-resend") {
+      await cloudResendInvitation(button.dataset.inviteId);
+    } else if (action === "member-role") {
+      await cloudUpdateMemberRole(button.dataset.memberId, button.dataset.role);
+    } else if (action === "member-remove") {
+      await cloudRemoveMember(button.dataset.memberId);
+    }
+  }
+  async function cloudRevokeInvitation(inviteId) {
+    const orgId = state.cloud?.activeOrganization?.id;
+    await cloudRequest(`/orgs/${orgId}/invitations/${inviteId}/revoke`, { method: "POST", body: JSON.stringify({}) });
+    await refreshCloudTeam({ silent: true });
+    persist();
+    renderCloudPanel();
+    toast("\u9080\u8BF7\u5DF2\u64A4\u9500");
+  }
+  async function cloudResendInvitation(inviteId) {
+    const orgId = state.cloud?.activeOrganization?.id;
+    const data = await cloudRequest(`/orgs/${orgId}/invitations/${inviteId}/resend`, { method: "POST", body: JSON.stringify({}) });
+    await refreshCloudTeam({ silent: true });
+    persist();
+    renderCloudPanel();
+    const tokenText = data.invitation?.token ? `\uFF0C\u9080\u8BF7\u7801\uFF1A${data.invitation.token}` : "";
+    toast(`\u9080\u8BF7\u5DF2\u91CD\u53D1${tokenText}`);
+  }
+  async function cloudUpdateMemberRole(memberId, role) {
+    const orgId = state.cloud?.activeOrganization?.id;
+    await cloudRequest(`/orgs/${orgId}/members/${memberId}`, {
+      method: "PUT",
+      body: JSON.stringify({ role })
+    });
+    await refreshCloudTeam({ silent: true });
+    persist();
+    renderCloudPanel();
+    toast("\u6210\u5458\u89D2\u8272\u5DF2\u66F4\u65B0");
+  }
+  async function cloudRemoveMember(memberId) {
+    if (!window.confirm("\u786E\u5B9A\u79FB\u9664\u8BE5\u6210\u5458\u5417\uFF1F\u8BE5\u6210\u5458\u4F1A\u7ACB\u5373\u5931\u53BB\u4E91\u7AEF\u8BBF\u95EE\u6743\u9650\uFF0C\u73B0\u6709\u4E91\u7AEF\u4F1A\u8BDD\u4F1A\u88AB\u6E05\u7406\u3002\u8BF7\u786E\u8BA4\u5DF2\u7ECF\u5904\u7406\u5176\u8D1F\u8D23\u7684\u6587\u6863\u548C\u6267\u7B14\u4EBA\u3002")) return;
+    const orgId = state.cloud?.activeOrganization?.id;
+    await cloudRequest(`/orgs/${orgId}/members/${memberId}`, { method: "DELETE" });
+    await refreshCloudTeam({ silent: true });
+    persist();
+    renderCloudPanel();
+    toast("\u6210\u5458\u5DF2\u79FB\u9664", "warn");
+  }
+  async function cloudExportMyData() {
+    await withLoading(els.cloudExportDataBtn, "\u5BFC\u51FA\u4E2D", async () => {
+      const data = await cloudRequest("/me/export", { method: "GET" });
+      downloadBlob(`mowen-cloud-export-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
+      toast("\u6211\u7684\u4E91\u7AEF\u6570\u636E\u5DF2\u5BFC\u51FA");
+    });
+  }
+  async function cloudDeleteAccount() {
+    if (!window.confirm("\u786E\u5B9A\u5220\u9664\u4E91\u7AEF\u8D26\u53F7\u5417\uFF1F\u8FD9\u4F1A\u9000\u51FA\u4E91\u7AEF\u5E76\u505C\u7528\u5F53\u524D\u8D26\u53F7\u3002")) return;
+    await withLoading(els.cloudDeleteAccountBtn, "\u5220\u9664\u4E2D", async () => {
+      await cloudRequest("/me", { method: "DELETE" });
+      state.cloud = {
+        ...state.cloud || {},
+        authenticated: false,
+        user: null,
+        activeOrganization: null,
+        membership: null,
+        members: [],
+        invitations: [],
+        usage: null,
+        limits: null
+      };
+      persist();
+      renderCloudPanel();
+      toast("\u4E91\u7AEF\u8D26\u53F7\u5DF2\u5220\u9664\uFF0C\u672C\u5730\u6570\u636E\u4ECD\u4FDD\u7559", "warn");
+    });
+  }
+  async function cloudLoadRecentErrors() {
+    await withLoading(els.cloudRecentErrorsBtn, "\u8BFB\u53D6\u4E2D", async () => {
+      const data = await cloudRequest("/ops/recent-errors", { method: "GET" });
+      const errors = Array.isArray(data.errors) ? data.errors : [];
+      els.cloudOpsReport.textContent = errors.length ? errors.map((item) => `${item.created_at || ""} ${item.type || "error"}\uFF1A${item.message || ""}`).join("\n") : "\u6682\u65E0\u6700\u8FD1\u9519\u8BEF\u3002";
+    });
+  }
+  function closeCloudAdminModal({ restoreFocus = true } = {}) {
+    if (!els.cloudAdminModal) return;
+    els.cloudAdminModal.hidden = true;
+    document.body.classList.remove("modal-open");
+    if (restoreFocus) ui.cloudAdminReturnFocus?.focus?.();
+    ui.cloudAdminReturnFocus = null;
+  }
+  function openStandaloneAdminPage() {
+    if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
+      toast("\u53EA\u6709\u7BA1\u7406\u5458\u53EF\u4EE5\u67E5\u770B\u7BA1\u7406\u540E\u53F0", "warn");
+      switchTab("cloud");
+      return;
+    }
+    window.location.href = "./admin.html";
+  }
+  function handleHashRoute() {
+    if (window.location.hash === "#admin") {
+      openCloudAdminWorkspace({ fromHash: true });
+    } else if (els.cloudAdminWorkspace && !els.cloudAdminWorkspace.hidden) {
+      closeCloudAdminWorkspace({ updateHash: false });
+    }
+  }
+  async function openCloudAdminWorkspace(options = {}) {
+    if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
+      toast("\u53EA\u6709\u7BA1\u7406\u5458\u53EF\u4EE5\u67E5\u770B\u7BA1\u7406\u540E\u53F0", "warn");
+      switchTab("cloud");
+      if (window.location.hash === "#admin") {
+        const url = new URL(window.location.href);
+        url.hash = "";
+        window.history.replaceState(null, "", url.toString());
+      }
+      return;
+    }
+    if (!options.fromHash && window.location.hash !== "#admin") {
+      window.location.hash = "admin";
+      return;
+    }
+    closeCloudAdminModal({ restoreFocus: false });
+    els.cloudAdminWorkspace.hidden = false;
+    document.body.classList.add("modal-open");
+    switchTab("cloud");
+    await cloudLoadAdminDashboard({ button: els.cloudAdminWorkspaceRefreshBtn });
+    renderCloudAdminWorkspace();
+    els.closeCloudAdminWorkspaceBtn?.focus();
+  }
+  function closeCloudAdminWorkspace(options = {}) {
+    if (!els.cloudAdminWorkspace) return;
+    els.cloudAdminWorkspace.hidden = true;
+    if (els.cloudAdminModal?.hidden !== false && els.skillBuilderModal?.hidden !== false && els.trashModal?.hidden !== false) {
+      document.body.classList.remove("modal-open");
+    }
+    if (options.updateHash !== false && window.location.hash === "#admin") {
+      const url = new URL(window.location.href);
+      url.hash = "";
+      window.history.replaceState(null, "", url.toString());
+    }
+  }
+  async function cloudLoadAdminDashboard(options = {}) {
+    if (!state.cloud?.authenticated) return;
+    const targetButton = options.silent ? null : options.button || els.cloudAdminRefreshBtn || els.cloudAdminDashboardBtn;
+    const runner = async () => {
+      const [dashboard, usage, audit] = await Promise.all([
+        cloudRequest("/admin/dashboard", { method: "GET" }),
+        cloudRequest(`/usage/history${buildAdminUsageQuery()}`, { method: "GET" }).catch(() => ({ usage: [] })),
+        cloudRequest(`/audit${buildAdminAuditQuery()}`, { method: "GET" }).catch(() => ({ audit_logs: [] }))
+      ]);
+      state.cloud.adminDashboard = dashboard;
+      state.cloud.adminUsage = usage.usage || [];
+      state.cloud.adminAudit = audit.audit_logs || [];
+      renderCloudAdminModal();
+      renderCloudAdminWorkspace();
+      const currentUsage = dashboard.usage || {};
+      els.cloudOpsReport.textContent = [
+        `\u7EC4\u7EC7\uFF1A${dashboard.organization?.name || ""}\uFF08${dashboard.organization?.plan || "free"}\uFF09`,
+        `\u6210\u5458\uFF1A${dashboard.members?.length || 0} \u4EBA\uFF0C\u5F85\u5904\u7406\u9080\u8BF7\uFF1A${dashboard.invitations?.filter((item) => !item.accepted_at).length || 0} \u4E2A`,
+        `\u4ECA\u65E5\u8BF7\u6C42\uFF1A${currentUsage.request_count || 0} \u6B21\uFF0C\u5931\u8D25\uFF1A${currentUsage.failed_count || 0} \u6B21`,
+        `\u53CD\u9988\uFF1A${dashboard.feedbacks?.length || 0} \u6761\uFF0C\u6700\u8FD1\u9519\u8BEF\uFF1A${dashboard.recent_errors?.length || 0} \u6761`
+      ].join("\n");
+    };
+    if (targetButton) {
+      await withLoading(targetButton, "\u8BFB\u53D6\u4E2D", runner);
+    } else {
+      await runner();
+    }
+  }
+  function renderCloudAdminModal() {
+    const dashboard = state.cloud?.adminDashboard || {};
+    const usage = Array.isArray(state.cloud?.adminUsage) ? state.cloud.adminUsage : [];
+    const audit = Array.isArray(state.cloud?.adminAudit) ? state.cloud.adminAudit : [];
+    const org = dashboard.organization || {};
+    if (els.cloudAdminOverview) {
+      els.cloudAdminOverview.innerHTML = [
+        `<div><strong>${escapeHtml(org.name || "\u672A\u547D\u540D\u7EC4\u7EC7")}</strong><span>\u5957\u9910\uFF1A${escapeHtml(org.plan || "free")}</span></div>`,
+        `<div><strong>${dashboard.usage?.request_count || 0}</strong><span>\u4ECA\u65E5\u8BF7\u6C42</span></div>`,
+        `<div><strong>${dashboard.limits?.org_daily || 0}</strong><span>\u7EC4\u7EC7\u65E5\u9650</span></div>`,
+        `<div><strong>${dashboard.email_deliveries?.length || 0}</strong><span>\u6700\u8FD1\u90AE\u4EF6\u6295\u9012</span></div>`
+      ].join("");
+    }
+    if (els.cloudAdminMembers) {
+      const members = dashboard.members || [];
+      const invitations = dashboard.invitations || [];
+      els.cloudAdminMembers.innerHTML = [
+        ...members.slice(-8).map((member) => `<div><strong>${escapeHtml(member.user?.email || member.user_id || "")}</strong><span>${escapeHtml(member.role || "member")}</span></div>`),
+        ...invitations.slice(-6).map((invitation) => `<div><strong>${escapeHtml(invitation.email || "")}</strong><span>${escapeHtml(invitation.role || "member")} \xB7 ${invitation.accepted_at ? "\u5DF2\u63A5\u53D7" : "\u5F85\u63A5\u53D7"}</span></div>`)
+      ].join("") || "\u6682\u65E0\u6210\u5458\u6216\u9080\u8BF7\u3002";
+    }
+    if (els.cloudAdminUsageList) {
+      els.cloudAdminUsageList.innerHTML = usage.length ? usage.slice(-12).reverse().map((item) => `<div><strong>${escapeHtml(item.task_type || "chat")}</strong><span>${escapeHtml(item.status || "")} \xB7 ${Number(item.total_tokens || 0).toLocaleString("zh-CN")} \xB7 ${escapeHtml(item.created_at || "")}</span></div>`).join("") : "\u6682\u65E0\u5339\u914D\u7528\u91CF\u3002";
+    }
+    if (els.cloudAdminAuditList) {
+      els.cloudAdminAuditList.innerHTML = audit.length ? audit.slice(-12).reverse().map((item) => `<div><strong>${escapeHtml(item.action || "")}</strong><span>${escapeHtml(item.target_type || "")} \xB7 ${escapeHtml(item.created_at || "")}</span></div>`).join("") : "\u6682\u65E0\u5339\u914D\u5BA1\u8BA1\u3002";
+    }
+    if (els.cloudAdminFeedbackList) {
+      const feedbacks = dashboard.feedbacks || [];
+      const statusFilter = els.cloudAdminFeedbackStatusFilter?.value || "";
+      const filteredFeedbacks = statusFilter ? feedbacks.filter((item) => (item.metadata?.status || "pending") === statusFilter) : feedbacks;
+      els.cloudAdminFeedbackList.innerHTML = filteredFeedbacks.length ? filteredFeedbacks.slice(-10).reverse().map((item) => {
+        const status = item.metadata?.status || "pending";
+        return `<div class="cloud-admin-feedback-row">
+          <strong>${escapeHtml(item.message || "")}</strong>
+          <span>${escapeHtml(status)} \xB7 ${escapeHtml(item.created_at || "")}</span>
+          <span class="cloud-row-actions">
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="processing">\u5904\u7406\u4E2D</button>
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="resolved">\u5DF2\u89E3\u51B3</button>
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="closed">\u5173\u95ED</button>
+          </span>
+        </div>`;
+      }).join("") : "\u6682\u65E0\u5339\u914D\u53CD\u9988\u3002";
+    }
+    if (els.cloudAdminEmailList) {
+      const emailText = (els.cloudAdminEmailInput?.value || "").trim().toLowerCase();
+      const template2 = els.cloudAdminEmailTemplate?.value || "";
+      const status = els.cloudAdminEmailStatus?.value || "";
+      const emails = Array.isArray(dashboard.email_deliveries) ? dashboard.email_deliveries : [];
+      ui.cloudAdminVisibleEmails = emails.filter((item) => !emailText || String(item.email || "").toLowerCase().includes(emailText)).filter((item) => !template2 || item.template === template2).filter((item) => !status || item.status === status).slice(-12).reverse();
+      els.cloudAdminEmailList.innerHTML = ui.cloudAdminVisibleEmails.length ? ui.cloudAdminVisibleEmails.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.email || "")}</strong><span>${escapeHtml(item.template || "")} \xB7 ${escapeHtml(item.status || "")} \xB7 ${escapeHtml(item.updated_at || item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-email" data-email-index="${index}">\u590D\u5236\u8BE6\u60C5</button></div>`).join("") : "\u6682\u65E0\u5339\u914D\u90AE\u4EF6\u3002";
+    }
+    if (els.cloudAdminOpsList) {
+      const errors = dashboard.recent_errors || [];
+      const payments = dashboard.billing?.payment_webhooks || [];
+      ui.cloudAdminVisibleErrors = errors.slice(-6).reverse();
+      ui.cloudAdminVisiblePayments = payments.slice(-6).reverse();
+      els.cloudAdminOpsList.innerHTML = [
+        ...ui.cloudAdminVisibleErrors.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.type || item.level || "error")}</strong><span>${escapeHtml(item.message || "")}</span><button type="button" data-cloud-admin-action="copy-error" data-error-index="${index}">\u590D\u5236\u8BE6\u60C5</button></div>`),
+        ...ui.cloudAdminVisiblePayments.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.event_type || "")}</strong><span>${escapeHtml(item.provider || "")} \xB7 ${escapeHtml(item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-payment" data-payment-index="${index}">\u590D\u5236\u4E8B\u4EF6</button></div>`)
+      ].join("") || "\u6682\u65E0\u9519\u8BEF\u6216\u8D26\u5355\u4E8B\u4EF6\u3002";
+    }
+  }
+  function renderCloudAdminWorkspace() {
+    if (!els.cloudAdminWorkspace || els.cloudAdminWorkspace.hidden) return;
+    const dashboard = state.cloud?.adminDashboard || {};
+    const usage = Array.isArray(state.cloud?.adminUsage) ? state.cloud.adminUsage : [];
+    const audit = Array.isArray(state.cloud?.adminAudit) ? state.cloud.adminAudit : [];
+    const org = dashboard.organization || {};
+    const members = Array.isArray(dashboard.members) ? dashboard.members : [];
+    const invitations = Array.isArray(dashboard.invitations) ? dashboard.invitations : [];
+    const feedbacks = Array.isArray(dashboard.feedbacks) ? dashboard.feedbacks : [];
+    const emails = Array.isArray(dashboard.email_deliveries) ? dashboard.email_deliveries : [];
+    const payments = Array.isArray(dashboard.billing?.payment_webhooks) ? dashboard.billing.payment_webhooks : [];
+    const errors = Array.isArray(dashboard.recent_errors) ? dashboard.recent_errors : [];
+    const currentUsage = dashboard.usage || {};
+    els.cloudAdminWorkspaceSubtitle.textContent = `${org.name || "\u672A\u547D\u540D\u7EC4\u7EC7"} \xB7 ${org.plan || "free"}`;
+    els.cloudAdminWorkspaceSummary.innerHTML = [
+      `<div><strong>${escapeHtml(org.plan || "free")}</strong><span>\u5F53\u524D\u5957\u9910</span></div>`,
+      `<div><strong>${members.length}</strong><span>\u7EC4\u7EC7\u6210\u5458</span></div>`,
+      `<div><strong>${currentUsage.request_count || 0}</strong><span>\u4ECA\u65E5\u8BF7\u6C42</span></div>`,
+      `<div><strong>${feedbacks.length}</strong><span>\u53CD\u9988\u8BB0\u5F55</span></div>`
+    ].join("");
+    const view = ui.cloudAdminWorkspaceView || "overview";
+    els.cloudAdminWorkspaceNav?.querySelectorAll("[data-admin-workspace-view]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.adminWorkspaceView === view);
+    });
+    const titles = {
+      overview: "\u6982\u89C8",
+      members: "\u6210\u5458",
+      usage: "\u7528\u91CF",
+      audit: "\u5BA1\u8BA1",
+      feedback: "\u53CD\u9988",
+      email: "\u90AE\u4EF6\u6295\u9012",
+      billing: "\u8D26\u5355",
+      errors: "\u9519\u8BEF"
+    };
+    els.cloudAdminWorkspacePanelTitle.textContent = titles[view] || "\u6982\u89C8";
+    els.cloudAdminWorkspaceDeletionRequestBtn.hidden = view !== "overview";
+    if (view === "members") {
+      els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${[
+        ...members.map((member) => `<div><strong>${escapeHtml(member.user?.email || member.user_id || "")}</strong><span>${escapeHtml(member.role || "member")}</span></div>`),
+        ...invitations.map((invitation) => `<div><strong>${escapeHtml(invitation.email || "")}</strong><span>${escapeHtml(invitation.role || "member")} \xB7 ${invitation.accepted_at ? "\u5DF2\u63A5\u53D7" : "\u5F85\u63A5\u53D7"}</span></div>`)
+      ].join("") || "\u6682\u65E0\u6210\u5458\u6216\u9080\u8BF7\u3002"}</div>`;
+      return;
+    }
+    if (view === "usage") {
+      els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${usage.length ? usage.slice().reverse().map((item) => `<div><strong>${escapeHtml(item.task_type || "chat")}</strong><span>${escapeHtml(item.status || "")} \xB7 ${Number(item.total_tokens || 0).toLocaleString("zh-CN")} \xB7 ${escapeHtml(item.created_at || "")}</span></div>`).join("") : "\u6682\u65E0\u5339\u914D\u7528\u91CF\u3002"}</div>`;
+      return;
+    }
+    if (view === "audit") {
+      els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${audit.length ? audit.slice().reverse().map((item) => `<div><strong>${escapeHtml(item.action || "")}</strong><span>${escapeHtml(item.target_type || "")} \xB7 ${escapeHtml(item.created_at || "")}</span></div>`).join("") : "\u6682\u65E0\u5339\u914D\u5BA1\u8BA1\u3002"}</div>`;
+      return;
+    }
+    if (view === "feedback") {
+      els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${feedbacks.length ? feedbacks.slice().reverse().map((item) => {
+        const status = item.metadata?.status || "pending";
+        return `<div class="cloud-admin-feedback-row">
+          <strong>${escapeHtml(item.message || "")}</strong>
+          <span>${escapeHtml(status)} \xB7 ${escapeHtml(item.created_at || "")}</span>
+          <span class="cloud-row-actions">
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="processing">\u5904\u7406\u4E2D</button>
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="resolved">\u5DF2\u89E3\u51B3</button>
+            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="closed">\u5173\u95ED</button>
+          </span>
+        </div>`;
+      }).join("") : "\u6682\u65E0\u53CD\u9988\u3002"}</div>`;
+      return;
+    }
+    if (view === "email") {
+      ui.cloudAdminVisibleEmails = emails.slice(-50).reverse();
+      els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${ui.cloudAdminVisibleEmails.length ? ui.cloudAdminVisibleEmails.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.email || "")}</strong><span>${escapeHtml(item.template || "")} \xB7 ${escapeHtml(item.status || "")} \xB7 ${escapeHtml(item.updated_at || item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-email" data-email-index="${index}">\u590D\u5236\u8BE6\u60C5</button></div>`).join("") : "\u6682\u65E0\u90AE\u4EF6\u6295\u9012\u3002"}</div>`;
+      return;
+    }
+    if (view === "billing") {
+      ui.cloudAdminVisiblePayments = payments.slice(-50).reverse();
+      els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${ui.cloudAdminVisiblePayments.length ? ui.cloudAdminVisiblePayments.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.event_type || "")}</strong><span>${escapeHtml(item.provider || "")} \xB7 ${escapeHtml(item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-payment" data-payment-index="${index}">\u590D\u5236\u4E8B\u4EF6</button></div>`).join("") : "\u6682\u65E0\u8D26\u5355\u4E8B\u4EF6\u3002"}</div>`;
+      return;
+    }
+    if (view === "errors") {
+      ui.cloudAdminVisibleErrors = errors.slice(-50).reverse();
+      els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${ui.cloudAdminVisibleErrors.length ? ui.cloudAdminVisibleErrors.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.type || item.level || "error")}</strong><span>${escapeHtml(item.message || "")}</span><button type="button" data-cloud-admin-action="copy-error" data-error-index="${index}">\u590D\u5236\u8BE6\u60C5</button></div>`).join("") : "\u6682\u65E0\u9519\u8BEF\u4E8B\u4EF6\u3002"}</div>`;
+      return;
+    }
+    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-grid">
+    <section class="cloud-admin-card"><h3>\u7EC4\u7EC7</h3><div class="cloud-admin-list"><div><strong>${escapeHtml(org.name || "\u672A\u547D\u540D\u7EC4\u7EC7")}</strong><span>${escapeHtml(org.plan || "free")}</span></div></div></section>
+    <section class="cloud-admin-card"><h3>\u8FD0\u8425\u72B6\u6001</h3><div class="cloud-admin-list">
+      <div><strong>${currentUsage.request_count || 0}</strong><span>\u4ECA\u65E5\u8BF7\u6C42</span></div>
+      <div><strong>${currentUsage.failed_count || 0}</strong><span>\u4ECA\u65E5\u5931\u8D25</span></div>
+      <div><strong>${emails.length}</strong><span>\u90AE\u4EF6\u6295\u9012</span></div>
+      <div><strong>${errors.length}</strong><span>\u9519\u8BEF\u4E8B\u4EF6</span></div>
+    </div></section>
+  </div>`;
+  }
+  function buildAdminUsageQuery() {
+    const params = new URLSearchParams();
+    if (els.cloudAdminUsageFrom?.value) params.set("from", els.cloudAdminUsageFrom.value);
+    if (els.cloudAdminUsageTo?.value) params.set("to", els.cloudAdminUsageTo.value);
+    if (els.cloudAdminUsageTask?.value.trim()) params.set("task_type", els.cloudAdminUsageTask.value.trim());
+    if (els.cloudAdminUsageStatus?.value) params.set("status", els.cloudAdminUsageStatus.value);
+    params.set("limit", "80");
+    const text = params.toString();
+    return text ? `?${text}` : "";
+  }
+  function buildAdminAuditQuery() {
+    const params = new URLSearchParams();
+    if (els.cloudAdminAuditFrom?.value) params.set("from", els.cloudAdminAuditFrom.value);
+    if (els.cloudAdminAuditTo?.value) params.set("to", els.cloudAdminAuditTo.value);
+    if (els.cloudAdminAuditAction?.value.trim()) params.set("action", els.cloudAdminAuditAction.value.trim());
+    params.set("limit", "80");
+    const text = params.toString();
+    return text ? `?${text}` : "";
+  }
+  async function handleCloudAdminAction(event) {
+    const button = event.target.closest("[data-cloud-admin-action]");
+    if (!button) return;
+    const action = button.dataset.cloudAdminAction;
+    if (action === "feedback-status") {
+      await withLoading(button, "\u66F4\u65B0\u4E2D", async () => {
+        await cloudRequest(`/feedback/${button.dataset.feedbackId}/status`, {
+          method: "POST",
+          body: JSON.stringify({ status: button.dataset.status })
+        });
+        await cloudLoadAdminDashboard({ silent: true });
+        toast("\u53CD\u9988\u72B6\u6001\u5DF2\u66F4\u65B0");
+      });
+    } else if (action === "copy-error") {
+      const item = ui.cloudAdminVisibleErrors?.[Number(button.dataset.errorIndex)];
+      await copyTextToClipboard(JSON.stringify(item || {}, null, 2));
+      toast("\u9519\u8BEF\u8BE6\u60C5\u5DF2\u590D\u5236");
+    } else if (action === "copy-payment") {
+      const item = ui.cloudAdminVisiblePayments?.[Number(button.dataset.paymentIndex)];
+      await copyTextToClipboard(JSON.stringify(item || {}, null, 2));
+      toast("\u8D26\u5355\u4E8B\u4EF6\u5DF2\u590D\u5236");
+    } else if (action === "copy-email") {
+      const item = ui.cloudAdminVisibleEmails?.[Number(button.dataset.emailIndex)];
+      await copyTextToClipboard(JSON.stringify(item || {}, null, 2));
+      toast("\u90AE\u4EF6\u6295\u9012\u8BE6\u60C5\u5DF2\u590D\u5236");
+    }
+  }
+  async function cloudExportOrganizationData() {
+    const orgId = state.cloud?.activeOrganization?.id;
+    if (!orgId) return;
+    await withLoading(els.cloudAdminExportOrgBtn, "\u5BFC\u51FA\u4E2D", async () => {
+      const data = await cloudRequest(`/orgs/${orgId}/export`, { method: "GET" });
+      downloadBlob(`mowen-org-export-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
+      toast("\u7EC4\u7EC7\u6570\u636E\u5DF2\u5BFC\u51FA");
+    });
+  }
+  function cloudExportUsageCsv() {
+    const rows = Array.isArray(state.cloud?.adminUsage) ? state.cloud.adminUsage : [];
+    if (!rows.length) {
+      toast("\u6CA1\u6709\u53EF\u5BFC\u51FA\u7684\u7528\u91CF\u8BB0\u5F55", "warn");
+      return;
+    }
+    downloadCsv(`mowen-usage-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv`, [
+      ["created_at", "task_type", "status", "prompt_tokens", "completion_tokens", "total_tokens", "model", "error"],
+      ...rows.map((item) => [
+        item.created_at || "",
+        item.task_type || "",
+        item.status || "",
+        item.prompt_tokens || 0,
+        item.completion_tokens || 0,
+        item.total_tokens || 0,
+        item.model || "",
+        item.error || ""
+      ])
+    ]);
+    toast("\u7528\u91CF CSV \u5DF2\u5BFC\u51FA");
+  }
+  function cloudExportAuditCsv() {
+    const rows = Array.isArray(state.cloud?.adminAudit) ? state.cloud.adminAudit : [];
+    if (!rows.length) {
+      toast("\u6CA1\u6709\u53EF\u5BFC\u51FA\u7684\u5BA1\u8BA1\u8BB0\u5F55", "warn");
+      return;
+    }
+    downloadCsv(`mowen-audit-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.csv`, [
+      ["created_at", "action", "actor_user_id", "target_type", "target_id", "details"],
+      ...rows.map((item) => [
+        item.created_at || "",
+        item.action || "",
+        item.actor_user_id || "",
+        item.target_type || "",
+        item.target_id || "",
+        JSON.stringify(item.details || {})
+      ])
+    ]);
+    toast("\u5BA1\u8BA1 CSV \u5DF2\u5BFC\u51FA");
+  }
+  async function cloudRequestOrganizationDeletion() {
+    const orgId = state.cloud?.activeOrganization?.id;
+    if (!orgId) return;
+    const reason = window.prompt("\u8BF7\u586B\u5199\u521B\u5EFA\u5220\u9664/\u505C\u7528\u8349\u6848\u7684\u539F\u56E0\u3002\u8BE5\u64CD\u4F5C\u4E0D\u4F1A\u7ACB\u5373\u5220\u9664\u6570\u636E\u3002", "\u7BA1\u7406\u5458\u53D1\u8D77\u7EC4\u7EC7\u6570\u636E\u6CBB\u7406\u8BC4\u4F30");
+    if (!reason) return;
+    await withLoading(els.cloudAdminDeletionRequestBtn, "\u521B\u5EFA\u4E2D", async () => {
+      await cloudRequest(`/orgs/${orgId}/deletion-request`, {
+        method: "POST",
+        body: JSON.stringify({ reason })
+      });
+      await cloudLoadAdminDashboard({ silent: true });
+      toast("\u7EC4\u7EC7\u5220\u9664/\u505C\u7528\u8349\u6848\u5DF2\u521B\u5EFA", "warn");
+    });
+  }
+  async function cloudSendFeedback() {
+    const message = els.cloudFeedbackInput.value.trim();
+    if (!message) {
+      toast("\u8BF7\u5148\u586B\u5199\u53CD\u9988\u5185\u5BB9", "warn");
+      return;
+    }
+    await withLoading(els.cloudSendFeedbackBtn, "\u63D0\u4EA4\u4E2D", async () => {
+      await cloudRequest("/feedback", {
+        method: "POST",
+        body: JSON.stringify({ message, source: "cloud_panel" })
+      });
+      els.cloudFeedbackInput.value = "";
+      toast("\u53CD\u9988\u5DF2\u63D0\u4EA4");
+    });
+  }
+  async function cloudSaveCurrentDocument() {
+    const doc = getCurrentDoc();
+    if (!doc || doc.deletedAt) {
+      toast("\u8BF7\u5148\u9009\u62E9\u8981\u540C\u6B65\u7684\u6587\u6863", "warn");
+      return;
+    }
+    await withLoading(els.cloudSaveDocBtn, "\u540C\u6B65\u4E2D", async () => {
+      const payload = {
+        title: doc.title || "\u672A\u547D\u540D\u6587\u6863",
+        type: doc.type || "custom",
+        folder_id: doc.folderId || "",
+        local_id: doc.id,
+        content: doc.content || "",
+        metadata: {
+          localId: doc.id,
+          type: doc.type || "",
+          folderId: doc.folderId || "",
+          styleId: doc.styleId || ""
+        },
+        expected_version: doc.cloudVersion || void 0
+      };
+      const data = await saveCloudResourceWithConflict({
+        localName: doc.title || "\u5F53\u524D\u6587\u6863",
+        endpoint: doc.cloudId ? `/documents/${doc.cloudId}` : "/documents",
+        method: doc.cloudId ? "PUT" : "POST",
+        payload,
+        remoteKey: "document",
+        applyRemote: (remoteDoc) => applyRemoteDocumentToLocal(doc, remoteDoc),
+        createLocalCopy: (remoteDoc) => createDocumentCopyFromRemote(remoteDoc)
+      });
+      doc.cloudId = data.document.id;
+      doc.cloudUpdatedAt = data.document.updated_at || now();
+      doc.cloudVersion = data.document.version || 1;
+      persist();
+      renderEditor();
+      toast(`\u5F53\u524D\u6587\u6863\u5DF2\u540C\u6B65\u5230\u4E91\u7AEF\uFF1A${getCloudDocumentLocation(data.document)}`);
+    });
+  }
+  async function cloudPullDocuments() {
+    await withLoading(els.cloudPullDocsBtn, "\u62C9\u53D6\u4E2D", async () => {
+      const data = await cloudRequest("/documents", { method: "GET" });
+      const documents = Array.isArray(data.documents) ? data.documents : [];
+      let imported = 0;
+      documents.forEach((remoteDoc) => {
+        const existing = state.docs.find((doc) => doc.cloudId === remoteDoc.id);
+        const metadata = remoteDoc.metadata || {};
+        if (existing) {
+          existing.title = remoteDoc.title || existing.title;
+          existing.content = remoteDoc.content || "";
+          existing.type = remoteDoc.type || metadata.type || existing.type || "custom";
+          existing.folderId = metadata.folderId || existing.folderId || state.folders[0]?.id || "";
+          existing.styleId = metadata.styleId || existing.styleId || state.styles[0]?.id || "";
+          existing.cloudUpdatedAt = remoteDoc.updated_at || now();
+          existing.cloudVersion = remoteDoc.version || 1;
+          existing.updatedAt = now();
+          existing.deletedAt = remoteDoc.deleted_at || "";
+          return;
+        }
+        state.docs.push({
+          id: createId(),
+          title: remoteDoc.title || "\u4E91\u7AEF\u6587\u6863",
+          type: remoteDoc.type || metadata.type || "custom",
+          folderId: metadata.folderId || state.folders[0]?.id || "",
+          styleId: metadata.styleId || state.styles[0]?.id || "",
+          content: remoteDoc.content || "",
+          createdAt: remoteDoc.created_at || now(),
+          updatedAt: remoteDoc.updated_at || now(),
+          deletedAt: remoteDoc.deleted_at || "",
+          deletedFromFolderId: "",
+          cloudId: remoteDoc.id,
+          cloudUpdatedAt: remoteDoc.updated_at || now(),
+          cloudVersion: remoteDoc.version || 1
+        });
+        imported += 1;
+      });
+      persist();
+      eventBus.emit(EVENTS.RENDER_DOC_LIST);
+      eventBus.emit(EVENTS.RENDER_EDITOR);
+      toast(`\u5DF2\u4ECE\u4E91\u7AEF\u62C9\u53D6 ${documents.length} \u4EFD\u6587\u6863\uFF0C\u65B0\u589E ${imported} \u4EFD`);
+    });
+  }
+  async function saveCloudResourceWithConflict({ localName, endpoint, method, payload, remoteKey, applyRemote, createLocalCopy }) {
+    try {
+      return await cloudRequest(endpoint, { method, body: JSON.stringify(payload) });
+    } catch (error) {
+      if (error.status !== 409 || error.payload?.error?.code !== "version_conflict") throw error;
+      const remote = error.payload?.error?.details?.remote;
+      const currentVersion = error.payload?.error?.details?.current_version || remote?.version || "\u672A\u77E5";
+      const choice = window.prompt(
+        `\u68C0\u6D4B\u5230\u4E91\u7AEF\u7248\u672C\u51B2\u7A81\uFF1A${localName}
+\u4E91\u7AEF\u7248\u672C\uFF1Av${currentVersion}
+\u8F93\u5165 1 \u8986\u76D6\u4E91\u7AEF\uFF1B\u8F93\u5165 2 \u53E6\u5B58\u672C\u5730\u526F\u672C\u540E\u62C9\u53D6\u4E91\u7AEF\uFF1B\u8F93\u5165 3 \u4EC5\u62C9\u53D6\u4E91\u7AEF\u3002`,
+        "3"
+      );
+      if (choice === "1") {
+        return cloudRequest(endpoint, {
+          method,
+          body: JSON.stringify({ ...payload, expected_version: void 0, force: true })
+        });
+      }
+      if (choice === "2") {
+        createLocalCopy?.(remote);
+        applyRemote?.(remote);
+        persist();
+        toast("\u5DF2\u4FDD\u7559\u672C\u5730\u526F\u672C\uFF0C\u5E76\u62C9\u53D6\u4E91\u7AEF\u7248\u672C", "warn");
+        return { [remoteKey]: remote };
+      }
+      applyRemote?.(remote);
+      persist();
+      toast("\u5DF2\u62C9\u53D6\u4E91\u7AEF\u7248\u672C\uFF0C\u672C\u5730\u6539\u52A8\u672A\u8986\u76D6\u4E91\u7AEF", "warn");
+      return { [remoteKey]: remote };
+    }
+  }
+  function applyRemoteDocumentToLocal(doc, remoteDoc) {
+    if (!remoteDoc) return;
+    const metadata = remoteDoc.metadata || {};
+    doc.title = remoteDoc.title || doc.title;
+    doc.content = remoteDoc.content || "";
+    doc.type = remoteDoc.type || metadata.type || doc.type || "custom";
+    doc.folderId = metadata.folderId || doc.folderId || state.folders[0]?.id || "";
+    doc.styleId = metadata.styleId || doc.styleId || state.styles[0]?.id || "";
+    doc.cloudId = remoteDoc.id;
+    doc.cloudUpdatedAt = remoteDoc.updated_at || now();
+    doc.cloudVersion = remoteDoc.version || 1;
+    doc.updatedAt = now();
+    eventBus.emit(EVENTS.RENDER_DOC_LIST);
+    eventBus.emit(EVENTS.RENDER_EDITOR);
+  }
+  function createDocumentCopyFromRemote(remoteDoc) {
+    const current = getCurrentDoc();
+    if (!current) return remoteDoc;
+    state.docs.push({
+      ...current,
+      id: createId(),
+      title: `${current.title || "\u672C\u5730\u526F\u672C"}\uFF08\u51B2\u7A81\u526F\u672C\uFF09`,
+      cloudId: "",
+      cloudUpdatedAt: "",
+      cloudVersion: "",
+      createdAt: now(),
+      updatedAt: now()
+    });
+    eventBus.emit(EVENTS.RENDER_DOC_LIST);
+    return remoteDoc;
+  }
+  async function cloudSaveCurrentWriter() {
+    const style = getCurrentCloudWriter();
+    if (!style) {
+      toast("\u8BF7\u5148\u9009\u62E9\u8981\u540C\u6B65\u7684\u6267\u7B14\u4EBA", "warn");
+      return;
+    }
+    await withLoading(els.cloudSaveWriterBtn, "\u540C\u6B65\u4E2D", async () => {
+      const payload = {
+        name: style.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
+        handle: normalizeHandle(style.handle || style.name),
+        category: style.category || "\u81EA\u5B9A\u4E49",
+        description: style.description || "",
+        enabled: style.enabled !== false,
+        summary_md: style.summary || "",
+        skill_json: parseJsonSafely(style.skillJson || "{}", {}),
+        quality_report: style.qualityReport || {},
+        expected_version: style.cloudVersion || void 0
+      };
+      const data = await saveCloudResourceWithConflict({
+        localName: style.name || "\u5F53\u524D\u6267\u7B14\u4EBA",
+        endpoint: style.cloudId ? `/writers/${style.cloudId}` : "/writers",
+        method: style.cloudId ? "PUT" : "POST",
+        payload,
+        remoteKey: "writer",
+        applyRemote: (remoteWriter) => applyRemoteWriterToLocal(style, remoteWriter),
+        createLocalCopy: (remoteWriter) => createWriterCopyFromRemote(remoteWriter)
+      });
+      style.cloudId = data.writer.id;
+      style.cloudUpdatedAt = data.writer.updated_at || now();
+      style.cloudVersion = data.writer.version || 1;
+      style.updatedAt = now();
+      persist();
+      eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+      toast(`\u6267\u7B14\u4EBA\u5DF2\u540C\u6B65\u5230\u4E91\u7AEF\uFF1A${getCloudWriterLocation(data.writer)}`);
+    });
+  }
+  function applyRemoteWriterToLocal(style, remoteWriter) {
+    if (!remoteWriter) return;
+    const next = normalizeSkill({
+      ...style,
+      name: remoteWriter.name || style.name,
+      handle: remoteWriter.handle || style.handle,
+      category: remoteWriter.category || style.category || "\u81EA\u5B9A\u4E49",
+      description: remoteWriter.description || style.description || "",
+      enabled: remoteWriter.enabled !== false,
+      summary: remoteWriter.summary_md || style.summary || "",
+      skillJson: JSON.stringify(remoteWriter.skill_json || {}, null, 2),
+      qualityReport: remoteWriter.quality_report || style.qualityReport || null,
+      versions: style.versions || [],
+      cloudId: remoteWriter.id,
+      cloudUpdatedAt: remoteWriter.updated_at || now(),
+      cloudVersion: remoteWriter.version || 1,
+      updatedAt: now()
+    });
+    Object.assign(style, next);
+    if (ui.editingStyle?.id === style.id) ui.editingStyle = clone(style);
+    eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
+    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+  }
+  function createWriterCopyFromRemote(remoteWriter) {
+    const style = getCurrentCloudWriter();
+    if (!style) return remoteWriter;
+    state.styles.push(normalizeSkill({
+      ...style,
+      id: createId(),
+      name: `${style.name || "\u672C\u5730\u526F\u672C"}\uFF08\u51B2\u7A81\u526F\u672C\uFF09`,
+      handle: normalizeHandle(`${style.handle || style.name || "copy"}${state.styles.length + 1}`),
+      cloudId: "",
+      cloudUpdatedAt: "",
+      cloudVersion: "",
+      createdAt: now(),
+      updatedAt: now()
+    }));
+    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+    return remoteWriter;
+  }
+  async function cloudPullWriters() {
+    await withLoading(els.cloudPullWritersBtn, "\u62C9\u53D6\u4E2D", async () => {
+      const data = await cloudRequest("/writers", { method: "GET" });
+      const writers = Array.isArray(data.writers) ? data.writers : [];
+      let imported = 0;
+      writers.forEach((remoteWriter) => {
+        const existing = state.styles.find((style) => style.cloudId === remoteWriter.id || style.handle === remoteWriter.handle);
+        const next = normalizeSkill({
+          ...existing || {},
+          id: existing?.id || createId(),
+          name: remoteWriter.name || existing?.name || "\u4E91\u7AEF\u6267\u7B14\u4EBA",
+          handle: remoteWriter.handle || existing?.handle || "",
+          category: remoteWriter.category || existing?.category || "\u81EA\u5B9A\u4E49",
+          description: remoteWriter.description || existing?.description || "",
+          enabled: remoteWriter.enabled !== false,
+          summary: remoteWriter.summary_md || existing?.summary || "",
+          skillJson: JSON.stringify(remoteWriter.skill_json || {}, null, 2),
+          qualityReport: remoteWriter.quality_report || existing?.qualityReport || null,
+          versions: Array.isArray(remoteWriter.versions) ? remoteWriter.versions.map(mapRemoteWriterVersion) : existing?.versions || [],
+          examples: existing?.examples || [],
+          createdAt: remoteWriter.created_at || existing?.createdAt || now(),
+          updatedAt: remoteWriter.updated_at || now(),
+          cloudId: remoteWriter.id,
+          cloudUpdatedAt: remoteWriter.updated_at || now(),
+          cloudVersion: remoteWriter.version || 1
+        });
+        if (existing) Object.assign(existing, next);
+        else {
+          state.styles.push(next);
+          imported += 1;
+        }
+      });
+      if (!ui.editingStyle && state.styles[0]) ui.editingStyle = clone(state.styles[0]);
+      persist();
+      eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
+      eventBus.emit(EVENTS.RENDER_STYLE_LIST);
+      eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
+      toast(`\u5DF2\u4ECE\u4E91\u7AEF\u62C9\u53D6 ${writers.length} \u4E2A\u6267\u7B14\u4EBA\uFF0C\u65B0\u589E ${imported} \u4E2A`);
+    });
+  }
+  function mapRemoteWriterVersion(version) {
+    return {
+      id: version.id || createId(),
+      version: Number(version.version || 1),
+      createdAt: version.created_at || now(),
+      summary: version.summary_md || "",
+      skillJson: JSON.stringify(version.skill_json || {}, null, 2),
+      qualityReport: version.quality_report || null,
+      sourceExamples: [],
+      analyses: [],
+      analysis: "",
+      aggregation: "",
+      aggregationData: null,
+      testDoc: "",
+      testReport: ""
+    };
+  }
+  function getCurrentCloudWriter() {
+    return state.styles.find((style) => style.id === ui.selectedSkillCardId) || state.styles.find((style) => style.id === ui.editingStyle?.id) || state.styles[0] || null;
+  }
+  async function cloudSaveApiKey() {
+    const apiKey = els.cloudApiKeyInput.value.trim();
+    if (!apiKey) {
+      toast("\u8BF7\u5148\u586B\u5199\u8981\u4FDD\u5B58\u7684 API Key", "warn");
+      return;
+    }
+    await withLoading(els.cloudSaveApiKeyBtn, "\u4FDD\u5B58\u4E2D", async () => {
+      const data = await cloudRequest("/api-keys", {
+        method: "POST",
+        body: JSON.stringify({
+          provider: "openai-compatible",
+          name: "\u9ED8\u8BA4\u63A5\u53E3",
+          api_key: apiKey
+        })
+      });
+      els.cloudApiKeyInput.value = "";
+      toast(`API Key \u5DF2\u52A0\u5BC6\u4FDD\u5B58\u5230\u4E91\u7AEF\uFF1A${data.api_key?.key_hint || "\u5DF2\u4FDD\u5B58"}`);
+    });
+  }
+  function enableCloudAiProxy() {
+    if (!state.cloud?.authenticated) {
+      toast("\u8BF7\u5148\u767B\u5F55\u4E91\u7AEF\u8D26\u53F7", "warn");
+      return;
+    }
+    state.cloud.model = els.cloudModelInput.value.trim() || state.cloud.model || "gpt-4.1-mini";
+    state.settings = {
+      provider: "openai-compatible",
+      baseUrl: normalizeCloudBaseUrl(state.cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL),
+      endpointPath: "/ai/chat",
+      model: state.cloud.model,
+      apiKey: "",
+      credentials: "include",
+      systemPrompt: state.settings?.systemPrompt || DEFAULT_SYSTEM_PROMPT
+    };
+    persist();
+    renderApiSettings();
+    updateAiStatus();
+    toast("\u5DF2\u542F\u7528\u4E91\u7AEF AI \u4EE3\u7406\uFF0C\u540E\u7EED\u751F\u6210\u5C06\u901A\u8FC7\u4E91\u7AEF\u63A5\u53E3\u8C03\u7528");
+  }
+  function getCloudSettingsLocation() {
+    return `${normalizeCloudBaseUrl(state.cloud?.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL)} / \u5F53\u524D\u5DE5\u4F5C\u533A`;
+  }
+  function getCloudDocumentLocation(document2) {
+    return `${state.cloud?.activeOrganization?.name || "\u4E91\u7AEF\u5DE5\u4F5C\u533A"} / \u6587\u6863 / ${document2.title || document2.id}`;
+  }
+  function getCloudWriterLocation(writer) {
+    return `${state.cloud?.activeOrganization?.name || "\u4E91\u7AEF\u5DE5\u4F5C\u533A"} / \u6267\u7B14\u4EBA / @${writer.handle || writer.id}`;
   }
   function renderStyleEditor() {
     skillRenderer.renderStyleEditor();
@@ -36914,9 +38456,10 @@ ${mention} ` : `${mention} `;
   }
   function updateAiStatus() {
     const ready = Boolean(state.settings?.baseUrl && state.settings?.model);
-    els.aiStatus.textContent = ready ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E";
+    const cloudProxy = ready && state.settings?.credentials === "include" && state.settings?.endpointPath === "/ai/chat";
+    els.aiStatus.textContent = cloudProxy ? "\u4E91\u7AEF\u4EE3\u7406" : ready ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E";
     els.aiStatus.className = `status-pill ${ready ? "ready" : ""}`;
-    els.apiSavedLabel.textContent = ready ? "\u672C\u673A\u5DF2\u4FDD\u5B58" : "\u5F85\u914D\u7F6E";
+    els.apiSavedLabel.textContent = cloudProxy ? "\u4E91\u7AEF\u4EE3\u7406\u5DF2\u542F\u7528" : ready ? "\u672C\u673A\u5DF2\u4FDD\u5B58" : "\u5F85\u914D\u7F6E";
   }
   async function withLoading(button, text, task) {
     const oldHtml = button.innerHTML;
@@ -37068,6 +38611,11 @@ ${mention} ` : `${mention} `;
       els.apiTopBtn.classList.toggle("active", apiActive);
       els.apiTopBtn.setAttribute("aria-pressed", String(apiActive));
     }
+    if (els.cloudTopBtn) {
+      const cloudActive = tabName === "cloud";
+      els.cloudTopBtn.classList.toggle("active", cloudActive);
+      els.cloudTopBtn.setAttribute("aria-pressed", String(cloudActive));
+    }
     if (window.lucide) window.lucide.createIcons();
   }
   function createEmptyStyle() {
@@ -37209,6 +38757,30 @@ ${mention} ` : `${mention} `;
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  }
+  function downloadCsv(fileName, rows) {
+    const content = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+    downloadBlob(fileName, `\uFEFF${content}
+`, "text/csv;charset=utf-8");
+  }
+  function csvCell(value) {
+    const text = String(value ?? "");
+    return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+  async function copyTextToClipboard(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const input = document.createElement("textarea");
+    input.value = text;
+    input.setAttribute("readonly", "");
+    input.style.position = "fixed";
+    input.style.left = "-9999px";
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand("copy");
+    input.remove();
   }
   function toast(message, tone = "info") {
     showToast(els.toastRegion, message, tone);

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>摹文拟笔管理后台</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230f766e'/%3E%3Cpath d='M18 16h22l8 8v24H18z' fill='%23ffffff'/%3E%3Cpath d='M40 16v10h10' fill='none' stroke='%230f766e' stroke-width='4'/%3E%3C/svg%3E" />
+    <script>
+      (() => {
+        const savedTheme = localStorage.getItem("school-doc-manager:theme");
+        const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+        document.documentElement.dataset.theme = savedTheme || systemTheme;
+      })();
+    </script>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="module" src="./src/admin/adminPage.js"></script>
+  </head>
+  <body class="admin-page">
+    <main class="cloud-admin-workspace admin-standalone" id="adminWorkspace">
+      <div class="cloud-admin-workspace-shell">
+        <header class="cloud-admin-workspace-head admin-standalone-head">
+          <div>
+            <p class="admin-eyebrow">摹文拟笔工作台</p>
+            <h1 id="adminTitle">管理后台</h1>
+            <span id="adminSubtitle">连接云端后查看组织、用量、审计、反馈、邮件、账单和错误事件。</span>
+          </div>
+          <div class="cloud-admin-workspace-actions">
+            <label class="admin-api-field">
+              <span>API 地址</span>
+              <input id="adminBaseUrlInput" type="url" value="http://127.0.0.1:8787/api" />
+            </label>
+            <button id="adminRefreshBtn" type="button">刷新</button>
+            <button id="adminLogoutBtn" type="button">退出</button>
+            <a class="icon-button" href="./index.html">返回工作台</a>
+          </div>
+        </header>
+
+        <section class="admin-login-card" id="adminLoginView">
+          <div>
+            <h2>登录管理员账号</h2>
+            <p>只有组织 owner/admin 可以进入此页面。未登录或无权限时，后台数据不会加载。</p>
+          </div>
+          <label>
+            <span>邮箱</span>
+            <input id="adminEmailInput" type="email" autocomplete="email" />
+          </label>
+          <label>
+            <span>密码</span>
+            <input id="adminPasswordInput" type="password" autocomplete="current-password" />
+          </label>
+          <button class="primary-action" id="adminLoginBtn" type="button">登录后台</button>
+          <p class="admin-inline-note" id="adminLoginHint">也可以先在主工作台完成登录，再打开本页面。</p>
+        </section>
+
+        <section class="admin-denied-card" id="adminDeniedView" hidden>
+          <h2>没有后台权限</h2>
+          <p id="adminDeniedText">当前账号不是组织管理员。</p>
+          <a class="icon-button" href="./index.html">返回工作台</a>
+        </section>
+
+        <section class="admin-main-view" id="adminMainView" hidden>
+          <div id="adminSummary" class="cloud-admin-summary-grid">等待加载。</div>
+
+          <div class="admin-filter-bar">
+            <label>
+              <span>开始日期</span>
+              <input id="adminFromInput" type="date" />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input id="adminToInput" type="date" />
+            </label>
+            <label>
+              <span>任务类型</span>
+              <input id="adminTaskInput" type="text" placeholder="如 draft / skill_build" />
+            </label>
+            <label>
+              <span>审计动作</span>
+              <input id="adminActionInput" type="text" placeholder="如 organization.update" />
+            </label>
+            <label>
+              <span>邮件状态</span>
+              <select id="adminEmailStatusSelect">
+                <option value="">全部</option>
+                <option value="sent">已发送</option>
+                <option value="delivered">已送达</option>
+                <option value="bounced">退信</option>
+                <option value="failed">失败</option>
+                <option value="opened">已打开</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="cloud-admin-workspace-body">
+            <nav id="adminNav" class="cloud-admin-side-nav" aria-label="管理后台栏目">
+              <button class="active" type="button" data-admin-view="overview">概览</button>
+              <button type="button" data-admin-view="members">成员</button>
+              <button type="button" data-admin-view="keys">接口</button>
+              <button type="button" data-admin-view="usage">用量</button>
+              <button type="button" data-admin-view="audit">审计</button>
+              <button type="button" data-admin-view="feedback">反馈</button>
+              <button type="button" data-admin-view="email">邮件</button>
+              <button type="button" data-admin-view="billing">账单</button>
+              <button type="button" data-admin-view="errors">错误</button>
+            </nav>
+
+            <section class="cloud-admin-workspace-panel">
+              <div class="cloud-admin-workspace-panel-head">
+                <h2 id="adminPanelTitle">概览</h2>
+                <div class="cloud-admin-workspace-actions">
+                  <button id="adminExportOrgBtn" type="button">导出组织</button>
+                  <button id="adminExportUsageBtn" type="button">导出用量 CSV</button>
+                  <button id="adminExportAuditBtn" type="button">导出审计 CSV</button>
+                  <button id="adminDeletionRequestBtn" type="button">创建删除草案</button>
+                </div>
+              </div>
+              <div id="adminContent" class="cloud-admin-workspace-content">等待加载。</div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </main>
+    <div class="toast-region admin-toast-region" id="adminToastRegion" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>

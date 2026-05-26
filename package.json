@@ -6,8 +6,13 @@
   "type": "module",
   "scripts": {
     "build": "esbuild src/main.js --bundle --format=iife --target=es2022 --outfile=build/bundle.js",
-    "check": "node --check app.js && node --check src/main.js && node --check e2e/serve-static.mjs && node --check e2e/run-e2e.mjs && node --check playwright.config.js && node --check build/bundle.js",
-    "test": "node --test test/*.test.js",
+    "check": "node --check app.js && node --check src/main.js && node --check src/admin/adminPage.js && node --check e2e/serve-static.mjs && node --check e2e/run-e2e.mjs && node --check playwright.config.js && node --check build/bundle.js && npm run server:check",
+    "test": "node --test test/*.test.js && npm run server:test",
+    "server:dev": "node server/src/server.js",
+    "server:check": "node server/scripts/check.mjs",
+    "server:test": "node --test server/tests/*.test.js",
+    "server:backup": "node server/scripts/backup.mjs",
+    "server:backup:verify": "node server/scripts/verify-backup.mjs",
     "test:e2e": "npm run build && node e2e/run-e2e.mjs"
   },
   "devDependencies": {
@@ -17,6 +22,7 @@
   "dependencies": {
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
+    "pg": "^8.13.1",
     "pptxgenjs": "^4.0.1"
   }
 }

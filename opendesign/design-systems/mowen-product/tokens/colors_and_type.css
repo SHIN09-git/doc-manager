@@ -1,0 +1,25 @@
+:root {
+  --mowen-ink-950: #0d1512;
+  --mowen-ink-800: #23302b;
+  --mowen-ink-600: #4f5d57;
+  --mowen-ink-400: #9aa39c;
+  --mowen-paper-50: #fbfaf6;
+  --mowen-paper-100: #f4f3ed;
+  --mowen-paper-200: #e5e4dc;
+  --mowen-canvas: #eef0e9;
+  --mowen-surface: #fffefa;
+  --mowen-accent-700: #12584f;
+  --mowen-accent-600: #176b60;
+  --mowen-accent-50: #edf5f1;
+  --mowen-warm-500: #b7782b;
+  --mowen-warm-50: #fbf3e4;
+  --mowen-danger-600: #bd433d;
+  --mowen-radius: 8px;
+  --mowen-shadow-panel: 0 18px 42px rgba(28, 43, 39, 0.1);
+  --mowen-shadow-control: 0 1px 2px rgba(28, 43, 39, 0.08);
+  --mowen-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --mowen-font-editor: "Times New Roman", "Songti SC", "SimSun", serif;
+  --mowen-body: 14px;
+  --mowen-caption: 12px;
+  --mowen-title: 30px;
+}

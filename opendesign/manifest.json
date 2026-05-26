@@ -1,0 +1,29 @@
+{
+  "generated": "2026-05-23T00:00:00+08:00",
+  "sections": [
+    {
+      "id": "design-systems",
+      "label": "Design Systems",
+      "groups": [
+        {
+          "slug": "mowen-product",
+          "files": [
+            {
+              "label": "README.md",
+              "path": "design-systems/mowen-product/README.md"
+            },
+            {
+              "label": "SKILL.md",
+              "path": "design-systems/mowen-product/SKILL.md"
+            },
+            {
+              "label": "colors_and_type.css",
+              "path": "design-systems/mowen-product/tokens/colors_and_type.css"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+

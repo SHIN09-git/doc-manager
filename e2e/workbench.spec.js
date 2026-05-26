@@ -716,6 +716,281 @@ test("PPT preview modal expands the generated HTML preview", async ({ page }) =>
   await expect(page.locator("#openPptPreviewBtn")).toBeFocused();
 });
 
+test("cloud panel keeps local mode safe before login", async ({ page }) => {
+  await page.goto("/index.html");
+  await page.locator("#cloudTopBtn").click();
+
+  await expect(page.locator("#cloudPanel")).toBeVisible();
+  await expect(page.locator("#cloudStatusLabel")).toContainText("本地模式");
+  await expect(page.locator("#cloudBaseUrlInput")).toHaveValue("http://127.0.0.1:8787/api");
+  await expect(page.locator("#cloudAccountCard")).toContainText("未连接云端");
+  await expect(page.locator("#cloudSaveDocBtn")).toBeDisabled();
+  await expect(page.locator("#cloudUseAiProxyBtn")).toBeDisabled();
+  await expect(page.locator("#cloudCheckoutBtn")).toBeDisabled();
+  await expect(page.locator("#cloudBillingReport")).toContainText("登录云端后显示套餐");
+});
+
+test("admin workspace hash is guarded before login", async ({ page }) => {
+  await page.goto("/index.html#admin");
+
+  await expect(page.locator("#cloudPanel")).toBeVisible();
+  await expect(page.locator("#cloudStatusLabel")).toContainText("本地模式");
+  await expect(page.locator("#cloudAdminWorkspace")).toBeHidden();
+});
+
+test("standalone admin page shows login gate before cloud session", async ({ page }) => {
+  await page.goto("/admin.html");
+
+  await expect(page.locator("#adminTitle")).toContainText("管理后台");
+  await expect(page.locator("#adminLoginView")).toBeVisible();
+  await expect(page.locator("#adminBaseUrlInput")).toHaveValue("http://127.0.0.1:8787/api");
+  await expect(page.locator("#adminMainView")).toBeHidden();
+});
+
+test("standalone admin page supports core management actions with API session", async ({ page }) => {
+  const adminApiBaseKey = "mowen-admin:api-base-url";
+  await page.addInitScript((storageKey) => {
+    localStorage.setItem(storageKey, "http://127.0.0.1:4173/mock-api");
+    window.__openedAdminUrls = [];
+    window.open = (url) => {
+      window.__openedAdminUrls.push(String(url));
+      return null;
+    };
+  }, adminApiBaseKey);
+
+  let orgName = "示例组织";
+  let memberRole = "member";
+  let invitation = null;
+  let adminPreferences = { audit_filters: [] };
+  let adminPreferenceWriteCount = 0;
+  let feedbackBatchWriteCount = 0;
+  let apiKeys = [{ id: "key-1", provider: "openai-compatible", key_hint: "sk-…test", updated_at: "2026-05-24T00:00:00.000Z" }];
+  const usageRows = [
+    { id: "use-1", task_type: "draft", status: "success", total_tokens: 1200, estimated_cost: 0.03, created_at: "2026-05-23T01:00:00.000Z" },
+    { id: "use-2", task_type: "skill_build", status: "failed", total_tokens: 340, estimated_cost: 0, created_at: "2026-05-24T02:00:00.000Z" },
+  ];
+  const auditRows = [
+    { id: "aud-1", action: "organization.update", target_type: "organization", created_at: "2026-05-24T03:00:00.000Z" },
+    { id: "aud-2", action: "api_key.create", target_type: "api_key", created_at: "2026-05-24T04:00:00.000Z" },
+  ];
+  let feedbacks = [
+    { id: "fb-1", message: "需要优化导出", created_at: "2026-05-24T05:00:00.000Z", metadata: { status: "pending" } },
+    { id: "fb-2", message: "希望后台更清晰", created_at: "2026-05-24T06:00:00.000Z", metadata: { status: "processing" } },
+  ];
+  let recentErrors = [
+    { id: "err-1", level: "error", type: "api", message: "AI proxy failed", created_at: "2026-05-24T07:00:00.000Z", metadata: { triage_status: "open" } },
+    { id: "err-2", level: "warn", type: "email", message: "Email bounced", created_at: "2026-05-24T08:00:00.000Z", metadata: { triage_status: "open", sla_at: "2026-05-27" } },
+  ];
+  let manualOrders = [
+    { id: "mop-1", title: "1000 点 AI 额度", package_id: "credits_1000", amount_cny: 50, credits: 1000, plan: "", duration_days: 0, payment_channel: "wechat", status: "pending", created_at: "2026-05-24T09:00:00.000Z" },
+  ];
+
+  await page.route("**/mock-api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname.replace("/mock-api", "") || "/";
+    const method = request.method();
+    let body = {};
+    try {
+      body = request.postDataJSON();
+    } catch {
+      body = {};
+    }
+    const json = (status, payload) => route.fulfill({
+      status,
+      contentType: "application/json",
+      body: JSON.stringify(payload),
+    });
+
+    if (path === "/me" && method === "GET") {
+      return json(200, {
+        authenticated: true,
+        user: { id: "usr-1", email: "owner@example.com" },
+        organizations: [{ id: "org-1", name: orgName, plan: "free" }],
+        organization: { id: "org-1", name: orgName, plan: "free" },
+        membership: { id: "mem-1", role: "owner", organization_id: "org-1", user_id: "usr-1" },
+      });
+    }
+
+    if (path === "/admin/dashboard" && method === "GET") {
+      return json(200, {
+        organization: { id: "org-1", name: orgName, plan: "free" },
+        members: [
+          { id: "mem-1", role: "owner", user_id: "usr-1", created_at: "2026-05-24T00:00:00.000Z", user: { email: "owner@example.com" } },
+          { id: "mem-2", role: memberRole, user_id: "usr-2", created_at: "2026-05-24T00:00:00.000Z", user: { email: "member@example.com" } },
+        ],
+        invitations: invitation ? [invitation] : [],
+        usage: { request_count: 4, failed_count: 1, estimated_cost: 0.03 },
+        limits: { user_daily: 100, org_daily: 500, plan: "free" },
+        budget: { today_cost: 0.03, month_cost: 0.03, daily_budget_cny: 1, monthly_budget_cny: 10 },
+        feedbacks,
+        recent_errors: recentErrors,
+        email_deliveries: [],
+        billing: { payment_webhooks: [], manual_orders: manualOrders, credits: { total_balance: 0, account_count: 0 } },
+      });
+    }
+
+    if (path === "/usage/history" && method === "GET") return json(200, { usage: usageRows });
+    if (path === "/audit" && method === "GET") return json(200, { audit_logs: auditRows });
+    if (path === "/billing/summary" && method === "GET") {
+      return json(200, {
+        organization: { id: "org-1", name: orgName, plan: "free" },
+        limits: { user_daily: 100, org_daily: 500 },
+        usage: { request_count: 4, failed_count: 1, estimated_cost: 0.03 },
+        budget: { today_cost: 0.03, month_cost: 0.03, daily_budget_cny: 1, monthly_budget_cny: 10 },
+        payment_webhooks: [],
+        manual_orders: manualOrders,
+        credits: { balance: 0 },
+        manual_payment: { packages: [{ id: "credits_1000", title: "1000 点 AI 额度", amount_cny: 50, credits: 1000 }], methods: [] },
+        checkout: { enabled: true, available_plans: [{ plan: "pro", price_id: "price_pro" }] },
+      });
+    }
+    if (path === "/api-keys" && method === "GET") return json(200, { api_keys: apiKeys });
+    if (path === "/admin/preferences" && method === "GET") return json(200, { preferences: adminPreferences });
+    if (path === "/admin/preferences" && method === "PUT") {
+      adminPreferenceWriteCount += 1;
+      adminPreferences = body.preferences || body || {};
+      return json(200, { preferences: adminPreferences });
+    }
+    if (path === "/admin/preferences" && method === "DELETE") {
+      adminPreferences = { audit_filters: [] };
+      return json(200, { preferences: adminPreferences });
+    }
+    if (path === "/api-keys" && method === "POST") {
+      apiKeys = [{ id: "key-2", provider: body.provider, key_hint: "sk-…live", updated_at: "2026-05-24T00:00:00.000Z" }];
+      return json(201, { api_key: apiKeys[0] });
+    }
+    if (path === "/api-keys/key-2" && method === "DELETE") {
+      apiKeys = [];
+      return json(200, { api_key: { id: "key-2", disabled_at: "2026-05-24T00:00:00.000Z" } });
+    }
+    if (path === "/orgs/org-1" && method === "PUT") {
+      orgName = body.name;
+      return json(200, { organization: { id: "org-1", name: orgName, plan: "free" } });
+    }
+    if (path === "/orgs/org-1/invitations" && method === "POST") {
+      invitation = { id: "inv-1", email: body.email, role: body.role, token: "invite-token", expires_at: "2026-06-01T00:00:00.000Z" };
+      return json(201, { invitation });
+    }
+    if (path === "/orgs/org-1/members/mem-2" && method === "PUT") {
+      memberRole = body.role;
+      return json(200, { membership: { id: "mem-2", role: memberRole } });
+    }
+    if (path === "/billing/checkout" && method === "POST") {
+      return json(201, { checkout: { plan: body.plan, price_id: body.price_id, checkout_url: `http://127.0.0.1:4173/checkout?plan=${body.plan}` } });
+    }
+    if (path === "/billing/manual-orders/mop-1/review" && method === "POST") {
+      manualOrders = manualOrders.map((item) =>
+        item.id === "mop-1" ? { ...item, status: body.action === "reject" ? "rejected" : "approved", reviewed_at: "2026-05-24T10:00:00.000Z" } : item);
+      return json(200, { order: manualOrders[0], credits: { balance: 1000 } });
+    }
+    if (path.startsWith("/feedback/") && path.endsWith("/status") && method === "POST") {
+      const feedbackId = path.split("/")[2];
+      feedbacks = feedbacks.map((item) =>
+        item.id === feedbackId ? { ...item, metadata: { ...(item.metadata || {}), status: body.status, assignee: body.assignee || item.metadata.assignee || "", sla_at: body.sla_at || item.metadata.sla_at || "", note: body.note || item.metadata.note || "" } } : item);
+      return json(200, { feedback: feedbacks.find((item) => item.id === feedbackId) });
+    }
+    if (path === "/feedback/batch-status" && method === "POST") {
+      feedbackBatchWriteCount += 1;
+      const ids = new Set(body.feedback_ids || body.feedbackIds || body.ids || []);
+      feedbacks = feedbacks.map((item) =>
+        ids.has(item.id) ? { ...item, metadata: { ...(item.metadata || {}), status: body.status || "processing" } } : item);
+      return json(200, { count: ids.size, feedbacks: feedbacks.filter((item) => ids.has(item.id)) });
+    }
+    if (path.startsWith("/ops/events/") && path.endsWith("/triage") && method === "POST") {
+      const errorId = path.split("/")[3];
+      recentErrors = recentErrors.map((item) =>
+        item.id === errorId ? { ...item, metadata: { ...(item.metadata || {}), triage_status: body.status || "open", priority: body.priority || "normal", assignee: body.assignee || "", sla_at: body.sla_at || "", note: body.note || "" } } : item);
+      return json(200, { event: recentErrors.find((item) => item.id === errorId) });
+    }
+
+    return json(404, { error: { message: `missing route ${method} ${path}` } });
+  });
+
+  await page.goto("/admin.html");
+
+  await expect(page.locator("#adminMainView")).toBeVisible();
+  await expect(page.locator("#adminSummary")).toContainText("接口配置");
+
+  await page.locator('[data-admin-form="org-name"] input[name="name"]').fill("正式运营组织");
+  await page.locator('[data-admin-form="org-name"] button[type="submit"]').click();
+  await expect(page.locator("#adminSubtitle")).toContainText("正式运营组织");
+
+  await page.locator('[data-admin-view="members"]').click();
+  await page.locator('[data-admin-form="invite-member"] input[name="email"]').fill("new-member@example.com");
+  await page.locator('[data-admin-form="invite-member"] button[type="submit"]').click();
+  await expect(page.locator("#adminContent")).toContainText("new-member@example.com");
+  await expect(page.locator('[data-admin-action="invite-copy"]')).toBeEnabled();
+  await page.locator('[data-member-role="mem-2"]').selectOption("admin");
+  await page.locator('[data-admin-action="member-role"][data-member-id="mem-2"]').click();
+  await expect(page.locator("#adminContent")).toContainText("admin");
+
+  await page.locator('[data-admin-view="keys"]').click();
+  await page.locator('[data-admin-form="api-key"] input[name="provider"]').fill("deepseek");
+  await page.locator('[data-admin-form="api-key"] input[name="apiKey"]').fill("sk-live-value");
+  await page.locator('[data-admin-form="api-key"] button[type="submit"]').click();
+  await expect(page.locator("#adminContent")).toContainText("deepseek");
+  await page.locator('[data-admin-action="key-delete"]').click();
+  await expect(page.locator("#adminConfirmModal")).toBeVisible();
+  await page.locator("#adminConfirmModal [data-admin-confirm-ok]").click();
+  await expect(page.locator("#adminContent")).toContainText("暂无接口配置");
+
+  await page.locator('[data-admin-view="usage"]').click();
+  await expect(page.locator("#adminContent")).toContainText("总 tokens");
+  await expect(page.locator("#adminContent")).toContainText("估算成本");
+  await expect(page.locator("#adminContent")).toContainText("今日成本");
+  await expect(page.locator("#adminContent")).toContainText("任务成本估算");
+  await expect(page.locator(".admin-trend-bar")).toHaveCount(2);
+  await expect(page.locator("#adminContent")).toContainText("skill_build");
+  await page.locator('[data-admin-action="copy-usage"]').first().click();
+
+  await page.locator('[data-admin-view="audit"]').click();
+  await expect(page.locator("#adminContent")).toContainText("动作分布");
+  await expect(page.locator("#adminContent")).toContainText("organization.update");
+  await page.locator('[data-admin-form="audit-filter"] input[name="filterName"]').fill("接口变更");
+  await page.locator('[data-admin-form="audit-filter"] button[type="submit"]').click();
+  await expect(page.locator(".admin-filter-pill")).toContainText("接口变更");
+  await expect.poll(() => adminPreferenceWriteCount).toBeGreaterThan(0);
+  await page.locator('[data-admin-action="audit-filter-apply"]').first().click();
+  await page.locator('[data-admin-action="copy-audit"]').first().click();
+
+  await page.locator('[data-admin-view="feedback"]').click();
+  await expect(page.locator("#adminContent")).toContainText("反馈处理");
+  const firstFeedbackForm = page.locator('[data-admin-form="feedback-triage"]').first();
+  await firstFeedbackForm.locator('input[name="assignee"]').fill("运营同学");
+  await firstFeedbackForm.locator('input[name="sla_at"]').fill("2026-05-30");
+  await firstFeedbackForm.locator('input[name="note"]').fill("已排期跟进");
+  await firstFeedbackForm.locator('button[type="submit"]').click();
+  await expect(page.locator("#adminContent")).toContainText("运营同学");
+  await page.locator('[data-admin-action="feedback-batch"][data-status="resolved"]').click();
+  await expect(page.locator("#adminConfirmModal")).toBeVisible();
+  await page.locator("#adminConfirmModal [data-admin-confirm-ok]").click();
+  await expect(page.locator("#adminContent")).toContainText("已解决");
+  expect(feedbackBatchWriteCount).toBe(1);
+
+  await page.locator('[data-admin-view="errors"]').click();
+  await expect(page.locator("#adminContent")).toContainText("错误事件");
+  await page.locator("[data-admin-error-level]").selectOption("warn");
+  await expect(page.locator("#adminContent")).toContainText("Email bounced");
+  await expect(page.locator("#adminContent")).not.toContainText("AI proxy failed");
+  const errorForm = page.locator('[data-admin-form="error-triage"]').first();
+  await errorForm.locator('select[name="status"]').selectOption("processing");
+  await errorForm.locator('select[name="priority"]').selectOption("high");
+  await errorForm.locator('input[name="assignee"]').fill("技术负责人");
+  await errorForm.locator('input[name="sla_at"]').fill("2026-05-31");
+  await errorForm.locator('input[name="note"]').fill("检查邮件服务商回调");
+  await errorForm.locator('button[type="submit"]').click();
+  await expect(page.locator("#adminContent")).toContainText("技术负责人");
+  await page.locator('[data-admin-action="copy-visible-errors"]').click();
+
+  await page.locator('[data-admin-view="billing"]').click();
+  await expect(page.locator("#adminContent")).toContainText("人工确认充值");
+  await page.locator('[data-admin-action="manual-order-approve"]').click();
+  await expect(page.locator("#adminContent")).toContainText("已确认");
+  await page.locator('[data-admin-action="billing-checkout"]').click();
+  await expect.poll(() => page.evaluate(() => window.__openedAdminUrls.at(-1))).toContain("plan=pro");
+});
+
 test("routes style panel drops into the current skill examples", async ({ page }) => {
   await page.goto("/index.html");
   await page.locator('[data-tab="style"]').click();
