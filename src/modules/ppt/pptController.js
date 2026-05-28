@@ -50,6 +50,8 @@ export function createPptController({
       if (ui.pptDeckSpec) renderPptQualityReport(ui.pptDeckSpec);
     });
     els.pptOutput?.addEventListener("input", handlePptOutputInput);
+    els.pptSlideEditor?.addEventListener("input", handlePptSlideEditorInput);
+    els.pptSlideEditor?.addEventListener("change", handlePptSlideEditorInput);
     els.openPptPreviewBtn?.addEventListener("click", openPptPreviewModal);
     els.closePptPreviewBtn?.addEventListener("click", closePptPreviewModal);
     els.pptPreviewOverlay?.addEventListener("click", (event) => {
@@ -130,6 +132,7 @@ export function createPptController({
       ui.pptDraft = JSON.stringify(spec, null, 2);
       els.pptOutput.value = ui.pptDraft;
       renderPptPreview(spec);
+      renderPptSlideEditor(spec);
       renderPptQualityReport(spec);
       toast(`已生成 PPTX 草稿，点击“下载 PPTX”保存到：${getDownloadLocation(`${sanitizeFileName(title)}.pptx`)}`);
     });
@@ -214,6 +217,7 @@ export function createPptController({
         ...getPptOptions(),
       });
       renderPptPreview(ui.pptDeckSpec);
+      renderPptSlideEditor(ui.pptDeckSpec);
       renderPptQualityReport(ui.pptDeckSpec);
     } catch {
       // Allow users to keep editing partial JSON without interrupting input.
@@ -224,6 +228,94 @@ export function createPptController({
     const html = spec ? renderPptSpecPreview(spec) : "";
     if (els.pptPreview) els.pptPreview.srcdoc = html;
     if (els.pptPreviewModalFrame) els.pptPreviewModalFrame.srcdoc = html;
+  }
+
+  function renderPptSlideEditor(spec) {
+    if (!els.pptSlideEditor) return;
+    const slides = Array.isArray(spec?.slides) ? spec.slides : [];
+    if (!slides.length) {
+      els.pptSlideEditor.innerHTML =
+        `<div class="empty-state">生成或粘贴 PPT 结构后，可以在这里逐页编辑标题、正文、要点和备注。</div>`;
+      return;
+    }
+    els.pptSlideEditor.innerHTML = slides
+      .map((slide, index) => {
+        const typeOptions = getPptSlideTypeOptions(slide.type);
+        return `<article class="ppt-slide-edit-card" data-ppt-slide-card="${index}">
+          <div class="ppt-slide-edit-head">
+            <strong>第 ${index + 1} 页</strong>
+            <select data-ppt-slide-index="${index}" data-ppt-slide-field="type" aria-label="第 ${index + 1} 页版式">
+              ${typeOptions}
+            </select>
+          </div>
+          <label>
+            <span>标题</span>
+            <input type="text" data-ppt-slide-index="${index}" data-ppt-slide-field="title" value="${escapeHtml(slide.title || "")}" />
+          </label>
+          <label>
+            <span>正文</span>
+            <textarea rows="3" data-ppt-slide-index="${index}" data-ppt-slide-field="body">${escapeHtml(slide.body || "")}</textarea>
+          </label>
+          <label>
+            <span>要点，每行一条</span>
+            <textarea rows="3" data-ppt-slide-index="${index}" data-ppt-slide-field="bullets">${escapeHtml((slide.bullets || []).join("\n"))}</textarea>
+          </label>
+          <label>
+            <span>演讲备注</span>
+            <textarea rows="2" data-ppt-slide-index="${index}" data-ppt-slide-field="notes">${escapeHtml(slide.notes || "")}</textarea>
+          </label>
+        </article>`;
+      })
+      .join("");
+  }
+
+  function getPptSlideTypeOptions(currentType) {
+    return [
+      ["cover", "封面"],
+      ["section", "章节"],
+      ["content", "正文"],
+      ["bullets", "要点"],
+      ["timeline", "时间线"],
+      ["comparison", "对比"],
+      ["quote", "引语"],
+      ["data", "数据"],
+      ["roadmap", "路线图"],
+      ["orgchart", "组织结构"],
+      ["imageText", "图文"],
+      ["appendix", "附录"],
+      ["closing", "结束页"],
+    ]
+      .map(([value, label]) => {
+        const selected = value === currentType ? " selected" : "";
+        return `<option value="${value}"${selected}>${label}</option>`;
+      })
+      .join("");
+  }
+
+  function handlePptSlideEditorInput(event) {
+    const control = event.target.closest?.("[data-ppt-slide-field]");
+    if (!control || !ui.pptDeckSpec) return;
+    const index = Number.parseInt(control.dataset.pptSlideIndex, 10);
+    if (!Number.isFinite(index) || !ui.pptDeckSpec.slides?.[index]) return;
+    const field = control.dataset.pptSlideField;
+    const slides = ui.pptDeckSpec.slides.map((slide) => ({
+      ...slide,
+      bullets: Array.isArray(slide.bullets) ? [...slide.bullets] : [],
+      table: slide.table ? { ...slide.table } : null,
+    }));
+    const slide = slides[index];
+    const value = control.value;
+    if (field === "bullets") {
+      slide.bullets = value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    } else if (["type", "title", "body", "notes"].includes(field)) {
+      slide[field] = value;
+    }
+    const nextSpec = normalizePptSpec({ ...ui.pptDeckSpec, slides }, getPptOptions());
+    ui.pptDeckSpec = nextSpec;
+    ui.pptDraft = JSON.stringify(nextSpec, null, 2);
+    if (els.pptOutput) els.pptOutput.value = ui.pptDraft;
+    renderPptPreview(nextSpec);
+    renderPptQualityReport(nextSpec);
   }
 
   function openPptPreviewModal() {

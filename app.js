@@ -83,13 +83,8 @@ const ui = {
   mobileView: "editor",
   pptPreviewReturnFocus: null,
   trashModalReturnFocus: null,
-  cloudAdminReturnFocus: null,
-  cloudAdminVisibleErrors: [],
-  cloudAdminVisiblePayments: [],
-  cloudAdminVisibleEmails: [],
-  cloudAdminWorkspaceView: "overview",
-  cloudAdminWorkspaceReturnHash: "",
   skillBuilderReturnFocus: null,
+  mainView: "editor",
   generatedDraft: "",
   pptDraft: "",
   pptDeckSpec: null,
@@ -97,7 +92,8 @@ const ui = {
 
 const els = {};
 const EDITOR_UNDO_LIMIT = 80;
-const DEFAULT_CLOUD_API_BASE_URL = "http://127.0.0.1:8787/api";
+const LOCAL_CLOUD_API_BASE_URL = "http://127.0.0.1:8787/api";
+const DEFAULT_CLOUD_API_BASE_URL = getDefaultCloudApiBaseUrl();
 const aiClient = createAiClient({
   getSettings: () => state.settings || {},
   notify: (message, tone) => toast(message, tone),
@@ -186,6 +182,7 @@ const documentRenderer = createDocumentRenderer({
   onSelectDocument: (docId) => {
     saveEditor(false);
     ui.selectedDocId = docId;
+    switchMainView("editor");
     if (layoutController.isMobileWorkspace()) layoutController.setMobileView("editor");
     persist();
     eventBus.emit(EVENTS.RENDER_DOC_LIST);
@@ -304,6 +301,8 @@ const pptController = createPptController({
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindElements();
+  mountCloudPage();
+  mountPptPage();
   bindEventBus();
   await hydrateState();
   initializeMissingData();
@@ -339,6 +338,7 @@ function bindElements() {
   [
     "storageLabel",
     "workspace",
+    "editorPanel",
     "leftWorkspaceResizer",
     "rightWorkspaceResizer",
     "themeToggle",
@@ -397,6 +397,7 @@ function bindElements() {
     "overwriteDraftBtn",
     "insertDraftBtn",
     "pptPanel",
+    "pptBackToEditorBtn",
     "pptTitleInput",
     "pptStyleSelect",
     "pptSlideCountSelect",
@@ -409,6 +410,7 @@ function bindElements() {
     "downloadPptBtn",
     "savePptStyleBtn",
     "pptOutput",
+    "pptSlideEditor",
     "pptQualityStatus",
     "pptQualityReport",
     "pptPreview",
@@ -469,6 +471,7 @@ function bindElements() {
     "skillDetailCloseBtn",
     "apiSavedLabel",
     "cloudPanel",
+    "cloudBackToEditorBtn",
     "providerSelect",
     "baseUrlInput",
     "endpointPathInput",
@@ -496,24 +499,13 @@ function bindElements() {
     "cloudRequestResetBtn",
     "cloudConfirmResetBtn",
     "cloudLogoutAllBtn",
-    "cloudInviteEmailInput",
-    "cloudInviteRoleSelect",
-    "cloudInviteBtn",
-    "cloudMembersList",
-    "cloudInvitationsList",
     "cloudSaveDocBtn",
     "cloudPullDocsBtn",
     "cloudSaveWriterBtn",
     "cloudPullWritersBtn",
-    "cloudModelInput",
-    "cloudApiKeyInput",
-    "cloudSaveApiKeyBtn",
-    "cloudUseAiProxyBtn",
     "cloudUsageLabel",
     "cloudUsageReport",
     "cloudBillingLabel",
-    "cloudCheckoutPlanSelect",
-    "cloudCheckoutBtn",
     "cloudManualRechargeCard",
     "cloudCreditBalanceLabel",
     "cloudManualPackageSelect",
@@ -525,53 +517,26 @@ function bindElements() {
     "cloudBillingReport",
     "cloudExportDataBtn",
     "cloudDeleteAccountBtn",
-    "cloudRecentErrorsBtn",
-    "cloudAdminDashboardBtn",
     "cloudFeedbackInput",
     "cloudSendFeedbackBtn",
     "cloudOpsReport",
-    "cloudAdminModal",
-    "closeCloudAdminModalBtn",
-    "cloudAdminRefreshBtn",
-    "cloudAdminExportOrgBtn",
-    "cloudAdminExportUsageCsvBtn",
-    "cloudAdminExportAuditCsvBtn",
-    "cloudAdminDeletionRequestBtn",
-    "cloudAdminOverview",
-    "cloudAdminMembers",
-    "cloudAdminUsageFrom",
-    "cloudAdminUsageTo",
-    "cloudAdminUsageTask",
-    "cloudAdminUsageStatus",
-    "cloudAdminUsageList",
-    "cloudAdminAuditFrom",
-    "cloudAdminAuditTo",
-    "cloudAdminAuditAction",
-    "cloudAdminAuditList",
-    "cloudAdminFeedbackStatusFilter",
-    "cloudAdminFeedbackList",
-    "cloudAdminEmailInput",
-    "cloudAdminEmailTemplate",
-    "cloudAdminEmailStatus",
-    "cloudAdminEmailList",
-    "cloudAdminOpsList",
-    "cloudAdminWorkspace",
-    "cloudAdminWorkspaceTitle",
-    "cloudAdminWorkspaceSubtitle",
-    "cloudAdminWorkspaceRefreshBtn",
-    "cloudAdminWorkspaceOrgExportBtn",
-    "cloudAdminWorkspaceExportUsageCsvBtn",
-    "cloudAdminWorkspaceExportAuditCsvBtn",
-    "closeCloudAdminWorkspaceBtn",
-    "cloudAdminWorkspaceSummary",
-    "cloudAdminWorkspaceNav",
-    "cloudAdminWorkspacePanelTitle",
-    "cloudAdminWorkspaceDeletionRequestBtn",
-    "cloudAdminWorkspaceContent",
     "toastRegion",
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
+}
+
+function mountCloudPage() {
+  if (!els.editorPanel || !els.cloudPanel) return;
+  els.editorPanel.appendChild(els.cloudPanel);
+}
+
+function mountPptPage() {
+  if (!els.editorPanel || !els.pptPanel) return;
+  els.editorPanel.appendChild(els.pptPanel);
+  if (els.pptPreviewOverlay && els.pptPreviewOverlay.parentElement !== document.body) {
+    document.body.appendChild(els.pptPreviewOverlay);
+  }
 }
 
 function initializeMissingData() {
@@ -739,12 +704,12 @@ function bindEvents() {
   els.backupBtn.addEventListener("click", exportWorkspaceBackup);
   trashController.bindEvents();
   els.apiTopBtn.addEventListener("click", () => {
+    switchMainView("editor");
     switchTab("api");
     layoutController.openResponsiveTools();
   });
   els.cloudTopBtn.addEventListener("click", () => {
-    switchTab("cloud");
-    layoutController.openResponsiveTools();
+    switchMainView(ui.mainView === "cloud" ? "editor" : "cloud");
     renderCloudPanel();
   });
   layoutController.bindEvents();
@@ -795,8 +760,6 @@ function bindEvents() {
     if (event.key === "Escape") {
       hideEditorMenu({ restoreFocus: true });
       hideSkillMentionPanel();
-      if (els.cloudAdminWorkspace && !els.cloudAdminWorkspace.hidden) closeCloudAdminWorkspace();
-      if (els.cloudAdminModal && !els.cloudAdminModal.hidden) closeCloudAdminModal();
       if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
       layoutController.closeResponsiveInspector();
     }
@@ -819,7 +782,9 @@ function bindEvents() {
     const button = event.target.closest(".tab");
     if (button) {
       switchTab(button.dataset.tab);
-      if (layoutController.isMobileWorkspace()) layoutController.setMobileView("tools");
+      if (layoutController.isMobileWorkspace()) {
+        layoutController.setMobileView(button.dataset.tab === "ppt" ? "editor" : "tools");
+      }
     }
   });
 
@@ -916,6 +881,8 @@ function bindEvents() {
   els.clearApiBtn.addEventListener("click", clearApiSettings);
   els.cloudBaseUrlInput.addEventListener("change", saveCloudBaseUrlFromInput);
   els.cloudRefreshBtn.addEventListener("click", refreshCloudStatus);
+  els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
+  els.pptBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
   els.cloudLoginBtn.addEventListener("click", cloudLogin);
   els.cloudRegisterBtn.addEventListener("click", cloudRegister);
   els.cloudLogoutBtn.addEventListener("click", cloudLogout);
@@ -924,65 +891,15 @@ function bindEvents() {
   els.cloudRequestResetBtn.addEventListener("click", cloudRequestPasswordReset);
   els.cloudConfirmResetBtn.addEventListener("click", cloudConfirmPasswordReset);
   els.cloudLogoutAllBtn.addEventListener("click", cloudLogoutAllDevices);
-  els.cloudInviteBtn.addEventListener("click", cloudInviteMember);
-  els.cloudPanel.addEventListener("click", handleCloudPanelAction);
   els.cloudSaveDocBtn.addEventListener("click", cloudSaveCurrentDocument);
   els.cloudPullDocsBtn.addEventListener("click", cloudPullDocuments);
   els.cloudSaveWriterBtn.addEventListener("click", cloudSaveCurrentWriter);
   els.cloudPullWritersBtn.addEventListener("click", cloudPullWriters);
-  els.cloudModelInput.addEventListener("change", () => {
-    state.cloud.model = els.cloudModelInput.value.trim();
-    persist();
-    renderCloudPanel();
-  });
-  els.cloudSaveApiKeyBtn.addEventListener("click", cloudSaveApiKey);
-  els.cloudUseAiProxyBtn.addEventListener("click", enableCloudAiProxy);
-  els.cloudCheckoutBtn?.addEventListener("click", cloudCreateCheckout);
   els.cloudManualOrderBtn?.addEventListener("click", cloudSubmitManualOrder);
   els.cloudManualPaymentMethodSelect?.addEventListener("change", renderCloudManualPaymentMethods);
   els.cloudExportDataBtn.addEventListener("click", cloudExportMyData);
   els.cloudDeleteAccountBtn.addEventListener("click", cloudDeleteAccount);
-  els.cloudRecentErrorsBtn.addEventListener("click", cloudLoadRecentErrors);
-  els.cloudAdminDashboardBtn.addEventListener("click", openStandaloneAdminPage);
   els.cloudSendFeedbackBtn.addEventListener("click", cloudSendFeedback);
-  els.closeCloudAdminModalBtn?.addEventListener("click", () => closeCloudAdminModal());
-  els.cloudAdminModal?.addEventListener("click", (event) => {
-    if (event.target === els.cloudAdminModal) closeCloudAdminModal();
-  });
-  els.cloudAdminModal?.addEventListener("click", handleCloudAdminAction);
-  [
-    els.cloudAdminUsageFrom,
-    els.cloudAdminUsageTo,
-    els.cloudAdminUsageTask,
-    els.cloudAdminUsageStatus,
-    els.cloudAdminAuditFrom,
-    els.cloudAdminAuditTo,
-    els.cloudAdminAuditAction,
-  ].forEach((input) => input?.addEventListener("change", () => cloudLoadAdminDashboard({ silent: true })));
-  els.cloudAdminFeedbackStatusFilter?.addEventListener("change", renderCloudAdminModal);
-  els.cloudAdminEmailTemplate?.addEventListener("change", renderCloudAdminModal);
-  els.cloudAdminEmailStatus?.addEventListener("change", renderCloudAdminModal);
-  els.cloudAdminEmailInput?.addEventListener("input", debounce(renderCloudAdminModal, 250));
-  els.cloudAdminUsageTask?.addEventListener("input", debounce(() => cloudLoadAdminDashboard({ silent: true }), 250));
-  els.cloudAdminAuditAction?.addEventListener("input", debounce(() => cloudLoadAdminDashboard({ silent: true }), 250));
-  els.cloudAdminRefreshBtn?.addEventListener("click", () => cloudLoadAdminDashboard());
-  els.cloudAdminExportOrgBtn?.addEventListener("click", cloudExportOrganizationData);
-  els.cloudAdminExportUsageCsvBtn?.addEventListener("click", cloudExportUsageCsv);
-  els.cloudAdminExportAuditCsvBtn?.addEventListener("click", cloudExportAuditCsv);
-  els.cloudAdminDeletionRequestBtn?.addEventListener("click", cloudRequestOrganizationDeletion);
-  els.closeCloudAdminWorkspaceBtn?.addEventListener("click", closeCloudAdminWorkspace);
-  els.cloudAdminWorkspaceRefreshBtn?.addEventListener("click", () => cloudLoadAdminDashboard({ button: els.cloudAdminWorkspaceRefreshBtn }));
-  els.cloudAdminWorkspaceOrgExportBtn?.addEventListener("click", cloudExportOrganizationData);
-  els.cloudAdminWorkspaceExportUsageCsvBtn?.addEventListener("click", cloudExportUsageCsv);
-  els.cloudAdminWorkspaceExportAuditCsvBtn?.addEventListener("click", cloudExportAuditCsv);
-  els.cloudAdminWorkspaceDeletionRequestBtn?.addEventListener("click", cloudRequestOrganizationDeletion);
-  els.cloudAdminWorkspaceNav?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-admin-workspace-view]");
-    if (!button) return;
-    ui.cloudAdminWorkspaceView = button.dataset.adminWorkspaceView || "overview";
-    renderCloudAdminWorkspace();
-  });
-  els.cloudAdminWorkspace?.addEventListener("click", handleCloudAdminAction);
   window.addEventListener("hashchange", handleHashRoute);
   handleHashRoute();
 }
@@ -1185,16 +1102,14 @@ function renderCloudPanel() {
   const cloud = state.cloud || {};
   const authenticated = Boolean(cloud.authenticated && cloud.user);
   const emailVerified = Boolean(cloud.user?.email_verified_at);
-  const canAdmin = authenticated && ["owner", "admin"].includes(cloud.membership?.role || "");
   const orgName = cloud.activeOrganization?.name || "未选择组织";
   els.cloudBaseUrlInput.value = cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL;
-  els.cloudModelInput.value = cloud.model || state.settings?.model || "gpt-4.1-mini";
   els.cloudStatusLabel.textContent = authenticated ? "已登录" : "本地模式";
   els.cloudStatusLabel.className = `status-pill ${authenticated ? "ready" : ""}`;
   els.cloudLogoutBtn.disabled = !authenticated;
   els.cloudAccountCard.innerHTML = authenticated
-    ? `<strong>${escapeHtml(cloud.user.email || "")}</strong><span>${escapeHtml(orgName)} · ${escapeHtml(cloud.membership?.role || "owner")} · ${emailVerified ? "邮箱已验证" : "邮箱未验证"}</span>`
-    : "<strong>未连接云端</strong><span>本地数据仍可正常使用，登录后可启用团队同步和云端 AI 代理。</span>";
+    ? `<strong>${escapeHtml(cloud.user.email || "")}</strong><span>${escapeHtml(orgName)} · ${escapeHtml(roleLabel(cloud.membership?.role || "owner"))} · ${emailVerified ? "邮箱已验证" : "邮箱未验证"}</span>`
+    : "<strong>未连接云端</strong><span>本地数据仍可正常使用，登录后可查看套餐、额度、费用明细并同步个人数据。</span>";
 
   [
     els.cloudSaveDocBtn,
@@ -1206,10 +1121,7 @@ function renderCloudPanel() {
     els.cloudLogoutAllBtn,
     els.cloudExportDataBtn,
     els.cloudDeleteAccountBtn,
-    els.cloudRecentErrorsBtn,
-    els.cloudAdminDashboardBtn,
     els.cloudSendFeedbackBtn,
-    els.cloudCheckoutBtn,
     els.cloudManualOrderBtn,
   ].forEach((button) => {
     if (button) button.disabled = !authenticated;
@@ -1222,44 +1134,6 @@ function renderCloudPanel() {
   ].forEach((field) => {
     if (field) field.disabled = !authenticated;
   });
-  if (els.cloudAdminDashboardBtn) {
-    els.cloudAdminDashboardBtn.hidden = authenticated && !canAdmin;
-    els.cloudAdminDashboardBtn.disabled = !authenticated || !canAdmin;
-  }
-
-  [
-    els.cloudInviteBtn,
-    els.cloudSaveApiKeyBtn,
-    els.cloudUseAiProxyBtn,
-  ].forEach((button) => {
-    if (button) button.disabled = !authenticated || !emailVerified;
-  });
-
-  if (els.cloudMembersList) {
-    els.cloudMembersList.innerHTML = authenticated && cloud.members?.length
-      ? cloud.members.map((member) => `
-        <div>
-          <strong>${escapeHtml(member.user?.name || member.user?.email || "")}</strong>
-          <span>${escapeHtml(member.role || "member")}</span>
-          <span class="cloud-row-actions">
-            ${member.role !== "owner" ? `<button type="button" data-cloud-action="member-role" data-member-id="${escapeHtml(member.id)}" data-role="${member.role === "admin" ? "member" : "admin"}">${member.role === "admin" ? "设为成员" : "设为管理员"}</button>` : ""}
-            ${member.role !== "owner" ? `<button type="button" data-cloud-action="member-remove" data-member-id="${escapeHtml(member.id)}">移除</button>` : ""}
-          </span>
-        </div>`).join("")
-      : "登录后显示成员。";
-  }
-  if (els.cloudInvitationsList) {
-    els.cloudInvitationsList.innerHTML = authenticated && cloud.invitations?.length
-      ? cloud.invitations.map((invitation) => `
-        <div>
-          <strong>${escapeHtml(invitation.email)}</strong>
-          <span>${escapeHtml(invitation.role)} · ${invitation.accepted_at ? "已接受" : "待接受"}</span>
-          <span class="cloud-row-actions">
-            ${!invitation.accepted_at && !invitation.revoked_at ? `<button type="button" data-cloud-action="invite-resend" data-invite-id="${escapeHtml(invitation.id)}">重发</button><button type="button" data-cloud-action="invite-revoke" data-invite-id="${escapeHtml(invitation.id)}">撤销</button>` : ""}
-          </span>
-        </div>`).join("")
-      : "暂无邀请。";
-  }
 
   const usage = cloud.usage;
   if (usage) {
@@ -1271,59 +1145,32 @@ function renderCloudPanel() {
     els.cloudUsageReport.innerHTML = [
       limits ? `<div>套餐：${escapeHtml(limits.plan || "free")} · 个人日限 ${limits.user_daily} · 组织日限 ${limits.org_daily}</div>` : "",
       `<div>总字数：${Number(usage.total_tokens || 0).toLocaleString("zh-CN")}</div>`,
-      `<div>预估成本：${Number(usage.estimated_cost || usage.estimated_cost_cents || 0)} 元</div>`,
+      `<div>预估费用：${formatCurrencyCny(usage.estimated_cost || usage.estimated_cost_cents || 0)}</div>`,
       taskRows,
     ].join("");
   } else {
     els.cloudUsageLabel.textContent = authenticated ? "等待统计" : "未登录";
-    els.cloudUsageReport.textContent = authenticated ? "暂无本月用量记录。" : "登录云端后显示本月 AI 调用用量。";
+    els.cloudUsageReport.textContent = authenticated ? "暂无本账号用量记录。" : "登录云端后显示本账号 AI 调用用量和费用估算。";
   }
 
-  renderCloudBilling(authenticated, canAdmin);
+  renderCloudBilling(authenticated);
 }
 
-function renderCloudBilling(authenticated, canAdmin) {
+function renderCloudBilling(authenticated) {
   if (!els.cloudBillingReport) return;
   const billing = state.cloud?.billing || null;
-  const options = billing?.checkout?.available_plans?.length
-    ? billing.checkout.available_plans
-    : [
-      { plan: "pro", price_id: "" },
-      { plan: "team", price_id: "" },
-    ];
-  const currentValue = els.cloudCheckoutPlanSelect?.value || "pro";
-  if (els.cloudCheckoutPlanSelect) {
-    els.cloudCheckoutPlanSelect.innerHTML = options.map((item) => {
-      const label = item.plan === "team" ? "Team" : item.plan === "pro" ? "Pro" : item.plan;
-      return `<option value="${escapeHtml(item.plan)}">${escapeHtml(label)}</option>`;
-    }).join("");
-    els.cloudCheckoutPlanSelect.value = options.some((item) => item.plan === currentValue) ? currentValue : options[0]?.plan || "pro";
-    els.cloudCheckoutPlanSelect.disabled = !authenticated || !canAdmin;
-  }
-  if (els.cloudCheckoutBtn) {
-    els.cloudCheckoutBtn.disabled = !authenticated || !canAdmin;
-  }
   renderCloudManualRecharge(authenticated, billing);
   if (!authenticated) {
     els.cloudBillingLabel.textContent = "未登录";
-    els.cloudBillingReport.textContent = "登录云端后显示套餐、账单事件和升级入口。";
-    return;
-  }
-  if (!canAdmin && !billing) {
-    els.cloudBillingLabel.textContent = "无权限";
-    els.cloudBillingReport.textContent = "只有组织所有者或管理员可以查看账单与发起升级。";
+    els.cloudBillingReport.textContent = "登录云端后显示套餐、可用额度和充值订单。";
     return;
   }
   if (!billing) {
     els.cloudBillingLabel.textContent = "等待统计";
-    els.cloudBillingReport.textContent = "刷新云端状态后显示套餐与账单事件。";
+    els.cloudBillingReport.textContent = "刷新云端状态后显示套餐、额度和充值订单。";
     return;
   }
   const plan = billing.organization?.plan || "free";
-  const checkout = billing.checkout || {};
-  const paymentRows = Array.isArray(billing.payment_webhooks) && billing.payment_webhooks.length
-    ? billing.payment_webhooks.slice(-5).reverse().map((item) => `${item.event_type || "billing.event"} · ${item.provider || "provider"} · ${item.created_at || ""}`).join("\n")
-    : "暂无账单事件。";
   const manualOrderRows = Array.isArray(billing.manual_orders) && billing.manual_orders.length
     ? billing.manual_orders.slice(-5).reverse().map((item) =>
       `${formatManualOrderStatus(item.status)} · ${item.title || item.package_id} · ¥${Number(item.amount_cny || 0)} · ${item.created_at || ""}`).join("\n")
@@ -1333,14 +1180,11 @@ function renderCloudBilling(authenticated, canAdmin) {
     `当前套餐：${plan}`,
     `个人日限：${billing.limits?.user_daily ?? "-"} · 组织日限：${billing.limits?.org_daily ?? "-"}`,
     `今日请求：${billing.usage?.request_count || 0} 次 · 失败：${billing.usage?.failed_count || 0} 次`,
-    `升级通道：${checkout.enabled ? checkout.mode || "已配置" : "未配置"}`,
+    `今日预估费用：${formatCurrencyCny(billing.usage?.estimated_cost || 0)}`,
     `AI 额度：${Number(billing.credits?.balance || 0).toLocaleString("zh-CN")} 点`,
     "",
-    "人工充值订单：",
+    "我的充值订单：",
     manualOrderRows,
-    "",
-    "最近账单事件：",
-    paymentRows,
   ].join("\n");
 }
 
@@ -1418,8 +1262,43 @@ function formatManualOrderStatus(status) {
   return "待确认";
 }
 
+function roleLabel(role) {
+  const value = String(role || "member");
+  if (value === "owner") return "所有者";
+  if (value === "admin") return "管理员";
+  if (value === "member") return "成员";
+  return value;
+}
+
+function formatCurrencyCny(value) {
+  const amount = Number(value || 0);
+  return `¥${(Number.isFinite(amount) ? amount : 0).toFixed(4)}`;
+}
+
+function getDefaultCloudApiBaseUrl() {
+  const location = window.location;
+  if (!location || !["http:", "https:"].includes(location.protocol)) {
+    return LOCAL_CLOUD_API_BASE_URL;
+  }
+  if (isLocalDevelopmentHost(location.hostname)) {
+    return LOCAL_CLOUD_API_BASE_URL;
+  }
+  return `${location.origin}/api`;
+}
+
+function isLocalDevelopmentHost(hostname) {
+  return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(String(hostname || "").toLowerCase());
+}
+
+function shouldReplaceLocalApiBaseUrl(value) {
+  if (DEFAULT_CLOUD_API_BASE_URL === LOCAL_CLOUD_API_BASE_URL) return false;
+  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\]):8787\/api\/?$/i.test(String(value || "").trim());
+}
+
 function normalizeCloudBaseUrl(value) {
-  return String(value || DEFAULT_CLOUD_API_BASE_URL).trim().replace(/\/+$/, "") || DEFAULT_CLOUD_API_BASE_URL;
+  const raw = String(value || "").trim();
+  if (shouldReplaceLocalApiBaseUrl(raw)) return DEFAULT_CLOUD_API_BASE_URL;
+  return (raw || DEFAULT_CLOUD_API_BASE_URL).replace(/\/+$/, "") || DEFAULT_CLOUD_API_BASE_URL;
 }
 
 function saveCloudBaseUrlFromInput() {
@@ -1437,11 +1316,16 @@ async function cloudRequest(path, options = {}) {
   };
   const orgId = state.cloud?.activeOrganization?.id;
   if (orgId) headers["x-organization-id"] = orgId;
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+  } catch (error) {
+    throw new Error(`无法连接云端 API：${baseUrl}。请确认后端服务已启动，或检查云端 API 地址。`);
+  }
   const text = await response.text();
   const data = text ? parseJsonSafely(text) : {};
   if (!response.ok) {
@@ -1489,7 +1373,6 @@ async function refreshCloudStatus() {
       const data = await cloudRequest("/me", { method: "GET" });
       applyCloudSession(data);
       if (state.cloud.authenticated) {
-        await refreshCloudTeam({ silent: true });
         await refreshCloudUsage({ silent: true });
         await refreshCloudBilling({ silent: true });
       }
@@ -1522,7 +1405,6 @@ async function cloudLogin() {
     if (data.email_verification_token && els.cloudEmailTokenInput) {
       els.cloudEmailTokenInput.value = data.email_verification_token;
     }
-    await refreshCloudTeam({ silent: true });
     await refreshCloudUsage({ silent: true });
     await refreshCloudBilling({ silent: true });
     persist();
@@ -1544,7 +1426,6 @@ async function cloudRegister() {
       }),
     });
     applyCloudSession(data);
-    await refreshCloudTeam({ silent: true });
     await refreshCloudUsage({ silent: true });
     await refreshCloudBilling({ silent: true });
     persist();
@@ -1708,26 +1589,6 @@ async function refreshCloudBilling(options = {}) {
   }
 }
 
-async function cloudCreateCheckout() {
-  const plan = els.cloudCheckoutPlanSelect?.value || "pro";
-  await withLoading(els.cloudCheckoutBtn, "创建中", async () => {
-    const data = await cloudRequest("/billing/checkout", {
-      method: "POST",
-      body: JSON.stringify({ plan }),
-    });
-    const checkoutUrl = data.checkout?.checkout_url;
-    if (!checkoutUrl) {
-      toast("支付升级入口未返回，请联系管理员", "warn");
-      return;
-    }
-    window.open(checkoutUrl, "_blank", "noopener");
-    await refreshCloudBilling({ silent: true });
-    persist();
-    renderCloudPanel();
-    toast("升级入口已打开");
-  });
-}
-
 async function cloudSubmitManualOrder() {
   const packageId = els.cloudManualPackageSelect?.value || "";
   const paymentChannel = els.cloudManualPaymentMethodSelect?.value || "wechat";
@@ -1751,100 +1612,6 @@ async function cloudSubmitManualOrder() {
     renderCloudPanel();
     toast(`充值订单已提交：${data.order?.title || packageId}`);
   });
-}
-
-async function refreshCloudTeam(options = {}) {
-  const orgId = state.cloud?.activeOrganization?.id;
-  if (!state.cloud?.authenticated || !orgId) return;
-  const [members, invitations] = await Promise.all([
-    cloudRequest(`/orgs/${orgId}/members`, { method: "GET" }),
-    cloudRequest(`/orgs/${orgId}/invitations`, { method: "GET" }).catch(() => ({ invitations: [] })),
-  ]);
-  state.cloud.members = Array.isArray(members.members) ? members.members : [];
-  state.cloud.invitations = Array.isArray(invitations.invitations) ? invitations.invitations : [];
-  if (!options.silent) toast("团队信息已刷新");
-}
-
-async function cloudInviteMember() {
-  const orgId = state.cloud?.activeOrganization?.id;
-  const email = els.cloudInviteEmailInput.value.trim();
-  if (!orgId || !email) {
-    toast("请先填写邀请邮箱", "warn");
-    return;
-  }
-  await withLoading(els.cloudInviteBtn, "生成中", async () => {
-    const data = await cloudRequest(`/orgs/${orgId}/invitations`, {
-      method: "POST",
-      body: JSON.stringify({
-        email,
-        role: els.cloudInviteRoleSelect.value || "member",
-      }),
-    });
-    els.cloudInviteEmailInput.value = "";
-    await refreshCloudTeam({ silent: true });
-    persist();
-    renderCloudPanel();
-    const tokenText = data.invitation?.token ? `，邀请码：${data.invitation.token}` : "";
-    toast(`邀请已生成${tokenText}`);
-  });
-}
-
-async function handleCloudPanelAction(event) {
-  const button = event.target.closest("[data-cloud-action]");
-  if (!button) return;
-  const action = button.dataset.cloudAction;
-  const orgId = state.cloud?.activeOrganization?.id;
-  if (!orgId) return;
-  if (action === "invite-revoke") {
-    await cloudRevokeInvitation(button.dataset.inviteId);
-  } else if (action === "invite-resend") {
-    await cloudResendInvitation(button.dataset.inviteId);
-  } else if (action === "member-role") {
-    await cloudUpdateMemberRole(button.dataset.memberId, button.dataset.role);
-  } else if (action === "member-remove") {
-    await cloudRemoveMember(button.dataset.memberId);
-  }
-}
-
-async function cloudRevokeInvitation(inviteId) {
-  const orgId = state.cloud?.activeOrganization?.id;
-  await cloudRequest(`/orgs/${orgId}/invitations/${inviteId}/revoke`, { method: "POST", body: JSON.stringify({}) });
-  await refreshCloudTeam({ silent: true });
-  persist();
-  renderCloudPanel();
-  toast("邀请已撤销");
-}
-
-async function cloudResendInvitation(inviteId) {
-  const orgId = state.cloud?.activeOrganization?.id;
-  const data = await cloudRequest(`/orgs/${orgId}/invitations/${inviteId}/resend`, { method: "POST", body: JSON.stringify({}) });
-  await refreshCloudTeam({ silent: true });
-  persist();
-  renderCloudPanel();
-  const tokenText = data.invitation?.token ? `，邀请码：${data.invitation.token}` : "";
-  toast(`邀请已重发${tokenText}`);
-}
-
-async function cloudUpdateMemberRole(memberId, role) {
-  const orgId = state.cloud?.activeOrganization?.id;
-  await cloudRequest(`/orgs/${orgId}/members/${memberId}`, {
-    method: "PUT",
-    body: JSON.stringify({ role }),
-  });
-  await refreshCloudTeam({ silent: true });
-  persist();
-  renderCloudPanel();
-  toast("成员角色已更新");
-}
-
-async function cloudRemoveMember(memberId) {
-  if (!window.confirm("确定移除该成员吗？该成员会立即失去云端访问权限，现有云端会话会被清理。请确认已经处理其负责的文档和执笔人。")) return;
-  const orgId = state.cloud?.activeOrganization?.id;
-  await cloudRequest(`/orgs/${orgId}/members/${memberId}`, { method: "DELETE" });
-  await refreshCloudTeam({ silent: true });
-  persist();
-  renderCloudPanel();
-  toast("成员已移除", "warn");
 }
 
 async function cloudExportMyData() {
@@ -1876,36 +1643,6 @@ async function cloudDeleteAccount() {
   });
 }
 
-async function cloudLoadRecentErrors() {
-  await withLoading(els.cloudRecentErrorsBtn, "读取中", async () => {
-    const data = await cloudRequest("/ops/recent-errors", { method: "GET" });
-    const errors = Array.isArray(data.errors) ? data.errors : [];
-    els.cloudOpsReport.textContent = errors.length
-      ? errors.map((item) => `${item.created_at || ""} ${item.type || "error"}：${item.message || ""}`).join("\n")
-      : "暂无最近错误。";
-  });
-}
-
-async function openCloudAdminModal() {
-  if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
-    toast("只有管理员可以查看管理后台", "warn");
-    return;
-  }
-  ui.cloudAdminReturnFocus = document.activeElement;
-  els.cloudAdminModal.hidden = false;
-  document.body.classList.add("modal-open");
-  els.cloudAdminModal.querySelector(".cloud-admin-modal")?.focus();
-  await cloudLoadAdminDashboard();
-}
-
-function closeCloudAdminModal({ restoreFocus = true } = {}) {
-  if (!els.cloudAdminModal) return;
-  els.cloudAdminModal.hidden = true;
-  document.body.classList.remove("modal-open");
-  if (restoreFocus) ui.cloudAdminReturnFocus?.focus?.();
-  ui.cloudAdminReturnFocus = null;
-}
-
 function openStandaloneAdminPage() {
   if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
     toast("只有管理员可以查看管理后台", "warn");
@@ -1917,377 +1654,10 @@ function openStandaloneAdminPage() {
 
 function handleHashRoute() {
   if (window.location.hash === "#admin") {
-    openCloudAdminWorkspace({ fromHash: true });
-  } else if (els.cloudAdminWorkspace && !els.cloudAdminWorkspace.hidden) {
-    closeCloudAdminWorkspace({ updateHash: false });
+    openStandaloneAdminPage();
+  } else if (window.location.hash === "#cloud") {
+    switchMainView("cloud");
   }
-}
-
-async function openCloudAdminWorkspace(options = {}) {
-  if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
-    toast("只有管理员可以查看管理后台", "warn");
-    switchTab("cloud");
-    if (window.location.hash === "#admin") {
-      const url = new URL(window.location.href);
-      url.hash = "";
-      window.history.replaceState(null, "", url.toString());
-    }
-    return;
-  }
-  if (!options.fromHash && window.location.hash !== "#admin") {
-    window.location.hash = "admin";
-    return;
-  }
-  closeCloudAdminModal({ restoreFocus: false });
-  els.cloudAdminWorkspace.hidden = false;
-  document.body.classList.add("modal-open");
-  switchTab("cloud");
-  await cloudLoadAdminDashboard({ button: els.cloudAdminWorkspaceRefreshBtn });
-  renderCloudAdminWorkspace();
-  els.closeCloudAdminWorkspaceBtn?.focus();
-}
-
-function closeCloudAdminWorkspace(options = {}) {
-  if (!els.cloudAdminWorkspace) return;
-  els.cloudAdminWorkspace.hidden = true;
-  if (els.cloudAdminModal?.hidden !== false && els.skillBuilderModal?.hidden !== false && els.trashModal?.hidden !== false) {
-    document.body.classList.remove("modal-open");
-  }
-  if (options.updateHash !== false && window.location.hash === "#admin") {
-    const url = new URL(window.location.href);
-    url.hash = "";
-    window.history.replaceState(null, "", url.toString());
-  }
-}
-
-async function cloudLoadAdminDashboard(options = {}) {
-  if (!state.cloud?.authenticated) return;
-  const targetButton = options.silent ? null : options.button || els.cloudAdminRefreshBtn || els.cloudAdminDashboardBtn;
-  const runner = async () => {
-    const [dashboard, usage, audit] = await Promise.all([
-      cloudRequest("/admin/dashboard", { method: "GET" }),
-      cloudRequest(`/usage/history${buildAdminUsageQuery()}`, { method: "GET" }).catch(() => ({ usage: [] })),
-      cloudRequest(`/audit${buildAdminAuditQuery()}`, { method: "GET" }).catch(() => ({ audit_logs: [] })),
-    ]);
-    state.cloud.adminDashboard = dashboard;
-    state.cloud.adminUsage = usage.usage || [];
-    state.cloud.adminAudit = audit.audit_logs || [];
-    renderCloudAdminModal();
-    renderCloudAdminWorkspace();
-    const currentUsage = dashboard.usage || {};
-    els.cloudOpsReport.textContent = [
-      `组织：${dashboard.organization?.name || ""}（${dashboard.organization?.plan || "free"}）`,
-      `成员：${dashboard.members?.length || 0} 人，待处理邀请：${dashboard.invitations?.filter((item) => !item.accepted_at).length || 0} 个`,
-      `今日请求：${currentUsage.request_count || 0} 次，失败：${currentUsage.failed_count || 0} 次`,
-      `反馈：${dashboard.feedbacks?.length || 0} 条，最近错误：${dashboard.recent_errors?.length || 0} 条`,
-    ].join("\n");
-  };
-  if (targetButton) {
-    await withLoading(targetButton, "读取中", runner);
-  } else {
-    await runner();
-  }
-}
-
-function renderCloudAdminModal() {
-  const dashboard = state.cloud?.adminDashboard || {};
-  const usage = Array.isArray(state.cloud?.adminUsage) ? state.cloud.adminUsage : [];
-  const audit = Array.isArray(state.cloud?.adminAudit) ? state.cloud.adminAudit : [];
-  const org = dashboard.organization || {};
-  if (els.cloudAdminOverview) {
-    els.cloudAdminOverview.innerHTML = [
-      `<div><strong>${escapeHtml(org.name || "未命名组织")}</strong><span>套餐：${escapeHtml(org.plan || "free")}</span></div>`,
-      `<div><strong>${dashboard.usage?.request_count || 0}</strong><span>今日请求</span></div>`,
-      `<div><strong>${dashboard.limits?.org_daily || 0}</strong><span>组织日限</span></div>`,
-      `<div><strong>${dashboard.email_deliveries?.length || 0}</strong><span>最近邮件投递</span></div>`,
-    ].join("");
-  }
-  if (els.cloudAdminMembers) {
-    const members = dashboard.members || [];
-    const invitations = dashboard.invitations || [];
-    els.cloudAdminMembers.innerHTML = [
-      ...members.slice(-8).map((member) => `<div><strong>${escapeHtml(member.user?.email || member.user_id || "")}</strong><span>${escapeHtml(member.role || "member")}</span></div>`),
-      ...invitations.slice(-6).map((invitation) => `<div><strong>${escapeHtml(invitation.email || "")}</strong><span>${escapeHtml(invitation.role || "member")} · ${invitation.accepted_at ? "已接受" : "待接受"}</span></div>`),
-    ].join("") || "暂无成员或邀请。";
-  }
-  if (els.cloudAdminUsageList) {
-    els.cloudAdminUsageList.innerHTML = usage.length
-      ? usage.slice(-12).reverse().map((item) => `<div><strong>${escapeHtml(item.task_type || "chat")}</strong><span>${escapeHtml(item.status || "")} · ${Number(item.total_tokens || 0).toLocaleString("zh-CN")} · ${escapeHtml(item.created_at || "")}</span></div>`).join("")
-      : "暂无匹配用量。";
-  }
-  if (els.cloudAdminAuditList) {
-    els.cloudAdminAuditList.innerHTML = audit.length
-      ? audit.slice(-12).reverse().map((item) => `<div><strong>${escapeHtml(item.action || "")}</strong><span>${escapeHtml(item.target_type || "")} · ${escapeHtml(item.created_at || "")}</span></div>`).join("")
-      : "暂无匹配审计。";
-  }
-  if (els.cloudAdminFeedbackList) {
-    const feedbacks = dashboard.feedbacks || [];
-    const statusFilter = els.cloudAdminFeedbackStatusFilter?.value || "";
-    const filteredFeedbacks = statusFilter
-      ? feedbacks.filter((item) => (item.metadata?.status || "pending") === statusFilter)
-      : feedbacks;
-    els.cloudAdminFeedbackList.innerHTML = filteredFeedbacks.length
-      ? filteredFeedbacks.slice(-10).reverse().map((item) => {
-        const status = item.metadata?.status || "pending";
-        return `<div class="cloud-admin-feedback-row">
-          <strong>${escapeHtml(item.message || "")}</strong>
-          <span>${escapeHtml(status)} · ${escapeHtml(item.created_at || "")}</span>
-          <span class="cloud-row-actions">
-            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="processing">处理中</button>
-            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="resolved">已解决</button>
-            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="closed">关闭</button>
-          </span>
-        </div>`;
-      }).join("")
-      : "暂无匹配反馈。";
-  }
-  if (els.cloudAdminEmailList) {
-    const emailText = (els.cloudAdminEmailInput?.value || "").trim().toLowerCase();
-    const template = els.cloudAdminEmailTemplate?.value || "";
-    const status = els.cloudAdminEmailStatus?.value || "";
-    const emails = Array.isArray(dashboard.email_deliveries) ? dashboard.email_deliveries : [];
-    ui.cloudAdminVisibleEmails = emails
-      .filter((item) => !emailText || String(item.email || "").toLowerCase().includes(emailText))
-      .filter((item) => !template || item.template === template)
-      .filter((item) => !status || item.status === status)
-      .slice(-12)
-      .reverse();
-    els.cloudAdminEmailList.innerHTML = ui.cloudAdminVisibleEmails.length
-      ? ui.cloudAdminVisibleEmails.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.email || "")}</strong><span>${escapeHtml(item.template || "")} · ${escapeHtml(item.status || "")} · ${escapeHtml(item.updated_at || item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-email" data-email-index="${index}">复制详情</button></div>`).join("")
-      : "暂无匹配邮件。";
-  }
-  if (els.cloudAdminOpsList) {
-    const errors = dashboard.recent_errors || [];
-    const payments = dashboard.billing?.payment_webhooks || [];
-    ui.cloudAdminVisibleErrors = errors.slice(-6).reverse();
-    ui.cloudAdminVisiblePayments = payments.slice(-6).reverse();
-    els.cloudAdminOpsList.innerHTML = [
-      ...ui.cloudAdminVisibleErrors.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.type || item.level || "error")}</strong><span>${escapeHtml(item.message || "")}</span><button type="button" data-cloud-admin-action="copy-error" data-error-index="${index}">复制详情</button></div>`),
-      ...ui.cloudAdminVisiblePayments.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.event_type || "")}</strong><span>${escapeHtml(item.provider || "")} · ${escapeHtml(item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-payment" data-payment-index="${index}">复制事件</button></div>`),
-    ].join("") || "暂无错误或账单事件。";
-  }
-}
-
-function renderCloudAdminWorkspace() {
-  if (!els.cloudAdminWorkspace || els.cloudAdminWorkspace.hidden) return;
-  const dashboard = state.cloud?.adminDashboard || {};
-  const usage = Array.isArray(state.cloud?.adminUsage) ? state.cloud.adminUsage : [];
-  const audit = Array.isArray(state.cloud?.adminAudit) ? state.cloud.adminAudit : [];
-  const org = dashboard.organization || {};
-  const members = Array.isArray(dashboard.members) ? dashboard.members : [];
-  const invitations = Array.isArray(dashboard.invitations) ? dashboard.invitations : [];
-  const feedbacks = Array.isArray(dashboard.feedbacks) ? dashboard.feedbacks : [];
-  const emails = Array.isArray(dashboard.email_deliveries) ? dashboard.email_deliveries : [];
-  const payments = Array.isArray(dashboard.billing?.payment_webhooks) ? dashboard.billing.payment_webhooks : [];
-  const errors = Array.isArray(dashboard.recent_errors) ? dashboard.recent_errors : [];
-  const currentUsage = dashboard.usage || {};
-  els.cloudAdminWorkspaceSubtitle.textContent = `${org.name || "未命名组织"} · ${org.plan || "free"}`;
-  els.cloudAdminWorkspaceSummary.innerHTML = [
-    `<div><strong>${escapeHtml(org.plan || "free")}</strong><span>当前套餐</span></div>`,
-    `<div><strong>${members.length}</strong><span>组织成员</span></div>`,
-    `<div><strong>${currentUsage.request_count || 0}</strong><span>今日请求</span></div>`,
-    `<div><strong>${feedbacks.length}</strong><span>反馈记录</span></div>`,
-  ].join("");
-
-  const view = ui.cloudAdminWorkspaceView || "overview";
-  els.cloudAdminWorkspaceNav?.querySelectorAll("[data-admin-workspace-view]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.adminWorkspaceView === view);
-  });
-  const titles = {
-    overview: "概览",
-    members: "成员",
-    usage: "用量",
-    audit: "审计",
-    feedback: "反馈",
-    email: "邮件投递",
-    billing: "账单",
-    errors: "错误",
-  };
-  els.cloudAdminWorkspacePanelTitle.textContent = titles[view] || "概览";
-  els.cloudAdminWorkspaceDeletionRequestBtn.hidden = view !== "overview";
-
-  if (view === "members") {
-    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${[
-      ...members.map((member) => `<div><strong>${escapeHtml(member.user?.email || member.user_id || "")}</strong><span>${escapeHtml(member.role || "member")}</span></div>`),
-      ...invitations.map((invitation) => `<div><strong>${escapeHtml(invitation.email || "")}</strong><span>${escapeHtml(invitation.role || "member")} · ${invitation.accepted_at ? "已接受" : "待接受"}</span></div>`),
-    ].join("") || "暂无成员或邀请。"}</div>`;
-    return;
-  }
-  if (view === "usage") {
-    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${usage.length
-      ? usage.slice().reverse().map((item) => `<div><strong>${escapeHtml(item.task_type || "chat")}</strong><span>${escapeHtml(item.status || "")} · ${Number(item.total_tokens || 0).toLocaleString("zh-CN")} · ${escapeHtml(item.created_at || "")}</span></div>`).join("")
-      : "暂无匹配用量。"}</div>`;
-    return;
-  }
-  if (view === "audit") {
-    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${audit.length
-      ? audit.slice().reverse().map((item) => `<div><strong>${escapeHtml(item.action || "")}</strong><span>${escapeHtml(item.target_type || "")} · ${escapeHtml(item.created_at || "")}</span></div>`).join("")
-      : "暂无匹配审计。"}</div>`;
-    return;
-  }
-  if (view === "feedback") {
-    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${feedbacks.length
-      ? feedbacks.slice().reverse().map((item) => {
-        const status = item.metadata?.status || "pending";
-        return `<div class="cloud-admin-feedback-row">
-          <strong>${escapeHtml(item.message || "")}</strong>
-          <span>${escapeHtml(status)} · ${escapeHtml(item.created_at || "")}</span>
-          <span class="cloud-row-actions">
-            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="processing">处理中</button>
-            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="resolved">已解决</button>
-            <button type="button" data-cloud-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="closed">关闭</button>
-          </span>
-        </div>`;
-      }).join("")
-      : "暂无反馈。"}</div>`;
-    return;
-  }
-  if (view === "email") {
-    ui.cloudAdminVisibleEmails = emails.slice(-50).reverse();
-    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${ui.cloudAdminVisibleEmails.length
-      ? ui.cloudAdminVisibleEmails.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.email || "")}</strong><span>${escapeHtml(item.template || "")} · ${escapeHtml(item.status || "")} · ${escapeHtml(item.updated_at || item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-email" data-email-index="${index}">复制详情</button></div>`).join("")
-      : "暂无邮件投递。"}</div>`;
-    return;
-  }
-  if (view === "billing") {
-    ui.cloudAdminVisiblePayments = payments.slice(-50).reverse();
-    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${ui.cloudAdminVisiblePayments.length
-      ? ui.cloudAdminVisiblePayments.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.event_type || "")}</strong><span>${escapeHtml(item.provider || "")} · ${escapeHtml(item.created_at || "")}</span><button type="button" data-cloud-admin-action="copy-payment" data-payment-index="${index}">复制事件</button></div>`).join("")
-      : "暂无账单事件。"}</div>`;
-    return;
-  }
-  if (view === "errors") {
-    ui.cloudAdminVisibleErrors = errors.slice(-50).reverse();
-    els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-list">${ui.cloudAdminVisibleErrors.length
-      ? ui.cloudAdminVisibleErrors.map((item, index) => `<div class="cloud-admin-ops-row"><strong>${escapeHtml(item.type || item.level || "error")}</strong><span>${escapeHtml(item.message || "")}</span><button type="button" data-cloud-admin-action="copy-error" data-error-index="${index}">复制详情</button></div>`).join("")
-      : "暂无错误事件。"}</div>`;
-    return;
-  }
-  els.cloudAdminWorkspaceContent.innerHTML = `<div class="cloud-admin-grid">
-    <section class="cloud-admin-card"><h3>组织</h3><div class="cloud-admin-list"><div><strong>${escapeHtml(org.name || "未命名组织")}</strong><span>${escapeHtml(org.plan || "free")}</span></div></div></section>
-    <section class="cloud-admin-card"><h3>运营状态</h3><div class="cloud-admin-list">
-      <div><strong>${currentUsage.request_count || 0}</strong><span>今日请求</span></div>
-      <div><strong>${currentUsage.failed_count || 0}</strong><span>今日失败</span></div>
-      <div><strong>${emails.length}</strong><span>邮件投递</span></div>
-      <div><strong>${errors.length}</strong><span>错误事件</span></div>
-    </div></section>
-  </div>`;
-}
-
-function buildAdminUsageQuery() {
-  const params = new URLSearchParams();
-  if (els.cloudAdminUsageFrom?.value) params.set("from", els.cloudAdminUsageFrom.value);
-  if (els.cloudAdminUsageTo?.value) params.set("to", els.cloudAdminUsageTo.value);
-  if (els.cloudAdminUsageTask?.value.trim()) params.set("task_type", els.cloudAdminUsageTask.value.trim());
-  if (els.cloudAdminUsageStatus?.value) params.set("status", els.cloudAdminUsageStatus.value);
-  params.set("limit", "80");
-  const text = params.toString();
-  return text ? `?${text}` : "";
-}
-
-function buildAdminAuditQuery() {
-  const params = new URLSearchParams();
-  if (els.cloudAdminAuditFrom?.value) params.set("from", els.cloudAdminAuditFrom.value);
-  if (els.cloudAdminAuditTo?.value) params.set("to", els.cloudAdminAuditTo.value);
-  if (els.cloudAdminAuditAction?.value.trim()) params.set("action", els.cloudAdminAuditAction.value.trim());
-  params.set("limit", "80");
-  const text = params.toString();
-  return text ? `?${text}` : "";
-}
-
-async function handleCloudAdminAction(event) {
-  const button = event.target.closest("[data-cloud-admin-action]");
-  if (!button) return;
-  const action = button.dataset.cloudAdminAction;
-  if (action === "feedback-status") {
-    await withLoading(button, "更新中", async () => {
-      await cloudRequest(`/feedback/${button.dataset.feedbackId}/status`, {
-        method: "POST",
-        body: JSON.stringify({ status: button.dataset.status }),
-      });
-      await cloudLoadAdminDashboard({ silent: true });
-      toast("反馈状态已更新");
-    });
-  } else if (action === "copy-error") {
-    const item = ui.cloudAdminVisibleErrors?.[Number(button.dataset.errorIndex)];
-    await copyTextToClipboard(JSON.stringify(item || {}, null, 2));
-    toast("错误详情已复制");
-  } else if (action === "copy-payment") {
-    const item = ui.cloudAdminVisiblePayments?.[Number(button.dataset.paymentIndex)];
-    await copyTextToClipboard(JSON.stringify(item || {}, null, 2));
-    toast("账单事件已复制");
-  } else if (action === "copy-email") {
-    const item = ui.cloudAdminVisibleEmails?.[Number(button.dataset.emailIndex)];
-    await copyTextToClipboard(JSON.stringify(item || {}, null, 2));
-    toast("邮件投递详情已复制");
-  }
-}
-
-async function cloudExportOrganizationData() {
-  const orgId = state.cloud?.activeOrganization?.id;
-  if (!orgId) return;
-  await withLoading(els.cloudAdminExportOrgBtn, "导出中", async () => {
-    const data = await cloudRequest(`/orgs/${orgId}/export`, { method: "GET" });
-    downloadBlob(`mowen-org-export-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
-    toast("组织数据已导出");
-  });
-}
-
-function cloudExportUsageCsv() {
-  const rows = Array.isArray(state.cloud?.adminUsage) ? state.cloud.adminUsage : [];
-  if (!rows.length) {
-    toast("没有可导出的用量记录", "warn");
-    return;
-  }
-  downloadCsv(`mowen-usage-${new Date().toISOString().slice(0, 10)}.csv`, [
-    ["created_at", "task_type", "status", "prompt_tokens", "completion_tokens", "total_tokens", "model", "error"],
-    ...rows.map((item) => [
-      item.created_at || "",
-      item.task_type || "",
-      item.status || "",
-      item.prompt_tokens || 0,
-      item.completion_tokens || 0,
-      item.total_tokens || 0,
-      item.model || "",
-      item.error || "",
-    ]),
-  ]);
-  toast("用量 CSV 已导出");
-}
-
-function cloudExportAuditCsv() {
-  const rows = Array.isArray(state.cloud?.adminAudit) ? state.cloud.adminAudit : [];
-  if (!rows.length) {
-    toast("没有可导出的审计记录", "warn");
-    return;
-  }
-  downloadCsv(`mowen-audit-${new Date().toISOString().slice(0, 10)}.csv`, [
-    ["created_at", "action", "actor_user_id", "target_type", "target_id", "details"],
-    ...rows.map((item) => [
-      item.created_at || "",
-      item.action || "",
-      item.actor_user_id || "",
-      item.target_type || "",
-      item.target_id || "",
-      JSON.stringify(item.details || {}),
-    ]),
-  ]);
-  toast("审计 CSV 已导出");
-}
-
-async function cloudRequestOrganizationDeletion() {
-  const orgId = state.cloud?.activeOrganization?.id;
-  if (!orgId) return;
-  const reason = window.prompt("请填写创建删除/停用草案的原因。该操作不会立即删除数据。", "管理员发起组织数据治理评估");
-  if (!reason) return;
-  await withLoading(els.cloudAdminDeletionRequestBtn, "创建中", async () => {
-    await cloudRequest(`/orgs/${orgId}/deletion-request`, {
-      method: "POST",
-      body: JSON.stringify({ reason }),
-    });
-    await cloudLoadAdminDashboard({ silent: true });
-    toast("组织删除/停用草案已创建", "warn");
-  });
 }
 
 async function cloudSendFeedback() {
@@ -2601,47 +1971,6 @@ function getCurrentCloudWriter() {
   );
 }
 
-async function cloudSaveApiKey() {
-  const apiKey = els.cloudApiKeyInput.value.trim();
-  if (!apiKey) {
-    toast("请先填写要保存的 API Key", "warn");
-    return;
-  }
-  await withLoading(els.cloudSaveApiKeyBtn, "保存中", async () => {
-    const data = await cloudRequest("/api-keys", {
-      method: "POST",
-      body: JSON.stringify({
-        provider: "openai-compatible",
-        name: "默认接口",
-        api_key: apiKey,
-      }),
-    });
-    els.cloudApiKeyInput.value = "";
-    toast(`API Key 已加密保存到云端：${data.api_key?.key_hint || "已保存"}`);
-  });
-}
-
-function enableCloudAiProxy() {
-  if (!state.cloud?.authenticated) {
-    toast("请先登录云端账号", "warn");
-    return;
-  }
-  state.cloud.model = els.cloudModelInput.value.trim() || state.cloud.model || "gpt-4.1-mini";
-  state.settings = {
-    provider: "openai-compatible",
-    baseUrl: normalizeCloudBaseUrl(state.cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL),
-    endpointPath: "/ai/chat",
-    model: state.cloud.model,
-    apiKey: "",
-    credentials: "include",
-    systemPrompt: state.settings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-  };
-  persist();
-  renderApiSettings();
-  updateAiStatus();
-  toast("已启用云端 AI 代理，后续生成将通过云端接口调用");
-}
-
 function getCloudSettingsLocation() {
   return `${normalizeCloudBaseUrl(state.cloud?.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL)} / 当前工作区`;
 }
@@ -2687,6 +2016,7 @@ function renderStyleList() {
 }
 
 function createDocument(seed = {}) {
+  switchMainView("editor");
   return documentManager.createDocument(seed);
 }
 
@@ -4253,6 +3583,15 @@ function getSelectionOrLine() {
 }
 
 function switchTab(tabName) {
+  if (tabName === "cloud") {
+    switchMainView("cloud");
+    return;
+  }
+  if (tabName === "ppt") {
+    switchMainView("ppt");
+    return;
+  }
+  switchMainView("editor");
   const targetPanelId = `${tabName}Panel`;
   if (!document.getElementById(targetPanelId)) return;
   document.querySelectorAll(".tab").forEach((button) => {
@@ -4269,11 +3608,61 @@ function switchTab(tabName) {
     els.apiTopBtn.setAttribute("aria-pressed", String(apiActive));
   }
   if (els.cloudTopBtn) {
-    const cloudActive = tabName === "cloud";
+    els.cloudTopBtn.classList.toggle("active", ui.mainView === "cloud");
+    els.cloudTopBtn.setAttribute("aria-pressed", String(ui.mainView === "cloud"));
+  }
+  if (window.lucide) window.lucide.createIcons();
+}
+
+function switchMainView(view = "editor") {
+  const cloudActive = view === "cloud";
+  const pptActive = view === "ppt";
+  ui.mainView = cloudActive ? "cloud" : pptActive ? "ppt" : "editor";
+  if (els.editorPanel) {
+    els.editorPanel.dataset.mainView = ui.mainView;
+    els.editorPanel.setAttribute("aria-label", cloudActive ? "我的云端" : pptActive ? "PPT 生成" : "文档编辑");
+  }
+  if (els.cloudPanel) {
+    els.cloudPanel.hidden = !cloudActive;
+  }
+  if (els.pptPanel) {
+    els.pptPanel.hidden = !pptActive;
+    els.pptPanel.classList.toggle("active", pptActive);
+  }
+  if (pptActive) {
+    document.querySelectorAll(".tab").forEach((button) => {
+      const active = button.dataset.tab === "ppt";
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    document.querySelectorAll(".tab-panel").forEach((panel) => {
+      panel.classList.toggle("active", panel.id === "pptPanel");
+    });
+  } else if (!cloudActive && !document.querySelector(".tab-panel.active:not(#pptPanel)")) {
+    document.querySelectorAll(".tab").forEach((button) => {
+      const active = button.dataset.tab === "style";
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    document.querySelectorAll(".tab-panel").forEach((panel) => {
+      panel.classList.toggle("active", panel.id === "stylePanel");
+    });
+  }
+  if (els.cloudTopBtn) {
     els.cloudTopBtn.classList.toggle("active", cloudActive);
     els.cloudTopBtn.setAttribute("aria-pressed", String(cloudActive));
   }
-  if (window.lucide) window.lucide.createIcons();
+  if ((cloudActive || pptActive) && els.apiTopBtn) {
+    els.apiTopBtn.classList.remove("active");
+    els.apiTopBtn.setAttribute("aria-pressed", "false");
+  }
+  if (cloudActive || pptActive) {
+    if (layoutController.isMobileWorkspace()) layoutController.setMobileView("editor");
+    if (cloudActive) renderCloudPanel();
+    window.requestAnimationFrame(() => {
+      (cloudActive ? els.cloudPanel : els.pptPanel)?.focus({ preventScroll: true });
+    });
+  }
 }
 
 function createEmptyStyle() {

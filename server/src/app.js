@@ -1099,9 +1099,13 @@ async function chatProxy(ctx) {
 }
 
 async function currentUsage(ctx) {
-  const { data, organization } = await loadOrg(ctx);
+  const { data, organization, membership } = await loadOrg(ctx);
+  const isAdmin = ADMIN_ROLES.has(membership.role);
   const today = todayKey();
-  const usage = data.ai_usage.filter((item) => item.organization_id === organization.id && item.created_at?.startsWith(today));
+  const usage = data.ai_usage.filter((item) =>
+    item.organization_id === organization.id &&
+    item.created_at?.startsWith(today) &&
+    (isAdmin || item.user_id === ctx.auth.user.id));
   const plan = getEffectivePlan(organization);
   const limits = getPlanLimits(plan, ctx.env);
   const credits = getCreditAccount(data, organization.id, ctx.auth.user.id);
@@ -1113,50 +1117,60 @@ async function currentUsage(ctx) {
 }
 
 async function usageHistory(ctx) {
-  const { data, organization } = await loadOrg(ctx);
+  const { data, organization, membership } = await loadOrg(ctx);
+  const isAdmin = ADMIN_ROLES.has(membership.role);
   const limit = getQueryLimit(ctx.url, 200, 1000);
   const usageItems = typeof ctx.store.listUsageByOrganization === "function"
     ? await ctx.store.listUsageByOrganization({
       organizationId: organization.id,
+      userId: isAdmin ? "" : ctx.auth.user.id,
       filters: normalizeUsageFiltersFromUrl(ctx.url),
       limit,
     })
-    : filterByQuery(data.ai_usage.filter((item) => item.organization_id === organization.id), ctx.url)
+    : filterByQuery(data.ai_usage.filter((item) =>
+      item.organization_id === organization.id &&
+      (isAdmin || item.user_id === ctx.auth.user.id)), ctx.url)
       .slice(-limit);
-  const usage = usageItems.map(publicUsage);
+  const usage = usageItems
+    .map(publicUsage);
   sendJson(ctx.response, 200, { usage });
 }
 
 async function billingSummary(ctx) {
   const { data, organization, membership } = await loadOrg(ctx);
-  if (!ADMIN_ROLES.has(membership.role)) throw new HttpError(403, "只有管理员可以查看套餐信息", "forbidden");
+  const isAdmin = ADMIN_ROLES.has(membership.role);
   const today = todayKey();
-  const usage = data.ai_usage.filter((item) => item.organization_id === organization.id && item.created_at?.startsWith(today));
+  const usage = data.ai_usage.filter((item) =>
+    item.organization_id === organization.id &&
+    item.created_at?.startsWith(today) &&
+    (isAdmin || item.user_id === ctx.auth.user.id));
   const plan = getEffectivePlan(organization);
   const limits = getPlanLimits(plan, ctx.env);
-  const webhooks = data.payment_webhooks
-    .filter((item) => item.organization_id === organization.id)
-    .slice(-20);
+  const webhooks = isAdmin
+    ? data.payment_webhooks
+      .filter((item) => item.organization_id === organization.id)
+      .slice(-20)
+    : [];
   const orders = data.manual_payment_orders
-    .filter((item) => item.organization_id === organization.id)
+    .filter((item) => item.organization_id === organization.id && (isAdmin || item.user_id === ctx.auth.user.id))
     .slice(-20);
+  const monthUsage = data.ai_usage.filter((item) =>
+    item.organization_id === organization.id &&
+    item.created_at?.startsWith(monthKey()) &&
+    (isAdmin || item.user_id === ctx.auth.user.id));
   const credits = getCreditAccount(data, organization.id, ctx.auth.user.id);
   sendJson(ctx.response, 200, {
     organization: { id: organization.id, name: organization.name, plan, stored_plan: organization.plan, plan_expires_at: organization.plan_expires_at || null },
     limits: { user_daily: limits.userDaily, org_daily: limits.orgDaily },
     credits: publicCreditAccount(credits),
     usage: summarizeUsage(usage),
-    budget: summarizeUsageBudget(
-      usage,
-      data.ai_usage.filter((item) => item.organization_id === organization.id && item.created_at?.startsWith(monthKey())),
-      ctx.env,
-    ),
+    budget: summarizeUsageBudget(usage, monthUsage, ctx.env),
     payment_webhooks: webhooks,
-    manual_orders: orders.map((item) => publicManualPaymentOrder(item, { admin: true })),
+    manual_orders: orders.map((item) => publicManualPaymentOrder(item, { admin: isAdmin, userId: ctx.auth.user.id })),
     checkout: {
       mode: ctx.env.paymentCheckoutMode,
-      enabled: ctx.env.paymentCheckoutMode !== "disabled",
-      available_plans: getCheckoutPlanOptions(ctx.env),
+      enabled: isAdmin && ctx.env.paymentCheckoutMode !== "disabled",
+      available_plans: isAdmin ? getCheckoutPlanOptions(ctx.env) : [],
     },
     manual_payment: getManualPaymentSummary(ctx.env),
   });

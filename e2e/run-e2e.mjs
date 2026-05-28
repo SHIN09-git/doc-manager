@@ -8,7 +8,12 @@ const host = "127.0.0.1";
 let server = null;
 
 try {
-  ({ server } = await startStaticServer({ host, port }));
+  try {
+    ({ server } = await startStaticServer({ host, port }));
+  } catch (error) {
+    if (error?.code !== "EADDRINUSE") throw error;
+    console.warn(`Static server ${host}:${port} is already in use; reusing the existing preview server.`);
+  }
   const args = [
     path.join("node_modules", "playwright", "cli.js"),
     "test",

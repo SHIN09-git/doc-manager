@@ -2,6 +2,8 @@
 
 本文档用于小团队灰度试用“摹文拟笔工作台”云端模式。
 
+如果目标是把项目部署成可绑定域名的真实网站，先看 [WEBSITE_DEPLOYMENT.md](WEBSITE_DEPLOYMENT.md)。该文档包含域名、前端托管、后端 API、PostgreSQL、邮件、人工确认充值和 DNS 的完整准备清单。
+
 ## 运行模式
 
 ### 本地静态前端

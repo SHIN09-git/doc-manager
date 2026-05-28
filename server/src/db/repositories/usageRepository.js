@@ -14,21 +14,26 @@ const USAGE_COLUMNS = [
   "created_at",
 ];
 
-export async function listUsageByOrganization(pool, { organizationId, filters = {}, limit = 200 } = {}) {
-  const query = buildUsageHistoryQuery({ organizationId, filters, limit });
+export async function listUsageByOrganization(pool, { organizationId, userId = "", filters = {}, limit = 200 } = {}) {
+  const query = buildUsageHistoryQuery({ organizationId, userId, filters, limit });
   const result = await pool.query(query.text, query.values);
   return result.rows.map(normalizeUsageRow);
 }
 
-export function buildUsageHistoryQuery({ organizationId, filters = {}, limit = 200 } = {}) {
+export function buildUsageHistoryQuery({ organizationId, userId = "", filters = {}, limit = 200 } = {}) {
   if (!organizationId) throw new Error("organizationId is required");
   const values = [organizationId];
   const where = ["organization_id = $1"];
+  const normalizedUserId = normalizeText(userId);
   const from = normalizeText(filters.from);
   const to = normalizeText(filters.to);
   const taskType = normalizeText(filters.task_type || filters.taskType);
   const status = normalizeText(filters.status);
 
+  if (normalizedUserId) {
+    values.push(normalizedUserId);
+    where.push(`user_id = $${values.length}`);
+  }
   if (from) {
     values.push(from);
     where.push(`created_at >= $${values.length}`);

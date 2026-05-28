@@ -6,8 +6,11 @@
   "type": "module",
   "scripts": {
     "build": "esbuild src/main.js --bundle --format=iife --target=es2022 --outfile=build/bundle.js",
+    "build:static": "npm run build && node scripts/build-static.mjs",
     "check": "node --check app.js && node --check src/main.js && node --check src/admin/adminPage.js && node --check e2e/serve-static.mjs && node --check e2e/run-e2e.mjs && node --check playwright.config.js && node --check build/bundle.js && npm run server:check",
     "test": "node --test test/*.test.js && npm run server:test",
+    "serve:static": "node e2e/serve-static.mjs",
+    "start:api": "node server/src/server.js",
     "server:dev": "node server/src/server.js",
     "server:check": "node server/scripts/check.mjs",
     "server:test": "node --test server/tests/*.test.js",

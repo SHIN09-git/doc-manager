@@ -1,4 +1,5 @@
-const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787/api";
+const LOCAL_API_BASE_URL = "http://127.0.0.1:8787/api";
+const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 const API_BASE_STORAGE_KEY = "mowen-admin:api-base-url";
 const ADMIN_AUDIT_FILTERS_STORAGE_KEY = "mowen-admin:audit-filters";
 const DEFAULT_TOKEN_COST_PER_1K = 0.01;
@@ -1493,15 +1494,20 @@ function applySession(data) {
 }
 
 async function apiRequest(path, options = {}) {
-  const response = await fetch(`${state.apiBaseUrl}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(state.activeOrganization?.id ? { "x-organization-id": state.activeOrganization.id } : {}),
-      ...(options.headers || {}),
-    },
-    credentials: "include",
-  });
+  let response;
+  try {
+    response = await fetch(`${state.apiBaseUrl}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(state.activeOrganization?.id ? { "x-organization-id": state.activeOrganization.id } : {}),
+        ...(options.headers || {}),
+      },
+      credentials: "include",
+    });
+  } catch {
+    throw new Error(`无法连接云端 API：${state.apiBaseUrl}。请确认后端服务已启动，或检查 API 地址。`);
+  }
   const text = await response.text();
   const data = text ? parseJson(text) : {};
   if (!response.ok) {
@@ -1652,7 +1658,29 @@ function debounce(fn, delay = 250) {
 }
 
 function normalizeBaseUrl(value) {
-  return String(value || DEFAULT_API_BASE_URL).trim().replace(/\/+$/, "") || DEFAULT_API_BASE_URL;
+  const raw = String(value || "").trim();
+  if (shouldReplaceLocalApiBaseUrl(raw)) return DEFAULT_API_BASE_URL;
+  return (raw || DEFAULT_API_BASE_URL).replace(/\/+$/, "") || DEFAULT_API_BASE_URL;
+}
+
+function getDefaultApiBaseUrl() {
+  const location = window.location;
+  if (!location || !["http:", "https:"].includes(location.protocol)) {
+    return LOCAL_API_BASE_URL;
+  }
+  if (isLocalDevelopmentHost(location.hostname)) {
+    return LOCAL_API_BASE_URL;
+  }
+  return `${location.origin}/api`;
+}
+
+function isLocalDevelopmentHost(hostname) {
+  return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(String(hostname || "").toLowerCase());
+}
+
+function shouldReplaceLocalApiBaseUrl(value) {
+  if (DEFAULT_API_BASE_URL === LOCAL_API_BASE_URL) return false;
+  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\]):8787\/api\/?$/i.test(String(value || "").trim());
 }
 
 function parseJson(text) {

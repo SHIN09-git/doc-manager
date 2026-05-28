@@ -431,6 +431,35 @@ test("PPT panel can use automatic slide count", async ({ page }) => {
   await expect(page.locator("#pptQualityStatus")).toContainText(/有提示|通过/);
 });
 
+test("PPT workspace opens in the editor area and edits slides inline", async ({ page }) => {
+  await page.goto("/index.html");
+  await page.locator('[data-tab="ppt"]').click();
+
+  await expect(page.locator("#editorPanel")).toHaveAttribute("data-main-view", "ppt");
+  await expect(page.locator("#pptPanel")).toBeVisible();
+  await expect.poll(() => page.locator("#pptPanel").evaluate((element) => element.parentElement?.id)).toBe("editorPanel");
+  await expect(page.locator("#workspaceInspector #pptPanel")).toHaveCount(0);
+  await expect(page.locator("#workspaceInspector")).toBeVisible();
+
+  await page.locator("#pptOutput").fill(
+    JSON.stringify({
+      title: "Deck",
+      style: "officialBlue",
+      slides: [
+        { type: "cover", title: "Original title", body: "Opening" },
+        { type: "bullets", title: "Second", bullets: ["One", "Two"] },
+      ],
+    }),
+  );
+  await page.locator("#pptOutput").dispatchEvent("input");
+
+  const firstTitle = page.locator('[data-ppt-slide-index="0"][data-ppt-slide-field="title"]');
+  await expect(firstTitle).toHaveValue("Original title");
+  await firstTitle.fill("Edited title");
+  await expect(page.locator("#pptOutput")).toHaveValue(/Edited title/);
+  await expect(page.frameLocator("#pptPreview").locator("h2").first()).toContainText("Edited title");
+});
+
 test("workspace columns can be resized from the editor handles", async ({ page }) => {
   await page.goto("/index.html");
 
@@ -721,13 +750,22 @@ test("cloud panel keeps local mode safe before login", async ({ page }) => {
   await page.locator("#cloudTopBtn").click();
 
   await expect(page.locator("#cloudPanel")).toBeVisible();
+  await expect(page.locator("#editorPanel")).toHaveAttribute("data-main-view", "cloud");
+  await expect(page.locator("#workspaceInspector #cloudPanel")).toHaveCount(0);
+  await expect(page.locator("#contentEditor")).toBeHidden();
   await expect(page.locator("#cloudStatusLabel")).toContainText("本地模式");
   await expect(page.locator("#cloudBaseUrlInput")).toHaveValue("http://127.0.0.1:8787/api");
   await expect(page.locator("#cloudAccountCard")).toContainText("未连接云端");
   await expect(page.locator("#cloudSaveDocBtn")).toBeDisabled();
-  await expect(page.locator("#cloudUseAiProxyBtn")).toBeDisabled();
-  await expect(page.locator("#cloudCheckoutBtn")).toBeDisabled();
+  await expect(page.locator("#cloudCheckoutBtn")).toHaveCount(0);
+  await expect(page.locator("[data-admin-only-cloud-section]")).toHaveCount(0);
+  await expect(page.locator("#cloudUseAiProxyBtn")).toHaveCount(0);
+  await expect(page.locator("#cloudAdminDashboardBtn")).toHaveCount(0);
+  await expect(page.locator("#cloudRecentErrorsBtn")).toHaveCount(0);
   await expect(page.locator("#cloudBillingReport")).toContainText("登录云端后显示套餐");
+  await page.locator("#cloudBackToEditorBtn").click();
+  await expect(page.locator("#editorPanel")).toHaveAttribute("data-main-view", "editor");
+  await expect(page.locator("#contentEditor")).toBeVisible();
 });
 
 test("admin workspace hash is guarded before login", async ({ page }) => {
@@ -735,7 +773,7 @@ test("admin workspace hash is guarded before login", async ({ page }) => {
 
   await expect(page.locator("#cloudPanel")).toBeVisible();
   await expect(page.locator("#cloudStatusLabel")).toContainText("本地模式");
-  await expect(page.locator("#cloudAdminWorkspace")).toBeHidden();
+  await expect(page.locator("#cloudAdminWorkspace")).toHaveCount(0);
 });
 
 test("standalone admin page shows login gate before cloud session", async ({ page }) => {

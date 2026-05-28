@@ -27,7 +27,7 @@
           <div class="cloud-admin-workspace-actions">
             <label class="admin-api-field">
               <span>API 地址</span>
-              <input id="adminBaseUrlInput" type="url" value="http://127.0.0.1:8787/api" />
+              <input id="adminBaseUrlInput" type="url" placeholder="默认使用当前域名 /api" />
             </label>
             <button id="adminRefreshBtn" type="button">刷新</button>
             <button id="adminLogoutBtn" type="button">退出</button>
@@ -49,7 +49,8 @@
             <input id="adminPasswordInput" type="password" autocomplete="current-password" />
           </label>
           <button class="primary-action" id="adminLoginBtn" type="button">登录后台</button>
-          <p class="admin-inline-note" id="adminLoginHint">也可以先在主工作台完成登录，再打开本页面。</p>
+          <p class="admin-inline-note" id="adminLoginHint">没有账号时，请先返回主工作台，在“云端”栏目注册；第一个注册账号会成为该工作区所有者。</p>
+          <a class="icon-button" href="./index.html#cloud">前往主工作台注册</a>
         </section>
 
         <section class="admin-denied-card" id="adminDeniedView" hidden>

@@ -134,6 +134,489 @@
   font-family: var(--font-sans-cn);
 }
 
+/* Taste Skill cloud page refresh: account workspace, calm hierarchy, no cramped sidebar feel */
+.editor-panel[data-main-view="cloud"],
+.editor-panel[data-main-view="ppt"] {
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  container-type: inline-size;
+}
+
+.editor-panel[data-main-view="cloud"] > :not(#cloudPanel) {
+  display: none !important;
+}
+
+.editor-panel[data-main-view="ppt"] > :not(#pptPanel) {
+  display: none !important;
+}
+
+.cloud-page[hidden] {
+  display: none !important;
+}
+
+.cloud-page {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: start;
+  gap: 16px;
+  padding: 10px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 72%, var(--color-bg-subtle) 28%), var(--color-bg-subtle));
+}
+
+.cloud-page-heading {
+  min-height: 104px;
+  padding: 20px 22px;
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--line));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 78%, var(--surface) 22%), var(--surface) 58%),
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 9%, transparent), transparent 54%);
+  box-shadow: var(--shadow-sm);
+}
+
+.cloud-page-heading h2 {
+  font-size: 27px;
+  line-height: 1.18;
+}
+
+.cloud-page-heading p {
+  max-width: 58ch;
+}
+
+.cloud-page-heading-actions {
+  flex-shrink: 0;
+}
+
+.cloud-page-body {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.cloud-left-rail,
+.cloud-main-rail {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.cloud-page .cloud-section {
+  display: grid;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, var(--color-bg-subtle) 6%), var(--surface));
+  box-shadow: var(--shadow-xs);
+}
+
+.cloud-page .compact-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+}
+
+.cloud-page .compact-heading h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.cloud-page .compact-heading span,
+.cloud-page .panel-heading > span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.cloud-connection-section {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
+}
+
+.cloud-page .cloud-card {
+  display: grid;
+  gap: 4px;
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent-soft) 48%, var(--surface) 52%);
+}
+
+.cloud-page .cloud-card strong {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.cloud-page .cloud-card span {
+  color: var(--muted);
+}
+
+.cloud-page .cloud-auth-grid {
+  grid-template-columns: 1fr;
+  gap: 11px;
+}
+
+.cloud-page .cloud-auth-actions,
+.cloud-page .two-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.cloud-page button,
+.cloud-page .primary-action {
+  min-height: 38px;
+}
+
+.cloud-sync-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+.cloud-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.cloud-billing-section {
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--line)) !important;
+}
+
+.cloud-page .quality-report {
+  min-height: 116px;
+  max-height: 240px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  background: color-mix(in srgb, var(--surface) 88%, var(--color-bg-subtle) 12%);
+  white-space: pre-wrap;
+}
+
+.cloud-page .manual-recharge-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 48%, var(--surface) 52%), var(--surface));
+}
+
+.cloud-page .manual-recharge-head {
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.cloud-page .manual-recharge-head strong {
+  font-size: 16px;
+}
+
+.cloud-page #cloudCreditBalanceLabel {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: var(--font-semibold);
+}
+
+.cloud-page .manual-payment-method {
+  align-items: center;
+  border-color: color-mix(in srgb, var(--line) 86%, transparent);
+  background: color-mix(in srgb, var(--surface) 88%, var(--color-bg-subtle) 12%);
+}
+
+.cloud-page .manual-payment-method img,
+.cloud-page .manual-payment-placeholder {
+  width: 104px;
+  min-width: 104px;
+  height: 104px;
+  border-radius: var(--radius);
+}
+
+.cloud-data-section textarea {
+  min-height: 84px;
+}
+
+@container (max-width: 860px) {
+  .cloud-page-body,
+  .cloud-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-sync-actions {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@container (max-width: 560px) {
+  .cloud-page {
+    padding: 6px;
+  }
+
+  .cloud-page-heading {
+    min-height: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .cloud-page .two-actions,
+  .cloud-page .cloud-auth-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-page .manual-recharge-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-page .manual-payment-method {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Taste Skill PPT page refresh: central canvas, large preview, direct slide editing */
+.ppt-page[hidden] {
+  display: none !important;
+}
+
+.tab-panel.ppt-page.active {
+  display: grid;
+}
+
+.ppt-page {
+  grid-template-columns: minmax(280px, 350px) minmax(0, 1fr);
+  grid-template-areas:
+    "head head"
+    "title previewbar"
+    "options preview"
+    "custom preview"
+    "prompt preview"
+    "drop preview"
+    "actions preview"
+    "editor editor"
+    "json quality";
+  align-content: start;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 70%, var(--color-bg-subtle) 30%), var(--color-bg-subtle));
+  container-type: inline-size;
+}
+
+.ppt-page > .panel-heading {
+  position: relative;
+  z-index: 1;
+  grid-area: head;
+  min-height: 92px;
+  padding: 20px 22px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 76%, var(--surface) 24%), var(--surface) 58%),
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 58%);
+  box-shadow: var(--shadow-sm);
+}
+
+.ppt-page > .panel-heading h2 {
+  font-size: 27px;
+  line-height: 1.18;
+}
+
+.ppt-page-heading-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ppt-page > label,
+.ppt-page > section,
+.ppt-page > .drop-zone,
+.ppt-page > .two-actions,
+.ppt-page > .preview-toolbar,
+.ppt-page > .ppt-preview {
+  min-width: 0;
+}
+
+.ppt-page > .ppt-title-field {
+  grid-area: title;
+}
+
+.ppt-page > .ppt-options {
+  grid-area: options;
+}
+
+.ppt-page > #pptCustomStyleField {
+  grid-area: custom;
+}
+
+.ppt-page > .ppt-material-field {
+  grid-area: prompt;
+}
+
+.ppt-page > #pptDropZone {
+  grid-area: drop;
+}
+
+.ppt-page > .two-actions {
+  grid-area: actions;
+}
+
+.ppt-page > .ppt-json-field {
+  grid-area: json;
+}
+
+.ppt-page > .ppt-slide-editor-panel {
+  grid-area: editor;
+}
+
+.ppt-page > .ppt-quality-panel {
+  grid-area: quality;
+}
+
+.ppt-page > .preview-toolbar {
+  grid-area: previewbar;
+  align-self: end;
+  padding: 0 2px;
+}
+
+.ppt-page > #pptPreview {
+  grid-area: preview;
+  min-height: min(68vh, 680px);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.ppt-page label,
+.ppt-page .ppt-options,
+.ppt-page .ppt-slide-editor-panel,
+.ppt-page > .ppt-quality-panel {
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, var(--color-bg-subtle) 6%), var(--surface));
+  box-shadow: var(--shadow-xs);
+}
+
+.ppt-page .ppt-options label,
+.ppt-page .slide-count-control label,
+.ppt-page .ppt-slide-editor label {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ppt-page #pptPromptInput {
+  min-height: 240px;
+}
+
+.ppt-page #pptOutput {
+  min-height: 320px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ppt-page .quality-report {
+  min-height: 320px;
+  max-height: 420px;
+}
+
+.ppt-slide-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ppt-slide-edit-card {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 90%, var(--color-bg-subtle) 10%);
+}
+
+.ppt-slide-edit-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 160px);
+  gap: 8px;
+  align-items: center;
+}
+
+.ppt-slide-edit-head strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.ppt-slide-edit-card textarea {
+  resize: vertical;
+}
+
+@container (max-width: 920px) {
+  .ppt-page {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "head"
+      "title"
+      "options"
+      "custom"
+      "prompt"
+      "drop"
+      "actions"
+      "previewbar"
+      "preview"
+      "editor"
+      "json"
+      "quality";
+  }
+
+  .ppt-slide-editor {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container (max-width: 560px) {
+  .ppt-page {
+    padding: 6px;
+  }
+
+  .ppt-page > .panel-heading {
+    min-height: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .ppt-page-heading-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .ppt-page > .ppt-options,
+  .ppt-slide-edit-head {
+    grid-template-columns: 1fr;
+  }
+
+  .ppt-page > #pptPreview {
+    min-height: 420px;
+  }
+}
+
 [data-theme="dark"] {
   color-scheme: dark;
   --color-bg-base: #070b0b;
@@ -6018,5 +6501,652 @@ body {
 
   .cloud-billing-actions {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Taste Skill refresh: denser, calmer, more editorial workspace */
+:root {
+  --color-bg-base: #eef4f3;
+  --color-bg-subtle: #f6f9f8;
+  --color-bg-surface: #fcfdfb;
+  --color-bg-elevated: #ffffff;
+  --color-text-primary: #13201e;
+  --color-text-secondary: #52615d;
+  --color-text-tertiary: #7b8985;
+  --color-border-default: #d9e2df;
+  --color-border-strong: #bccbc6;
+  --color-border-subtle: #edf2f0;
+  --color-accent-primary: #0f756d;
+  --color-accent-hover: #0b5d58;
+  --color-accent-active: #084743;
+  --color-accent-subtle: #e7f3f1;
+  --color-accent-text: #0b5d58;
+  --color-info-primary: #596aa7;
+  --color-info-subtle: #eef1fa;
+  --color-info-text: #48588e;
+  --color-warning-primary: #a7652f;
+  --color-warning-subtle: #fbf0df;
+  --color-warning-text: #8b5227;
+  --shadow-xs: 0 1px 2px rgba(15, 31, 29, 0.05);
+  --shadow-sm: 0 5px 14px rgba(15, 31, 29, 0.07);
+  --shadow-md: 0 14px 34px rgba(15, 31, 29, 0.09);
+  --shadow-lg: 0 24px 58px rgba(15, 31, 29, 0.12);
+  --radius: 8px;
+  --topbar-h: 70px;
+  --sidebar-w: 292px;
+  --inspector-w: 372px;
+}
+
+[data-theme="dark"] {
+  --color-bg-base: #0b1111;
+  --color-bg-subtle: #111918;
+  --color-bg-surface: #17211f;
+  --color-bg-elevated: #1e2a27;
+  --color-text-primary: #f5f7f4;
+  --color-text-secondary: #c8d3cf;
+  --color-text-tertiary: #94a39e;
+  --color-border-default: rgba(232, 241, 238, 0.11);
+  --color-border-strong: rgba(232, 241, 238, 0.2);
+  --color-border-subtle: rgba(232, 241, 238, 0.07);
+  --color-accent-primary: #70b7aa;
+  --color-accent-hover: #91ccbf;
+  --color-accent-active: #b1dfd5;
+  --color-accent-subtle: rgba(112, 183, 170, 0.16);
+  --color-accent-text: #b1dfd5;
+  --color-bg-overlay: rgba(3, 8, 8, 0.78);
+}
+
+body {
+  background:
+    linear-gradient(180deg, #f7fbfa 0, #eef4f3 34%, #e8efec 100%),
+    var(--color-bg-base);
+  color: var(--ink);
+}
+
+[data-theme="dark"] body {
+  background:
+    linear-gradient(180deg, #0e1716 0, #0b1111 42%, #090d0d 100%),
+    var(--color-bg-base);
+}
+
+.app-shell {
+  background: transparent;
+}
+
+.topbar {
+  min-height: var(--topbar-h);
+  padding: 12px 18px;
+  border: 0;
+  background:
+    linear-gradient(90deg, #10221f 0%, #17342f 58%, #21453f 100%);
+  color: #edf7f4;
+  box-shadow: 0 16px 42px rgba(12, 31, 28, 0.18);
+}
+
+[data-theme="dark"] .topbar {
+  background:
+    linear-gradient(90deg, #07100f 0%, #0f211e 58%, #16312c 100%);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.42);
+}
+
+.brand {
+  gap: 12px;
+  min-width: 300px;
+}
+
+.brand-mark {
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.17), transparent),
+    #0d756c;
+  color: #f5fffb;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    0 10px 22px rgba(2, 10, 9, 0.22);
+}
+
+.brand strong {
+  color: #f8fffc;
+  font-size: 17px;
+  font-weight: 780;
+}
+
+.brand span:not(.brand-mark) {
+  color: rgba(237, 247, 244, 0.72);
+}
+
+.topbar-actions {
+  gap: 8px;
+}
+
+.topbar .icon-button,
+.topbar label.icon-button,
+.topbar .theme-toggle {
+  min-height: 38px;
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: #edf7f4;
+  box-shadow: none;
+}
+
+.topbar .icon-button:hover,
+.topbar label.icon-button:hover,
+.topbar .theme-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: none;
+}
+
+.topbar .icon-button.primary {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: #f7fbfa;
+  color: #12332f;
+}
+
+.icon-button-badged small {
+  background: rgba(255, 255, 255, 0.16);
+  color: #edf7f4;
+}
+
+.icon-button-badged.has-trash small {
+  background: var(--color-warning-primary);
+  color: #fffaf2;
+}
+
+.workspace {
+  grid-template-columns: var(--sidebar-w) 10px minmax(560px, 1fr) 10px var(--inspector-w);
+  gap: 0;
+  padding: 16px;
+  background:
+    linear-gradient(90deg, rgba(15, 117, 109, 0.06), transparent 20%, transparent 80%, rgba(89, 106, 167, 0.05)),
+    var(--color-bg-base);
+}
+
+.sidebar,
+.editor-panel,
+.inspector {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 94%, var(--color-bg-subtle) 6%);
+  box-shadow: var(--shadow-md);
+}
+
+.sidebar,
+.inspector {
+  overflow: hidden;
+}
+
+.workspace-resizer {
+  background: transparent;
+}
+
+.workspace-resizer::after {
+  width: 2px;
+  top: 22px;
+  bottom: 22px;
+  background: color-mix(in srgb, var(--line-strong) 64%, transparent);
+}
+
+.workspace-resizer:hover::after,
+.workspace-resizer:focus-visible::after,
+.workspace-resizer.dragging::after {
+  width: 4px;
+  background: var(--accent);
+}
+
+.panel {
+  padding: 16px 18px;
+  border-bottom-color: var(--line);
+  background: transparent;
+}
+
+.panel-heading,
+.compact-heading {
+  align-items: center;
+}
+
+.panel-heading h2,
+.compact-heading h3 {
+  color: var(--ink);
+  font-weight: 780;
+}
+
+.panel-heading h2::before,
+.inspector .panel-heading h2::before {
+  background: linear-gradient(180deg, var(--accent), var(--color-info-primary));
+}
+
+input,
+select,
+textarea {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--surface) 92%, var(--color-bg-subtle) 8%);
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--line-strong);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line-strong));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-soft) 78%, transparent);
+}
+
+button,
+label.icon-button {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--surface) 90%, var(--color-bg-subtle) 10%);
+  color: var(--ink);
+}
+
+button:hover,
+label.icon-button:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
+
+.primary-action,
+.save-button,
+.icon-button.primary {
+  border-color: var(--accent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 94%, #ffffff 6%), var(--accent-strong));
+  color: var(--color-text-inverse);
+  box-shadow: 0 10px 24px rgba(15, 117, 109, 0.2);
+}
+
+.primary-action:hover,
+.save-button:hover,
+.icon-button.primary:hover {
+  border-color: var(--accent-strong);
+  background:
+    linear-gradient(180deg, var(--accent), var(--accent-active));
+  box-shadow: 0 12px 28px rgba(15, 117, 109, 0.24);
+}
+
+.folder-list,
+.doc-list {
+  gap: 8px;
+}
+
+.folder-item,
+.doc-item {
+  border-color: color-mix(in srgb, var(--line) 84%, transparent);
+  background: color-mix(in srgb, var(--surface) 88%, var(--color-bg-subtle) 12%);
+  box-shadow: none;
+}
+
+.folder-item:hover,
+.doc-item:hover {
+  border-color: var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.folder-item.active,
+.doc-item.active {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-soft) 84%, var(--surface) 16%), var(--surface));
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    0 0 0 3px color-mix(in srgb, var(--accent-soft) 74%, transparent);
+}
+
+.doc-title,
+.folder-item strong {
+  font-weight: 720;
+}
+
+.drop-zone.compact,
+.import-drop-zone {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--line-strong) 72%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, var(--color-bg-subtle) 12%), var(--surface));
+}
+
+.drop-zone:hover,
+.drop-zone:focus-within,
+.drop-zone.drag-over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 66%, var(--surface) 34%);
+}
+
+.editor-panel {
+  grid-template-rows: auto auto auto auto minmax(420px, 1fr) auto;
+  gap: 12px;
+  padding: 18px 22px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 78%, var(--color-bg-subtle) 22%), var(--color-bg-subtle));
+}
+
+.editor-meta,
+.save-strip,
+.replace-bar {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: var(--shadow-xs);
+}
+
+[data-theme="dark"] .editor-meta,
+[data-theme="dark"] .save-strip,
+[data-theme="dark"] .replace-bar {
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+}
+
+.editor-meta {
+  padding: 12px;
+}
+
+.save-strip {
+  padding: 8px 10px;
+}
+
+.replace-bar {
+  padding: 10px;
+}
+
+.title-input {
+  min-height: 56px;
+  padding: 4px 8px 8px;
+  border-bottom-color: color-mix(in srgb, var(--line-strong) 78%, transparent);
+  color: #071b19;
+  font-size: 29px;
+  line-height: 1.18;
+}
+
+[data-theme="dark"] .title-input {
+  color: var(--ink);
+}
+
+#contentEditor {
+  width: min(100%, 960px);
+  justify-self: center;
+  min-height: 520px;
+  height: min(70vh, 760px);
+  padding: 34px 38px;
+  border-color: color-mix(in srgb, var(--line) 74%, transparent);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(90deg, rgba(15, 117, 109, 0.05) 0 4px, transparent 4px),
+    #fffefb;
+  color: #111816;
+  font-size: 16px;
+  line-height: 1.86;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 22px 56px rgba(15, 31, 29, 0.1);
+}
+
+[data-theme="dark"] #contentEditor {
+  background:
+    linear-gradient(90deg, rgba(112, 183, 170, 0.12) 0 4px, transparent 4px),
+    #16201e;
+  color: var(--ink);
+}
+
+#contentEditor:focus {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent-soft) 80%, transparent),
+    0 24px 60px rgba(15, 31, 29, 0.12);
+}
+
+.toast-region {
+  width: min(100%, 960px);
+  justify-self: center;
+}
+
+.tabs {
+  gap: 6px;
+  padding: 12px;
+  border-bottom-color: var(--line);
+  background: color-mix(in srgb, var(--surface) 80%, var(--color-bg-subtle) 20%);
+}
+
+.tab {
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-weight: 720;
+}
+
+.tab.active {
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: var(--accent);
+  color: var(--color-text-inverse);
+  box-shadow: 0 12px 26px rgba(15, 117, 109, 0.18);
+}
+
+.tab-panel {
+  padding: 18px;
+}
+
+.skill-workbench-heading {
+  gap: 14px;
+  padding-bottom: 4px;
+}
+
+.skill-workbench-heading p {
+  color: var(--color-text-secondary);
+}
+
+.skill-workbench-heading .panel-actions {
+  grid-template-columns: 38px 38px minmax(132px, 1fr);
+}
+
+.skill-create-button {
+  min-height: 44px;
+}
+
+.skill-filter-bar {
+  padding: 12px;
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--surface) 82%, var(--color-bg-subtle) 18%);
+  box-shadow: var(--shadow-xs);
+}
+
+.skill-card-grid {
+  gap: 10px;
+}
+
+.skill-card,
+.skill-empty-card {
+  border-color: color-mix(in srgb, var(--line) 86%, transparent);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.skill-card:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.skill-card.is-active {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-soft) 62%, var(--surface) 38%), var(--surface));
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    var(--shadow-sm);
+}
+
+.skill-avatar {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 78%, var(--surface) 22%);
+  color: var(--accent-strong);
+}
+
+.skill-card-title h3 {
+  font-weight: 780;
+}
+
+.skill-card-tags span,
+.skill-status-badge,
+.status-pill {
+  border: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+  background: color-mix(in srgb, var(--surface) 68%, var(--color-bg-subtle) 32%);
+}
+
+.skill-card-actions {
+  gap: 7px;
+}
+
+.skill-card-actions > button,
+.skill-toggle,
+.skill-more summary,
+.two-actions button {
+  min-height: 36px;
+  border-radius: var(--radius);
+}
+
+.prompt-window textarea,
+#pptPrompt,
+#pptOutput,
+#styleSummaryInput,
+#skillJsonInput,
+#skillAnalysisInput,
+#skillAggregationInput {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 94%, var(--color-bg-subtle) 6%), var(--surface));
+}
+
+.cloud-card,
+.cloud-section,
+.admin-plan-card,
+.admin-toolbar-card,
+.admin-insight-card,
+.manual-recharge-card {
+  border-color: var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+
+.cloud-admin-workspace {
+  background:
+    linear-gradient(180deg, var(--color-bg-subtle), var(--color-bg-base));
+}
+
+.cloud-admin-workspace-head {
+  border-color: var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.cloud-admin-side-nav {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--surface) 86%, var(--color-bg-subtle) 14%);
+}
+
+.cloud-admin-side-nav button.active {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 76%, var(--surface) 24%);
+  color: var(--accent-strong);
+}
+
+.preview-modal,
+.skill-builder-dialog,
+.skill-detail-menu,
+.editor-menu,
+.cloud-admin-modal {
+  border-color: var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow-xl);
+}
+
+@media (max-width: 1180px) {
+  .workspace {
+    padding: 12px;
+  }
+
+  .inspector {
+    border-radius: var(--radius) 0 0 var(--radius);
+  }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --topbar-h: auto;
+  }
+
+  .topbar {
+    background: #10221f;
+  }
+
+  .brand {
+    min-width: 0;
+  }
+
+  .workspace {
+    padding: 10px;
+  }
+
+  .editor-panel,
+  .sidebar,
+  .inspector {
+    border-radius: var(--radius);
+  }
+
+  #contentEditor {
+    width: 100%;
+    min-height: 420px;
+    padding: 24px 22px;
+  }
+
+  .save-strip {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px 42px;
+    grid-template-areas:
+      "save undo find"
+      "state state state";
+    align-items: center;
+    overflow: hidden;
+  }
+
+  .save-button {
+    grid-area: save;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .save-strip #undoEditBtn {
+    grid-area: undo;
+  }
+
+  .save-strip #replaceToggleBtn {
+    grid-area: find;
+  }
+
+  .save-strip #undoEditBtn,
+  .save-strip #replaceToggleBtn {
+    width: 42px;
+    min-width: 42px;
+    max-width: 42px;
+    margin-left: 0;
+    justify-self: end;
+  }
+
+  .save-strip .icon-button.compact span {
+    display: none;
+  }
+
+  .save-state {
+    grid-area: state;
+  }
+
+  .title-input {
+    margin-top: 4px;
+    font-size: 26px;
   }
 }

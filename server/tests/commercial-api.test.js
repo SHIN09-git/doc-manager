@@ -740,6 +740,15 @@ test("billing checkout is admin-only and returns configured checkout URLs", asyn
   });
   assert.equal(blockedMember.status, 403);
 
+  const memberBilling = await api("/api/billing/summary", {
+    cookie: invitee.cookie,
+    headers: { "x-organization-id": owner.orgId },
+  });
+  assert.equal(memberBilling.status, 200);
+  assert.equal(memberBilling.json.organization.id, owner.orgId);
+  assert.equal(memberBilling.json.checkout.enabled, false);
+  assert.ok(Array.isArray(memberBilling.json.manual_payment.packages));
+
   const unconfigured = await api("/api/billing/checkout", {
     method: "POST",
     cookie: owner.cookie,

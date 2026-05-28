@@ -44,6 +44,22 @@ test("usage repository query is organization-scoped and applies limit", async ()
   assert.deepEqual(query.values, ["org_001", "draft", "success", 3]);
 });
 
+test("usage repository can scope history to one user before applying limit", async () => {
+  const query = buildUsageHistoryQuery({
+    organizationId: "org_001",
+    userId: "usr_001",
+    filters: { task_type: "draft", status: "success" },
+    limit: 3,
+  });
+
+  assert.match(query.text, /organization_id = \$1/);
+  assert.match(query.text, /user_id = \$2/);
+  assert.match(query.text, /task_type = \$3/);
+  assert.match(query.text, /status = \$4/);
+  assert.match(query.text, /limit \$5/);
+  assert.deepEqual(query.values, ["org_001", "usr_001", "draft", "success", 3]);
+});
+
 test("usage repository normalizes PostgreSQL rows without exposing other organizations", async () => {
   let captured = null;
   const pool = {

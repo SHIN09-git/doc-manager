@@ -1,13 +1,126 @@
 {
-  "users": [],
-  "organizations": [],
-  "memberships": [],
+  "users": [
+    {
+      "id": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "email": "jinhanzhe09@gmail.com",
+      "name": "shin",
+      "avatar_url": "",
+      "password_hash": "pbkdf2$210000$SeTdQ3cZU03KP1_QfhX-DA$zc8GTMHHSVR5XDaHuGD_mFvCuAX5B2B_IoVfI6vlOW8",
+      "email_verified_at": null,
+      "created_at": "2026-05-28T18:27:35.991Z",
+      "updated_at": "2026-05-28T18:27:50.972Z",
+      "last_login_at": "2026-05-28T18:27:50.972Z",
+      "disabled_at": null
+    }
+  ],
+  "organizations": [
+    {
+      "id": "org_d8a62bc7-80a1-45af-9715-7aeb9811ccc4",
+      "name": "shin的工作区",
+      "slug": "shin",
+      "plan": "free",
+      "created_by": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "created_at": "2026-05-28T18:27:35.991Z",
+      "updated_at": "2026-05-28T18:27:35.991Z",
+      "plan_expires_at": null
+    }
+  ],
+  "memberships": [
+    {
+      "id": "mem_55dc71b1-7eff-4ce0-8cb6-534ea4eee440",
+      "organization_id": "org_d8a62bc7-80a1-45af-9715-7aeb9811ccc4",
+      "user_id": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "role": "owner",
+      "created_at": "2026-05-28T18:27:35.991Z"
+    }
+  ],
+  "organization_invitations": [],
+  "email_verifications": [
+    {
+      "id": "emv_b19ae2e1-06b3-4a72-9071-aef0c5ea03b3",
+      "user_id": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "token_hash": "288740c2806d6aa6fe4c6515aef55d0acc58e3d8513e6d383238efdaa77c3caa",
+      "created_at": "2026-05-28T18:27:36.018Z",
+      "expires_at": "2026-05-29T18:27:36.018Z",
+      "used_at": null
+    }
+  ],
+  "password_resets": [],
+  "email_deliveries": [
+    {
+      "id": "mail_ba785241-d09c-4008-8e38-06f446b77cdb",
+      "user_id": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "email": "jinhanzhe09@gmail.com",
+      "template": "email_verification",
+      "provider": "log",
+      "status": "sent",
+      "attempts": 1,
+      "error": "",
+      "metadata": {
+        "verification_id": "emv_b19ae2e1-06b3-4a72-9071-aef0c5ea03b3"
+      },
+      "created_at": "2026-05-28T18:27:36.019Z",
+      "updated_at": "2026-05-28T18:27:36.020Z"
+    }
+  ],
+  "login_attempts": [
+    {
+      "id": "lat_c0b3ec05-76fd-4e9e-b677-6f85c8729196",
+      "email": "jinhanzhe09@gmail.com",
+      "ip_hash": "7dade63a64a7394136a7d3adf028bde75c1c6f1a1b898f02aacf36681657a6db",
+      "success": true,
+      "created_at": "2026-05-28T18:27:50.972Z"
+    }
+  ],
   "documents": [],
   "writer_profiles": [],
   "writer_versions": [],
   "ai_usage": [],
+  "manual_payment_orders": [],
+  "credit_accounts": [],
+  "credit_ledger": [],
+  "ops_triage": [],
   "api_keys": [],
-  "audit_logs": [],
-  "sessions": [],
-  "rate_limits": []
+  "audit_logs": [
+    {
+      "id": "aud_758d0cf3-6b4c-4529-a1f7-d958f74abfe1",
+      "organization_id": "org_d8a62bc7-80a1-45af-9715-7aeb9811ccc4",
+      "user_id": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "action": "auth.register",
+      "target_type": "user",
+      "target_id": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "metadata": {},
+      "created_at": "2026-05-28T18:27:36.018Z"
+    },
+    {
+      "id": "aud_00b7cdca-2c5e-458f-85bc-f7e76163e69d",
+      "organization_id": "org_d8a62bc7-80a1-45af-9715-7aeb9811ccc4",
+      "user_id": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "action": "auth.login",
+      "target_type": "user",
+      "target_id": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "metadata": {},
+      "created_at": "2026-05-28T18:27:50.972Z"
+    }
+  ],
+  "system_events": [],
+  "admin_preferences": [],
+  "sessions": [
+    {
+      "id": "ses_430df98e-fba0-4ae6-af44-e735b8bdfe41",
+      "user_id": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "token_hash": "906df876f281d09aeb97f731796f7adaff77b7568751857120f1c2c2da4960fa",
+      "expires_at": "2026-06-11T18:27:36.018Z",
+      "created_at": "2026-05-28T18:27:36.018Z"
+    },
+    {
+      "id": "ses_84b1bff9-cd9b-439c-852b-ebd70454f84b",
+      "user_id": "usr_deec17ff-8cb0-4bd6-a7fa-85c6c3f64437",
+      "token_hash": "5fe31b4a64bdf56ef8e3044e3f63dcad66843548b9ac75a462cf9278470844fd",
+      "expires_at": "2026-06-11T18:27:50.972Z",
+      "created_at": "2026-05-28T18:27:50.972Z"
+    }
+  ],
+  "rate_limits": [],
+  "payment_webhooks": []
 }

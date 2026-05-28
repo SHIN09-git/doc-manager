@@ -56,6 +56,14 @@ node e2e/serve-static.mjs
 http://127.0.0.1:4173/index.html
 ```
 
+如果要部署到真实网站，可以先生成静态发布目录：
+
+```bash
+npm run build:static
+```
+
+发布目录是 `dist/`。完整上线准备见 [WEBSITE_DEPLOYMENT.md](WEBSITE_DEPLOYMENT.md)。
+
 ### 可选云端后端
 
 P0 商业化底座已提供最小后端服务。另开一个终端运行：
