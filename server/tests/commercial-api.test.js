@@ -413,6 +413,17 @@ test("manual recharge orders grant credits after admin approval", async () => {
   assert.equal(summary.status, 200);
   assert.ok(summary.json.manual_payment.packages.some((item) => item.id === "credits_1000"));
 
+  const missingProof = await api("/api/billing/manual-orders", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: {
+      package_id: "credits_1000",
+      payment_channel: "wechat",
+    },
+  });
+  assert.equal(missingProof.status, 400);
+  assert.equal(missingProof.json.error.code, "manual_payment_proof_required");
+
   const created = await api("/api/billing/manual-orders", {
     method: "POST",
     cookie: owner.cookie,
@@ -433,7 +444,17 @@ test("manual recharge orders grant credits after admin approval", async () => {
   });
   assert.equal(approved.status, 200);
   assert.equal(approved.json.order.status, "approved");
+  assert.equal(approved.json.order.review_note, "paid");
   assert.equal(approved.json.credits.balance, 1000);
+  assert.ok(approved.json.credit_ledger.some((item) => item.order_id === created.json.order.id && item.direction === "in"));
+
+  const billingAfterApproval = await api("/api/billing/summary", { cookie: owner.cookie });
+  assert.equal(billingAfterApproval.status, 200);
+  assert.ok(billingAfterApproval.json.credit_ledger.some((item) =>
+    item.order_id === created.json.order.id &&
+    item.direction === "in" &&
+    item.amount === 1000 &&
+    item.balance_after === 1000));
 
   for (let i = 0; i < 4; i += 1) {
     const response = await api("/api/ai/chat", {
@@ -451,6 +472,12 @@ test("manual recharge orders grant credits after admin approval", async () => {
   const refreshed = await api("/api/billing/manual-orders", { cookie: owner.cookie });
   assert.equal(refreshed.status, 200);
   assert.equal(refreshed.json.orders[0].status, "approved");
+  assert.ok(refreshed.json.credit_ledger.some((item) => item.order_id === created.json.order.id));
+
+  const data = await server.store.read();
+  assert.ok(data.audit_logs.some((item) => item.action === "billing.manual_order.create" && item.target_id === created.json.order.id && item.metadata.proof_submitted));
+  assert.ok(data.audit_logs.some((item) => item.action === "billing.manual_order.approve" && item.target_id === created.json.order.id && item.metadata.review_note === "paid"));
+  assert.ok(data.audit_logs.some((item) => item.action === "billing.credit.grant" && item.metadata.order_id === created.json.order.id && item.metadata.balance_after === 1000));
 });
 
 test("organization invitations add members without exposing cross-org data", async () => {

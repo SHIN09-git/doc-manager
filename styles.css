@@ -286,6 +286,98 @@
   align-items: start;
 }
 
+.feature-map-section {
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--line)) !important;
+}
+
+.feature-map-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.feature-map-group {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.feature-map-group-title {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: var(--font-semibold);
+}
+
+.feature-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 90%, var(--color-bg-subtle) 10%);
+}
+
+.feature-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.feature-card-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-card-head span,
+.feature-card-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.feature-card-head span {
+  flex-shrink: 0;
+  padding: 3px 7px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent-soft) 54%, var(--surface) 46%);
+  color: var(--accent-strong);
+  font-weight: var(--font-semibold);
+}
+
+.feature-card p {
+  margin: 0;
+  min-height: 40px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.feature-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.feature-card-tags span {
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: var(--radius-full);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.feature-card button {
+  min-height: 30px;
+  justify-self: start;
+  padding: 0 10px;
+}
+
 .cloud-billing-section {
   border-color: color-mix(in srgb, var(--accent) 20%, var(--line)) !important;
 }
@@ -348,7 +440,8 @@
 
 @container (max-width: 860px) {
   .cloud-page-body,
-  .cloud-dashboard-grid {
+  .cloud-dashboard-grid,
+  .feature-map-grid {
     grid-template-columns: 1fr;
   }
 

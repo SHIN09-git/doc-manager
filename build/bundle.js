@@ -24243,6 +24243,156 @@ ${formatListItems(items)}`;
     return typeof window !== "undefined" ? window : globalThis;
   }
 
+  // src/modules/cloud/billingFormatters.js
+  function formatManualPaymentPackage(item = {}) {
+    const amount = Number(item.amount_cny || 0);
+    const parts = [`${item.title || item.id || "\u5145\u503C\u5957\u9910"}`];
+    if (amount > 0) parts.push(`\xA5${amount}`);
+    if (item.plan) parts.push(`${String(item.plan).toUpperCase()} ${Number(item.duration_days || 0) || ""}\u5929`.trim());
+    if (Number(item.credits || 0) > 0) parts.push(`${Number(item.credits).toLocaleString("zh-CN")} \u70B9`);
+    return parts.join(" \xB7 ");
+  }
+  function formatManualOrderStatus(status) {
+    const value = String(status || "pending");
+    if (value === "approved") return "\u5DF2\u786E\u8BA4";
+    if (value === "rejected") return "\u5DF2\u62D2\u7EDD";
+    if (value === "cancelled") return "\u5DF2\u53D6\u6D88";
+    return "\u5F85\u786E\u8BA4";
+  }
+  function formatManualOrderSummary(item = {}) {
+    const orderId = item.id ? `\u8BA2\u5355 ${item.id}` : "\u8BA2\u5355";
+    const packageTitle = item.title || item.package_id || "\u5145\u503C\u5957\u9910";
+    const review = item.review_note ? ` \xB7 \u5BA1\u6838\u5907\u6CE8\uFF1A${item.review_note}` : "";
+    return `${formatManualOrderStatus(item.status)} \xB7 ${orderId} \xB7 ${packageTitle} \xB7 \xA5${Number(item.amount_cny || 0)} \xB7 ${item.created_at || ""}${review}`;
+  }
+  function formatCreditLedgerDirection(item = {}) {
+    return item.direction === "out" ? "\u6263\u51CF" : "\u5165\u8D26";
+  }
+  function formatCreditLedgerReason(reason) {
+    const value = String(reason || "");
+    if (value === "manual_payment_approved") return "\u4EBA\u5DE5\u5145\u503C\u786E\u8BA4";
+    if (value === "ai_quota_overage") return "AI \u8D85\u989D\u8C03\u7528";
+    return value || "\u989D\u5EA6\u6D41\u6C34";
+  }
+  function formatCreditLedgerSummary(item = {}) {
+    const direction = formatCreditLedgerDirection(item);
+    const sign = item.direction === "out" ? "-" : "+";
+    const source = item.order_title || formatCreditLedgerReason(item.reason);
+    const date = item.created_at || "";
+    return `${direction} ${sign}${Number(item.amount || 0).toLocaleString("zh-CN")} \u70B9 \xB7 \u4F59\u989D ${Number(item.balance_after || 0).toLocaleString("zh-CN")} \xB7 ${source} \xB7 ${date}`;
+  }
+
+  // src/modules/product/featureCatalog.js
+  var WORKBENCH_FEATURES = [
+    {
+      id: "documents",
+      group: "\u8D44\u6599\u4E0E\u6587\u6863",
+      title: "\u6587\u6863\u7BA1\u7406",
+      summary: "\u5BFC\u5165\u3001\u9605\u8BFB\u3001\u5F52\u7C7B\u3001\u6392\u5E8F\u548C\u6062\u590D\u8D44\u6599\uFF0C\u5F62\u6210\u53EF\u590D\u7528\u7684\u672C\u5730\u6587\u6863\u5E93\u3002",
+      entry: "\u5DE6\u4FA7\u6587\u6863\u680F",
+      action: "documents",
+      outputs: ["\u6587\u6863\u5E93", "\u6807\u7B7E", "\u5783\u573E\u7BB1"],
+      mode: "\u672C\u5730\u4F18\u5148"
+    },
+    {
+      id: "editor",
+      group: "\u8D44\u6599\u4E0E\u6587\u6863",
+      title: "\u6B63\u6587\u7F16\u8F91",
+      summary: "\u5728\u4E2D\u95F4\u7F16\u8F91\u533A\u5B8C\u6210\u6B63\u6587\u4FEE\u8BA2\u3001\u67E5\u627E\u66FF\u6362\u3001\u64A4\u9500\u3001\u53F3\u952E\u6574\u7406\u548C Word \u5BFC\u51FA\u3002",
+      entry: "\u4E2D\u95F4\u6B63\u6587\u533A",
+      action: "editor",
+      outputs: ["\u6B63\u6587", "Word \u6587\u6863"],
+      mode: "\u672C\u5730\u4F18\u5148"
+    },
+    {
+      id: "writer-use",
+      group: "\u6267\u7B14\u4EBA",
+      title: "\u4F7F\u7528\u6267\u7B14\u4EBA",
+      summary: "\u50CF\u8C03\u7528\u4E13\u5C5E\u5199\u4F5C\u52A9\u624B\u4E00\u6837\u4F7F\u7528 @\u8C03\u7528\u540D\uFF0C\u7A33\u5B9A\u63A7\u5236\u6587\u79CD\u7ED3\u6784\u548C\u8868\u8FBE\u4E60\u60EF\u3002",
+      entry: "\u53F3\u4FA7\u6267\u7B14\u4EBA\u5361\u7247",
+      action: "writer-use",
+      outputs: ["@\u8C03\u7528\u540D", "\u89C4\u5219\u6CE8\u5165"],
+      mode: "\u6838\u5FC3\u80FD\u529B"
+    },
+    {
+      id: "writer-build",
+      group: "\u6267\u7B14\u4EBA",
+      title: "\u751F\u6210\u6267\u7B14\u4EBA",
+      summary: "\u4ECE\u591A\u7BC7\u540C\u7C7B\u6837\u672C\u6587\u6863\u4E2D\u63D0\u70BC\u7ED3\u6784\u3001\u6587\u98CE\u3001\u7981\u5FCC\u548C\u5BA1\u7A3F\u6807\u51C6\uFF0C\u53EF\u91CD\u8BAD\u548C\u6D4B\u8BD5\u3002",
+      entry: "\u6267\u7B14\u4EBA\u5DE5\u4F5C\u53F0",
+      action: "writer-build",
+      outputs: ["\u8BF4\u660E.md", "\u89C4\u5219 JSON", "\u7248\u672C"],
+      mode: "AI \u6784\u5EFA"
+    },
+    {
+      id: "draft",
+      group: "\u751F\u6210\u4E0E\u6F14\u793A",
+      title: "AI \u8D77\u8349",
+      summary: "\u8F93\u5165\u5927\u6BB5\u63D0\u793A\u8BCD\u751F\u6210\u65B0\u6587\u6863\uFF0C\u4E5F\u53EF\u4EE5\u63D2\u5165\u6216\u8986\u76D6\u5F53\u524D\u6B63\u6587\uFF0C\u5E76\u652F\u6301 @\u6267\u7B14\u4EBA\u3002",
+      entry: "\u53F3\u4FA7\u751F\u6210\u7A97\u53E3",
+      action: "draft",
+      outputs: ["\u65B0\u6587\u6863", "\u63D2\u5165\u6B63\u6587", "\u8986\u76D6\u6B63\u6587"],
+      mode: "AI \u751F\u6210"
+    },
+    {
+      id: "ppt",
+      group: "\u751F\u6210\u4E0E\u6F14\u793A",
+      title: "PPT \u751F\u6210",
+      summary: "\u628A\u8D44\u6599\u6574\u7406\u4E3A\u53EF\u9884\u89C8\u3001\u53EF\u7F16\u8F91\u3001\u53EF\u5BFC\u51FA\u7684\u539F\u751F .pptx \u6F14\u793A\u7A3F\u3002",
+      entry: "PPT \u751F\u6210\u9875",
+      action: "ppt",
+      outputs: ["PPTX", "\u6F14\u8BB2\u5907\u6CE8", "\u9884\u89C8"],
+      mode: "AI \u751F\u6210"
+    },
+    {
+      id: "cloud-sync",
+      group: "\u4E91\u7AEF\u4E0E\u5546\u4E1A\u5316",
+      title: "\u4E91\u7AEF\u540C\u6B65",
+      summary: "\u767B\u5F55\u540E\u624B\u52A8\u540C\u6B65\u6587\u6863\u548C\u6267\u7B14\u4EBA\uFF0C\u5904\u7406\u7248\u672C\u51B2\u7A81\uFF0C\u5E76\u4FDD\u7559\u672C\u5730\u4F18\u5148\u6A21\u5F0F\u3002",
+      entry: "\u4E91\u7AEF\u9875",
+      action: "cloud-sync",
+      outputs: ["\u4E91\u7AEF\u6587\u6863", "\u4E91\u7AEF\u6267\u7B14\u4EBA"],
+      mode: "\u53EF\u9009\u4E91\u7AEF"
+    },
+    {
+      id: "billing",
+      group: "\u4E91\u7AEF\u4E0E\u5546\u4E1A\u5316",
+      title: "\u5957\u9910\u4E0E\u5145\u503C",
+      summary: "\u67E5\u770B\u5957\u9910\u3001\u989D\u5EA6\u548C\u8D39\u7528\u660E\u7EC6\uFF0C\u63D0\u4EA4\u4EBA\u5DE5\u5145\u503C\u8BA2\u5355\uFF0C\u7B49\u5F85\u7BA1\u7406\u5458\u786E\u8BA4\u5230\u8D26\u3002",
+      entry: "\u4E91\u7AEF\u9875\u5957\u9910\u4E0E\u5145\u503C",
+      action: "billing",
+      outputs: ["\u5145\u503C\u8BA2\u5355", "\u989D\u5EA6\u6D41\u6C34"],
+      mode: "\u7070\u5EA6\u53EF\u7528"
+    },
+    {
+      id: "admin",
+      group: "\u4E91\u7AEF\u4E0E\u5546\u4E1A\u5316",
+      title: "\u7BA1\u7406\u5458\u540E\u53F0",
+      summary: "\u9762\u5411 owner/admin\uFF0C\u7BA1\u7406\u6210\u5458\u3001\u63A5\u53E3\u3001\u7528\u91CF\u3001\u5BA1\u8BA1\u3001\u53CD\u9988\u3001\u90AE\u4EF6\u3001\u8D26\u5355\u548C\u9519\u8BEF\u3002",
+      entry: "admin.html",
+      action: "admin",
+      outputs: ["\u8FD0\u8425\u770B\u677F", "\u5BA1\u8BA1\u8BB0\u5F55", "\u5BA1\u6838\u5145\u503C"],
+      mode: "\u7BA1\u7406\u5458"
+    }
+  ];
+  function getFeatureGroups(features = WORKBENCH_FEATURES) {
+    const groups = [];
+    const index = /* @__PURE__ */ new Map();
+    features.forEach((feature) => {
+      const groupName = feature.group || "\u5176\u4ED6";
+      if (!index.has(groupName)) {
+        const group2 = { name: groupName, features: [] };
+        index.set(groupName, group2);
+        groups.push(group2);
+      }
+      index.get(groupName).features.push(feature);
+    });
+    return groups;
+  }
+  function getFeatureByAction(action, features = WORKBENCH_FEATURES) {
+    return features.find((feature) => feature.action === action) || null;
+  }
+
   // src/modules/documents/documentEditor.js
   function createDocumentEditor(deps) {
     const {
@@ -26164,6 +26314,19 @@ ${doc.content || ""}`);
   }
 
   // src/modules/ppt/guizangPpt.js
+  var PPT_DENSITY_LIMITS = {
+    titleChars: 34,
+    bodyChars: 150,
+    bulletChars: 52,
+    bulletsPerSlide: 7
+  };
+  var PPTX_NATIVE_RULES = [
+    "\u539F\u751F PPTX \u53EF\u7F16\u8F91\u6027\u89C4\u5219\uFF1A\u6240\u6709\u6B63\u6587\u3001\u6807\u9898\u3001\u8868\u683C\u3001\u5907\u6CE8\u90FD\u5FC5\u987B\u662F\u53EF\u7F16\u8F91\u6587\u672C\u6216\u8868\u683C\u6570\u636E\uFF0C\u4E0D\u8981\u628A\u6574\u9875\u5F53\u6210\u56FE\u7247\u3001\u622A\u56FE\u6216 HTML \u9875\u9762\u3002",
+    `\u6587\u5B57\u5BC6\u5EA6\u89C4\u5219\uFF1A\u6807\u9898\u5EFA\u8BAE\u4E0D\u8D85\u8FC7 ${PPT_DENSITY_LIMITS.titleChars} \u5B57\uFF0C\u6B63\u6587\u4E0D\u8D85\u8FC7 ${PPT_DENSITY_LIMITS.bodyChars} \u5B57\uFF0C\u6BCF\u9875\u8981\u70B9\u4E0D\u8D85\u8FC7 ${PPT_DENSITY_LIMITS.bulletsPerSlide} \u6761\uFF0C\u5355\u6761\u8981\u70B9\u4E0D\u8D85\u8FC7 ${PPT_DENSITY_LIMITS.bulletChars} \u5B57\uFF1B\u8D85\u51FA\u65F6\u62C6\u6210\u591A\u9875\u3002`,
+    "\u6BCF\u9875\u90FD\u8981\u8865\u5145 notes \u5B57\u6BB5\uFF0C\u5199\u7ED9\u6F14\u8BB2\u8005\u7684\u63D0\u793A\uFF0C\u4E0D\u8981\u628A\u5907\u6CE8\u5199\u8FDB\u9875\u9762\u6B63\u6587\u3002",
+    "\u5C01\u9762\u9875\u4E4B\u540E\u5E94\u6709\u6E05\u6670\u7684\u7AE0\u8282\u6216\u903B\u8F91\u9012\u8FDB\uFF1B\u6B63\u5F0F\u6C47\u62A5\u5EFA\u8BAE\u4EE5 closing \u9875\u6536\u675F\uFF0C\u7ED9\u51FA\u7ED3\u8BBA\u3001\u8BF7\u6C42\u6216\u4E0B\u4E00\u6B65\u3002",
+    "\u4E0D\u8981\u5F15\u7528\u5916\u90E8\u56FE\u7247 URL\u3001\u672C\u673A\u6587\u4EF6\u8DEF\u5F84\u3001\u7F51\u9875\u811A\u672C\u3001CSS \u7C7B\u540D\u6216\u65E0\u6CD5\u5728 PowerPoint \u4E2D\u7F16\u8F91\u7684\u6548\u679C\u3002imageText \u53EA\u80FD\u5199\u56FE\u7247\u5360\u4F4D\u8BF4\u660E\u3002"
+  ];
   function buildGuizangPptPrompt({ title, style, styleDescription, slideCount, autoSlideCount, content, skillPrompt }) {
     const styleGuide = buildPptStyleGuide(style, styleDescription);
     const slideCountInstruction = autoSlideCount ? "\u9875\u6570\u6A21\u5F0F\uFF1A\u81EA\u52A8\u3002\u8BF7\u6839\u636E\u7528\u6237\u6750\u6599\u7684\u4FE1\u606F\u91CF\u3001\u7ED3\u6784\u5C42\u7EA7\u548C\u6F14\u793A\u8282\u594F\u81EA\u884C\u51B3\u5B9A\u9875\u6570\uFF0C\u901A\u5E38\u63A7\u5236\u5728 6-24 \u9875\uFF1B\u5185\u5BB9\u5C11\u5C31\u5C11\u9875\uFF0C\u5185\u5BB9\u590D\u6742\u5C31\u62C6\u6210\u66F4\u591A\u9875\uFF0C\u4F46\u6700\u591A\u4E0D\u8981\u8D85\u8FC7 40 \u9875\u3002" : `\u5EFA\u8BAE\u9875\u6570\uFF1A${slideCount || 12}`;
@@ -26175,6 +26338,7 @@ ${doc.content || ""}`);
       "\u4E0D\u8981\u4F7F\u7528 emoji\uFF1B\u4E0D\u8981\u5F15\u7528\u672C\u673A\u8DEF\u5F84\uFF1B\u4E0D\u8981\u628A\u7F51\u9875\u4EA4\u4E92\u3001CSS\u3001\u811A\u672C\u5199\u8FDB\u7ED3\u679C\u3002",
       "\u53EF\u7528\u9875\u9762\u7C7B\u578B\uFF1Acover\u3001section\u3001content\u3001bullets\u3001timeline\u3001comparison\u3001quote\u3001data\u3001roadmap\u3001orgchart\u3001imageText\u3001appendix\u3001closing\u3002",
       "\u8BF7\u6839\u636E\u5185\u5BB9\u9009\u62E9\u5408\u9002\u9875\u9762\u7C7B\u578B\uFF1A\u6570\u636E\u9875\u7528\u4E8E\u6307\u6807/\u6570\u5B57\uFF0C\u8DEF\u7EBF\u56FE\u7528\u4E8E\u9636\u6BB5\u5B89\u6392\uFF0C\u7EC4\u7EC7\u56FE\u7528\u4E8E\u804C\u8D23\u5C42\u7EA7\uFF0C\u56FE\u6587\u9875\u7528\u4E8E\u56FE\u7247\u5360\u4F4D+\u8BF4\u660E\uFF0C\u9644\u5F55\u9875\u7528\u4E8E\u8865\u5145\u6750\u6599\u3002",
+      PPTX_NATIVE_RULES.join("\n"),
       styleGuide,
       skillPrompt ? `\u989D\u5916\u6267\u7B14\u4EBA\u89C4\u5219\uFF1A
 ${skillPrompt}` : "",
@@ -26262,6 +26426,34 @@ ${content}`
       addCheck("layout-variety", "\u5E03\u5C40\u4E30\u5BCC\u5EA6", "warn", "\u9875\u9762\u7C7B\u578B\u8F83\u5C11\uFF0C\u5EFA\u8BAE\u52A0\u5165\u6570\u636E\u9875\u3001\u8DEF\u7EBF\u56FE\u3001\u56FE\u6587\u9875\u6216\u9644\u5F55\u9875\u589E\u5F3A\u8282\u594F\u3002");
     } else {
       addCheck("layout-variety", "\u5E03\u5C40\u4E30\u5BCC\u5EA6", "pass", `\u5DF2\u4F7F\u7528 ${layoutSet.size} \u79CD\u9875\u9762\u7C7B\u578B\u3002`, "info");
+    }
+    const denseSlides = normalized.slides.map((slide, index) => {
+      const issues = [];
+      if (countChars(slide.title) > PPT_DENSITY_LIMITS.titleChars) issues.push("\u6807\u9898\u8FC7\u957F");
+      if (countChars(slide.body) > PPT_DENSITY_LIMITS.bodyChars) issues.push("\u6B63\u6587\u8FC7\u957F");
+      if ((slide.bullets || []).length > PPT_DENSITY_LIMITS.bulletsPerSlide) issues.push("\u8981\u70B9\u8FC7\u591A");
+      if ((slide.bullets || []).some((item) => countChars(item) > PPT_DENSITY_LIMITS.bulletChars)) issues.push("\u8981\u70B9\u8FC7\u957F");
+      return issues.length ? `${index + 1}\u9875(${issues.join("\u3001")})` : null;
+    }).filter(Boolean);
+    if (denseSlides.length) {
+      addCheck("text-density", "\u6587\u5B57\u5BC6\u5EA6", "warn", `\u90E8\u5206\u9875\u9762\u6587\u5B57\u504F\u591A\uFF0C\u5EFA\u8BAE\u62C6\u9875\u6216\u538B\u7F29\u8868\u8FBE\uFF1A${denseSlides.join("\u3001")}\u3002`);
+    } else {
+      addCheck("text-density", "\u6587\u5B57\u5BC6\u5EA6", "pass", "\u9875\u9762\u6587\u5B57\u5BC6\u5EA6\u9002\u5408 PPTX \u9605\u8BFB\u548C\u7F16\u8F91\u3002", "info");
+    }
+    const firstType = normalized.slides[0]?.type || "";
+    const lastType = normalized.slides.at(-1)?.type || "";
+    if (normalized.slides.length >= 3 && firstType !== "cover") {
+      addCheck("deck-flow", "\u6F14\u793A\u6D41\u7A0B", "warn", "\u9996\u5C4F\u4E0D\u662F\u5C01\u9762\u9875\uFF0C\u5EFA\u8BAE\u8865\u5145 cover \u9875\u660E\u786E\u4E3B\u9898\u548C\u5BF9\u8C61\u3002");
+    } else if (normalized.slides.length >= 5 && lastType !== "closing" && lastType !== "appendix") {
+      addCheck("deck-flow", "\u6F14\u793A\u6D41\u7A0B", "warn", "\u7ED3\u5C3E\u7F3A\u5C11 closing \u6216 appendix \u6536\u675F\u9875\uFF0C\u5EFA\u8BAE\u8865\u5145\u7ED3\u8BBA\u3001\u8BF7\u6C42\u6216\u540E\u7EED\u5B89\u6392\u3002");
+    } else {
+      addCheck("deck-flow", "\u6F14\u793A\u6D41\u7A0B", "pass", "\u6F14\u793A\u7ED3\u6784\u5177\u5907\u660E\u786E\u8D77\u6B62\u3002", "info");
+    }
+    const externalRefs = normalized.slides.map((slide, index) => hasExternalOrLocalReference(slide) ? index + 1 : null).filter(Boolean);
+    if (externalRefs.length) {
+      addCheck("native-editability", "\u539F\u751F\u53EF\u7F16\u8F91\u6027", "warn", `\u7B2C ${externalRefs.join("\u3001")} \u9875\u542B\u5916\u90E8\u94FE\u63A5\u3001\u672C\u673A\u8DEF\u5F84\u6216\u7F51\u9875\u6548\u679C\u63CF\u8FF0\uFF0C\u5BFC\u51FA PPTX \u540E\u53EF\u80FD\u4E0D\u53EF\u7F16\u8F91\u3002`);
+    } else {
+      addCheck("native-editability", "\u539F\u751F\u53EF\u7F16\u8F91\u6027", "pass", "\u672A\u53D1\u73B0\u5916\u90E8\u8D44\u6E90\u8DEF\u5F84\u6216\u7F51\u9875\u6548\u679C\u4F9D\u8D56\u3002", "info");
     }
     return {
       ok: checks.every((check) => check.status !== "fail"),
@@ -26371,6 +26563,21 @@ ${content}`
     if (value == null) return "";
     if (typeof value === "string") return value.trim();
     return String(value).trim();
+  }
+  function countChars(value) {
+    return asText(value).replace(/\s+/g, "").length;
+  }
+  function hasExternalOrLocalReference(slide) {
+    const text = [
+      slide.title,
+      slide.subtitle,
+      slide.kicker,
+      slide.body,
+      slide.notes,
+      ...slide.bullets || [],
+      ...(slide.table?.rows || []).flat()
+    ].map((item) => asText(item)).join("\n");
+    return /(https?:\/\/|file:\/\/|[a-zA-Z]:\\|\.css\b|<script\b|<\/?html\b|<\/?div\b)/i.test(text);
   }
   function isAutoSlideCount(value) {
     return value === true || String(value || "").trim().toLowerCase() === "auto";
@@ -35296,6 +35503,7 @@ ${JSON.stringify(payload, null, 2)}`
       "cloudPullDocsBtn",
       "cloudSaveWriterBtn",
       "cloudPullWritersBtn",
+      "featureMapGrid",
       "cloudUsageLabel",
       "cloudUsageReport",
       "cloudBillingLabel",
@@ -35660,7 +35868,9 @@ ${JSON.stringify(payload, null, 2)}`
     els.cloudSaveWriterBtn.addEventListener("click", cloudSaveCurrentWriter);
     els.cloudPullWritersBtn.addEventListener("click", cloudPullWriters);
     els.cloudManualOrderBtn?.addEventListener("click", cloudSubmitManualOrder);
+    els.cloudManualPackageSelect?.addEventListener("change", renderCloudManualPaymentMethods);
     els.cloudManualPaymentMethodSelect?.addEventListener("change", renderCloudManualPaymentMethods);
+    els.featureMapGrid?.addEventListener("click", handleFeatureMapAction);
     els.cloudExportDataBtn.addEventListener("click", cloudExportMyData);
     els.cloudDeleteAccountBtn.addEventListener("click", cloudDeleteAccount);
     els.cloudSendFeedbackBtn.addEventListener("click", cloudSendFeedback);
@@ -35848,6 +36058,7 @@ ${JSON.stringify(payload, null, 2)}`
     els.cloudStatusLabel.className = `status-pill ${authenticated ? "ready" : ""}`;
     els.cloudLogoutBtn.disabled = !authenticated;
     els.cloudAccountCard.innerHTML = authenticated ? `<strong>${escapeHtml(cloud.user.email || "")}</strong><span>${escapeHtml(orgName)} \xB7 ${escapeHtml(roleLabel(cloud.membership?.role || "owner"))} \xB7 ${emailVerified ? "\u90AE\u7BB1\u5DF2\u9A8C\u8BC1" : "\u90AE\u7BB1\u672A\u9A8C\u8BC1"}</span>` : "<strong>\u672A\u8FDE\u63A5\u4E91\u7AEF</strong><span>\u672C\u5730\u6570\u636E\u4ECD\u53EF\u6B63\u5E38\u4F7F\u7528\uFF0C\u767B\u5F55\u540E\u53EF\u67E5\u770B\u5957\u9910\u3001\u989D\u5EA6\u3001\u8D39\u7528\u660E\u7EC6\u5E76\u540C\u6B65\u4E2A\u4EBA\u6570\u636E\u3002</span>";
+    renderFeatureMap();
     [
       els.cloudSaveDocBtn,
       els.cloudPullDocsBtn,
@@ -35888,6 +36099,82 @@ ${JSON.stringify(payload, null, 2)}`
     }
     renderCloudBilling(authenticated);
   }
+  function renderFeatureMap() {
+    if (!els.featureMapGrid) return;
+    els.featureMapGrid.innerHTML = getFeatureGroups().map((group2) => `
+    <section class="feature-map-group" aria-label="${escapeHtml(group2.name)}">
+      <div class="feature-map-group-title">${escapeHtml(group2.name)}</div>
+      ${group2.features.map((feature) => `
+        <article class="feature-card" data-feature-id="${escapeHtml(feature.id)}">
+          <div class="feature-card-head">
+            <strong>${escapeHtml(feature.title)}</strong>
+            <span>${escapeHtml(feature.mode)}</span>
+          </div>
+          <p>${escapeHtml(feature.summary)}</p>
+          <div class="feature-card-meta">\u5165\u53E3\uFF1A${escapeHtml(feature.entry)}</div>
+          <div class="feature-card-tags">
+            ${feature.outputs.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+          </div>
+          <button type="button" data-feature-action="${escapeHtml(feature.action)}">\u8FDB\u5165</button>
+        </article>`).join("")}
+    </section>`).join("");
+  }
+  function handleFeatureMapAction(event) {
+    const button = event.target.closest("[data-feature-action]");
+    if (!button) return;
+    const feature = getFeatureByAction(button.dataset.featureAction);
+    if (!feature) return;
+    activateFeature(feature.action);
+  }
+  function activateFeature(action) {
+    const focusLater = (element) => window.setTimeout(() => element?.focus?.({ preventScroll: false }), 0);
+    if (action === "documents") {
+      switchMainView("editor");
+      focusLater(els.searchInput);
+      return;
+    }
+    if (action === "editor") {
+      switchMainView("editor");
+      focusLater(els.contentEditor);
+      return;
+    }
+    if (action === "writer-use") {
+      switchMainView("editor");
+      switchTab("style");
+      focusLater(els.styleList || els.newStyleBtn);
+      return;
+    }
+    if (action === "writer-build") {
+      switchMainView("editor");
+      switchTab("style");
+      els.newStyleBtn?.click?.();
+      return;
+    }
+    if (action === "draft") {
+      switchMainView("editor");
+      switchTab("generate");
+      focusLater(els.generatePrompt);
+      return;
+    }
+    if (action === "ppt") {
+      switchMainView("ppt");
+      focusLater(els.pptPromptInput);
+      return;
+    }
+    if (action === "cloud-sync") {
+      switchMainView("cloud");
+      focusLater(els.cloudSaveDocBtn);
+      return;
+    }
+    if (action === "billing") {
+      switchMainView("cloud");
+      focusLater(els.cloudManualPackageSelect);
+      return;
+    }
+    if (action === "admin") {
+      openStandaloneAdminPage();
+    }
+  }
   function renderCloudBilling(authenticated) {
     if (!els.cloudBillingReport) return;
     const billing = state.cloud?.billing || null;
@@ -35903,7 +36190,8 @@ ${JSON.stringify(payload, null, 2)}`
       return;
     }
     const plan = billing.organization?.plan || "free";
-    const manualOrderRows = Array.isArray(billing.manual_orders) && billing.manual_orders.length ? billing.manual_orders.slice(-5).reverse().map((item) => `${formatManualOrderStatus(item.status)} \xB7 ${item.title || item.package_id} \xB7 \xA5${Number(item.amount_cny || 0)} \xB7 ${item.created_at || ""}`).join("\n") : "\u6682\u65E0\u4EBA\u5DE5\u5145\u503C\u8BA2\u5355\u3002";
+    const manualOrderRows = Array.isArray(billing.manual_orders) && billing.manual_orders.length ? billing.manual_orders.slice(-5).reverse().map((item) => formatManualOrderSummary(item)).join("\n") : "\u6682\u65E0\u4EBA\u5DE5\u5145\u503C\u8BA2\u5355\u3002";
+    const creditLedgerRows = Array.isArray(billing.credit_ledger) && billing.credit_ledger.length ? billing.credit_ledger.slice(-8).reverse().map((item) => formatCreditLedgerSummary(item)).join("\n") : "\u6682\u65E0\u989D\u5EA6\u660E\u7EC6\u3002";
     els.cloudBillingLabel.textContent = `\u5957\u9910\uFF1A${plan}`;
     els.cloudBillingReport.textContent = [
       `\u5F53\u524D\u5957\u9910\uFF1A${plan}`,
@@ -35913,7 +36201,10 @@ ${JSON.stringify(payload, null, 2)}`
       `AI \u989D\u5EA6\uFF1A${Number(billing.credits?.balance || 0).toLocaleString("zh-CN")} \u70B9`,
       "",
       "\u6211\u7684\u5145\u503C\u8BA2\u5355\uFF1A",
-      manualOrderRows
+      manualOrderRows,
+      "",
+      "\u989D\u5EA6\u660E\u7EC6\uFF1A",
+      creditLedgerRows
     ].join("\n");
   }
   function renderCloudManualRecharge(authenticated, billing) {
@@ -35950,10 +36241,14 @@ ${JSON.stringify(payload, null, 2)}`
     if (!els.cloudManualPaymentMethods) return;
     const billing = state.cloud?.billing || null;
     const manual = billing?.manual_payment || {};
+    const packages = Array.isArray(manual.packages) ? manual.packages : [];
     const methods = Array.isArray(manual.methods) ? manual.methods : [];
+    const selectedPackageId = els.cloudManualPackageSelect?.value || packages[0]?.id || "";
+    const selectedPackage = packages.find((item) => item.id === selectedPackageId) || packages[0] || null;
     const selected = els.cloudManualPaymentMethodSelect?.value || methods[0]?.channel || "wechat";
     const method = methods.find((item) => item.channel === selected) || methods[0] || { channel: selected, label: selected, qr_url: "" };
     const receiver = manual.receiver_name ? `<span>\u6536\u6B3E\u65B9\uFF1A${escapeHtml(manual.receiver_name)}</span>` : "";
+    const packageHint = selectedPackage ? `<span>\u672C\u6B21\u5E94\u4ED8\uFF1A\xA5${escapeHtml(selectedPackage.amount_cny ?? 0)} \xB7 ${escapeHtml(formatManualPaymentPackage(selectedPackage))}</span>` : "";
     const qr = method.qr_url ? `<img src="${escapeHtml(method.qr_url)}" alt="${escapeHtml(method.label || method.channel)} \u6536\u6B3E\u7801">` : `<div class="manual-payment-placeholder">\u672A\u914D\u7F6E\u6536\u6B3E\u7801\uFF0C\u8BF7\u5411\u7BA1\u7406\u5458\u7D22\u53D6\u3002</div>`;
     els.cloudManualPaymentMethods.innerHTML = `
     <div class="manual-payment-method">
@@ -35961,24 +36256,10 @@ ${JSON.stringify(payload, null, 2)}`
       <div>
         <strong>${escapeHtml(method.label || method.channel || "\u652F\u4ED8\u65B9\u5F0F")}</strong>
         ${receiver}
+        ${packageHint}
         <span>\u4ED8\u6B3E\u540E\u63D0\u4EA4\u8BA2\u5355\uFF0C\u7BA1\u7406\u5458\u6838\u5BF9\u540E\u751F\u6548\u3002</span>
       </div>
     </div>`;
-  }
-  function formatManualPaymentPackage(item = {}) {
-    const amount = Number(item.amount_cny || 0);
-    const parts = [`${item.title || item.id || "\u5145\u503C\u5957\u9910"}`];
-    if (amount > 0) parts.push(`\xA5${amount}`);
-    if (item.plan) parts.push(`${String(item.plan).toUpperCase()} ${Number(item.duration_days || 0) || ""}\u5929`.trim());
-    if (Number(item.credits || 0) > 0) parts.push(`${Number(item.credits).toLocaleString("zh-CN")} \u70B9`);
-    return parts.join(" \xB7 ");
-  }
-  function formatManualOrderStatus(status) {
-    const value = String(status || "pending");
-    if (value === "approved") return "\u5DF2\u786E\u8BA4";
-    if (value === "rejected") return "\u5DF2\u62D2\u7EDD";
-    if (value === "cancelled") return "\u5DF2\u53D6\u6D88";
-    return "\u5F85\u786E\u8BA4";
   }
   function roleLabel(role) {
     const value = String(role || "member");
@@ -36265,7 +36546,8 @@ ${JSON.stringify(payload, null, 2)}`
             checkout: { enabled: false, available_plans: [] },
             manual_payment: data.manual_payment || {},
             manual_orders: data.orders || [],
-            credits: data.credits || null
+            credits: data.credits || null,
+            credit_ledger: data.credit_ledger || []
           };
           return;
         } catch {
@@ -36281,8 +36563,15 @@ ${JSON.stringify(payload, null, 2)}`
   async function cloudSubmitManualOrder() {
     const packageId = els.cloudManualPackageSelect?.value || "";
     const paymentChannel = els.cloudManualPaymentMethodSelect?.value || "wechat";
+    const payerNote = (els.cloudManualOrderNoteInput?.value || "").trim();
+    const proofText = (els.cloudManualProofInput?.value || "").trim();
     if (!packageId) {
       toast("\u8BF7\u9009\u62E9\u5145\u503C\u5957\u9910", "warn");
+      return;
+    }
+    if (!payerNote && !proofText) {
+      toast("\u8BF7\u586B\u5199\u4ED8\u6B3E\u5907\u6CE8\u6216\u51ED\u8BC1\u8BF4\u660E\uFF0C\u65B9\u4FBF\u7BA1\u7406\u5458\u6838\u5BF9", "warn");
+      els.cloudManualOrderNoteInput?.focus();
       return;
     }
     await withLoading(els.cloudManualOrderBtn, "\u63D0\u4EA4\u4E2D", async () => {
@@ -36291,15 +36580,16 @@ ${JSON.stringify(payload, null, 2)}`
         body: JSON.stringify({
           package_id: packageId,
           payment_channel: paymentChannel,
-          payer_note: els.cloudManualOrderNoteInput?.value || "",
-          proof_text: els.cloudManualProofInput?.value || ""
+          payer_note: payerNote,
+          proof_text: proofText
         })
       });
       if (els.cloudManualOrderNoteInput) els.cloudManualOrderNoteInput.value = "";
       if (els.cloudManualProofInput) els.cloudManualProofInput.value = "";
       await refreshCloudBilling({ silent: true });
       renderCloudPanel();
-      toast(`\u5145\u503C\u8BA2\u5355\u5DF2\u63D0\u4EA4\uFF1A${data.order?.title || packageId}`);
+      const orderId = data.order?.id ? `\uFF08\u8BA2\u5355\u53F7\uFF1A${data.order.id}\uFF09` : "";
+      toast(`\u5145\u503C\u8BA2\u5355\u5DF2\u63D0\u4EA4\uFF1A${data.order?.title || packageId}${orderId}`);
     });
   }
   async function cloudExportMyData() {
@@ -37618,14 +37908,17 @@ ${mention} ` : `${mention} `;
         must: [
           "\u8F93\u51FA\u5FC5\u987B\u9002\u5408\u8F6C\u6362\u4E3A\u53EF\u7F16\u8F91\u7684\u539F\u751F PowerPoint \u9875\u9762",
           "\u6BCF\u9875\u53EA\u8868\u8FBE\u4E00\u4E2A\u6838\u5FC3\u89C2\u70B9",
+          "\u6807\u9898\u3001\u6B63\u6587\u3001\u8981\u70B9\u3001\u8868\u683C\u548C\u5907\u6CE8\u5FC5\u987B\u4FDD\u7559\u4E3A\u53EF\u7F16\u8F91\u6587\u672C\u6216\u8868\u683C\u6570\u636E\uFF0C\u4E0D\u5F97\u6574\u9875\u622A\u56FE\u5316",
+          "\u6807\u9898\u3001\u6B63\u6587\u548C\u8981\u70B9\u9700\u8981\u63A7\u5236\u5B57\u6570\uFF0C\u5185\u5BB9\u8FC7\u5BC6\u65F6\u62C6\u6210\u591A\u9875",
+          "\u6BCF\u9875\u90FD\u8981\u8865\u5145\u6F14\u8BB2\u8005\u5907\u6CE8\uFF0C\u5907\u6CE8\u53EA\u670D\u52A1\u8BB2\u8FF0\uFF0C\u4E0D\u8981\u6324\u8FDB\u9875\u9762\u6B63\u6587",
           "\u6839\u636E\u5185\u5BB9\u9009\u62E9 cover\u3001section\u3001content\u3001data\u3001roadmap\u3001orgchart\u3001imageText\u3001appendix\u3001closing \u7B49\u5E03\u5C40"
         ],
-        recommended: [styleDescription],
+        recommended: [styleDescription, "\u6B63\u5F0F\u6C47\u62A5\u5EFA\u8BAE\u4EE5 cover \u5F00\u573A\uFF0C\u4EE5 closing \u6216 appendix \u6536\u675F\uFF0C\u5E76\u5728\u4E2D\u95F4\u7A7F\u63D2\u6570\u636E\u9875\u3001\u8DEF\u7EBF\u56FE\u6216\u5BF9\u6BD4\u9875\u5F62\u6210\u8282\u594F\u3002"],
         optional: []
       },
-      forbidden: ["\u4E0D\u5F97\u4F9D\u8D56\u7F51\u9875\u811A\u672C\u3001CSS \u52A8\u753B\u3001\u672C\u673A\u8DEF\u5F84\u6216\u622A\u56FE\u5F0F\u8F93\u51FA", "\u4E0D\u5F97\u7F16\u9020\u7528\u6237\u672A\u63D0\u4F9B\u7684\u4E8B\u5B9E\u3001\u6570\u5B57\u3001\u65F6\u95F4\u548C\u8D23\u4EFB\u4EBA"],
+      forbidden: ["\u4E0D\u5F97\u4F9D\u8D56\u7F51\u9875\u811A\u672C\u3001CSS \u52A8\u753B\u3001\u672C\u673A\u8DEF\u5F84\u3001\u5916\u90E8\u56FE\u7247 URL \u6216\u622A\u56FE\u5F0F\u8F93\u51FA", "\u4E0D\u5F97\u7F16\u9020\u7528\u6237\u672A\u63D0\u4F9B\u7684\u4E8B\u5B9E\u3001\u6570\u5B57\u3001\u65F6\u95F4\u548C\u8D23\u4EFB\u4EBA"],
       generation_steps: ["\u5224\u65AD\u6F14\u793A\u76EE\u6807", "\u62C6\u5206\u9875\u9762\u7ED3\u6784", "\u9009\u62E9\u9875\u9762\u7C7B\u578B", "\u63A7\u5236\u6587\u5B57\u5BC6\u5EA6", "\u8865\u5145\u6F14\u8BB2\u8005\u5907\u6CE8", "\u6267\u884C\u7ED3\u6784\u81EA\u68C0"],
-      self_checklist: ["\u9875\u6570\u662F\u5426\u7B26\u5408\u8981\u6C42", "\u6BCF\u9875\u6807\u9898\u662F\u5426\u660E\u786E", "\u8868\u683C\u662F\u5426\u9002\u5408\u6F14\u793A\u9875", "\u5907\u6CE8\u662F\u5426\u5B8C\u6574", "\u5E03\u5C40\u662F\u5426\u6709\u8282\u594F\u53D8\u5316"],
+      self_checklist: ["\u9875\u6570\u662F\u5426\u7B26\u5408\u8981\u6C42", "\u6BCF\u9875\u6807\u9898\u662F\u5426\u660E\u786E", "\u6587\u5B57\u5BC6\u5EA6\u662F\u5426\u9002\u5408\u6F14\u793A\u9875", "\u8868\u683C\u662F\u5426\u9002\u5408\u6F14\u793A\u9875", "\u5907\u6CE8\u662F\u5426\u5B8C\u6574", "\u662F\u5426\u5B58\u5728\u5916\u90E8\u8D44\u6E90\u6216\u7F51\u9875\u6548\u679C\u4F9D\u8D56", "\u5E03\u5C40\u662F\u5426\u6709\u8282\u594F\u53D8\u5316"],
       ppt_generation: {
         style: "custom",
         styleDescription,

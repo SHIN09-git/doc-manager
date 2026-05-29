@@ -42,12 +42,14 @@ src/modules/*
 | `src/main.js` | 打包入口，注册模块能力 |
 | `src/admin/` | 独立后台页面脚本，不依赖主工作台 DOM |
 | `src/modules/ai/` | AI 调用、重试、取消、JSON 容错和接口配置 |
+| `src/modules/cloud/` | 云端账单、人工充值和费用明细的前端展示格式化工具 |
 | `src/modules/documents/` | 文档导入、阅读、导出、垃圾箱、真实文件夹关联 |
+| `src/modules/product/` | 产品级功能目录，用于功能地图和后续内容结构统一 |
 | `src/modules/skills/` | 执笔人解析、聚合、生成、渲染、导入导出、版本和测试 |
 | `src/modules/ppt/` | PPT 素材整理、HTML 预览和原生 `.pptx` 生成 |
 | `src/modules/storage/` | IndexedDB 与 localStorage 兼容存储 |
 | `src/utils/` | EventBus、DOM 工具、拖拽路由、通用函数 |
-| `server/` | 商业化后端，包含账号安全、组织、团队邀请、云端同步、AI 代理、用量、审计、邮件投递、支付 webhook、备份脚本和管理汇总 |
+| `server/` | 商业化后端，包含账号安全、组织、团队邀请、云端同步、AI 代理、用量、审计、邮件投递、支付 webhook、人工充值、备份脚本和管理汇总 |
 | `test/` | Node 单元测试 |
 | `e2e/` | Playwright 端到端测试与静态服务 |
 
@@ -86,6 +88,37 @@ src/modules/*
 3. 通过事件通知局部视图刷新。
 
 后续重构建议继续把 `app.js` 中的页面控制逻辑迁移到更小的控制器模块。
+
+## 功能内容结构
+
+工作台的功能目录集中在 `src/modules/product/featureCatalog.js`。该目录不保存业务数据，只描述：
+
+- 功能所属分组
+- 用户看到的名称和说明
+- 入口位置
+- 主要产出
+- 跳转动作
+
+云端页的“功能地图”从这份目录渲染。后续新增功能时，应先补充功能目录，再接入具体 UI 和文档，避免 README、入门指南、工作台入口和后台说明各写一套。
+
+## 云端账单边界
+
+人工确认充值已经形成一条独立链路：
+
+```text
+用户提交充值申请
+  → manual_payment_orders
+  → 管理员确认 / 拒绝
+  → credit_accounts / credit_ledger
+  → audit_logs / system_events
+  → 用户云端页和独立后台账单页
+```
+
+结构约定：
+
+- 前端展示文案和状态格式化集中在 `src/modules/cloud/billingFormatters.js`，主工作台和独立后台共用，避免状态名、支付方式、额度流水文案分叉。
+- 后端额度流水公开字段集中在 `server/src/billing/creditLedger.js`，接口只返回按组织和权限过滤后的公开字段。
+- `server/src/app.js` 仍负责路由和事务编排，但新增账单子能力时应优先放入 `server/src/billing/`，再由路由调用。
 
 ## 文档链路
 

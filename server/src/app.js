@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { loadEnv } from "./config/env.js";
+import { listPublicCreditLedger } from "./billing/creditLedger.js";
 import { createStore } from "./db/storeFactory.js";
 import { normalizeAuditFiltersFromUrl } from "./db/repositories/auditRepository.js";
 import { normalizeDocumentListFiltersFromUrl } from "./db/repositories/documentRepository.js";
@@ -1154,6 +1155,12 @@ async function billingSummary(ctx) {
   const orders = data.manual_payment_orders
     .filter((item) => item.organization_id === organization.id && (isAdmin || item.user_id === ctx.auth.user.id))
     .slice(-20);
+  const creditLedger = listPublicCreditLedger(data, {
+    organizationId: organization.id,
+    userId: ctx.auth.user.id,
+    isAdmin,
+    limit: 50,
+  });
   const monthUsage = data.ai_usage.filter((item) =>
     item.organization_id === organization.id &&
     item.created_at?.startsWith(monthKey()) &&
@@ -1167,6 +1174,7 @@ async function billingSummary(ctx) {
     budget: summarizeUsageBudget(usage, monthUsage, ctx.env),
     payment_webhooks: webhooks,
     manual_orders: orders.map((item) => publicManualPaymentOrder(item, { admin: isAdmin, userId: ctx.auth.user.id })),
+    credit_ledger: creditLedger,
     checkout: {
       mode: ctx.env.paymentCheckoutMode,
       enabled: isAdmin && ctx.env.paymentCheckoutMode !== "disabled",
@@ -1222,8 +1230,14 @@ async function listManualPaymentOrders(ctx) {
     .filter((item) => item.organization_id === organization.id && (isAdmin || item.user_id === ctx.auth.user.id))
     .slice(-100);
   sendJson(ctx.response, 200, {
-    orders: orders.map((item) => publicManualPaymentOrder(item, { admin: isAdmin })),
+    orders: orders.map((item) => publicManualPaymentOrder(item, { admin: isAdmin, userId: ctx.auth.user.id })),
     credits: publicCreditAccount(getCreditAccount(data, organization.id, ctx.auth.user.id)),
+    credit_ledger: listPublicCreditLedger(data, {
+      organizationId: organization.id,
+      userId: ctx.auth.user.id,
+      isAdmin,
+      limit: 100,
+    }),
     manual_payment: getManualPaymentSummary(ctx.env),
   });
 }
@@ -1237,6 +1251,9 @@ async function createManualPaymentOrder(ctx) {
   if (!paymentChannel) throw new HttpError(400, "请选择支付方式", "invalid_payment_channel");
   const payerNote = String(body.payer_note || body.payerNote || "").trim().slice(0, 500);
   const proofText = String(body.proof_text || body.proofText || "").trim().slice(0, 1000);
+  if (!payerNote && !proofText) {
+    throw new HttpError(400, "请填写付款备注或凭证说明，方便管理员核对", "manual_payment_proof_required");
+  }
   const order = await ctx.store.write((data) => {
     const now = new Date().toISOString();
     const next = {
@@ -1263,8 +1280,13 @@ async function createManualPaymentOrder(ctx) {
     data.manual_payment_orders.push(next);
     addAudit(data, organization.id, ctx.auth.user.id, "billing.manual_order.create", "manual_payment_order", next.id, {
       package_id: next.package_id,
+      package_type: next.package_type,
       amount_cny: next.amount_cny,
+      credits: next.credits,
+      plan: next.plan || "",
+      duration_days: next.duration_days,
       payment_channel: next.payment_channel,
+      proof_submitted: Boolean(next.proof_text || next.payer_note),
     });
     addSystemEvent(data, organization.id, ctx.auth.user.id, "info", "billing.manual_order.pending", "收到人工充值订单，等待管理员确认", {
       order_id: next.id,
@@ -1272,7 +1294,7 @@ async function createManualPaymentOrder(ctx) {
     });
     return next;
   });
-  sendJson(ctx.response, 201, { order: publicManualPaymentOrder(order) });
+  sendJson(ctx.response, 201, { order: publicManualPaymentOrder(order, { userId: ctx.auth.user.id }) });
 }
 
 async function reviewManualPaymentOrder(ctx, orderId) {
@@ -1296,6 +1318,7 @@ async function reviewManualPaymentOrder(ctx, orderId) {
     order.review_note = reviewNote;
     order.updated_at = now;
     let creditAccount = null;
+    let planOrganization = null;
     if (approved) {
       if (Number(order.credits || 0) > 0) {
         creditAccount = grantCredits(data, {
@@ -1305,9 +1328,26 @@ async function reviewManualPaymentOrder(ctx, orderId) {
           amount: Number(order.credits || 0),
           reason: "manual_payment_approved",
         });
+        addAudit(data, organization.id, ctx.auth.user.id, "billing.credit.grant", "credit_account", creditAccount.id, {
+          order_id: order.id,
+          user_id: order.user_id,
+          amount: Number(order.credits || 0),
+          balance_after: creditAccount.balance,
+          review_note: reviewNote,
+        });
       }
       if (order.plan) {
-        applyApprovedPlanOrder(data, organization.id, order);
+        planOrganization = applyApprovedPlanOrder(data, organization.id, order);
+        if (planOrganization) {
+          addAudit(data, organization.id, ctx.auth.user.id, "billing.plan.manual_activate", "organization", organization.id, {
+            order_id: order.id,
+            user_id: order.user_id,
+            plan: order.plan,
+            duration_days: order.duration_days,
+            plan_expires_at: planOrganization.plan_expires_at || null,
+            review_note: reviewNote,
+          });
+        }
       }
     }
     addAudit(data, organization.id, ctx.auth.user.id, approved ? "billing.manual_order.approve" : "billing.manual_order.reject", "manual_payment_order", order.id, {
@@ -1315,17 +1355,31 @@ async function reviewManualPaymentOrder(ctx, orderId) {
       amount_cny: order.amount_cny,
       credits: order.credits,
       plan: order.plan || "",
+      duration_days: order.duration_days,
+      payment_channel: order.payment_channel,
+      review_note: reviewNote,
     });
     addSystemEvent(data, organization.id, order.user_id, approved ? "info" : "warn", approved ? "billing.manual_order.approved" : "billing.manual_order.rejected", approved ? "人工充值订单已确认" : "人工充值订单已拒绝", {
       order_id: order.id,
       package_id: order.package_id,
       reviewed_by: ctx.auth.user.id,
     });
-    return { order, creditAccount };
+    return {
+      order,
+      creditAccount,
+      planOrganization,
+      creditLedger: listPublicCreditLedger(data, {
+        organizationId: organization.id,
+        userId: order.user_id,
+        isAdmin: true,
+        limit: 20,
+      }),
+    };
   });
   sendJson(ctx.response, 200, {
     order: publicManualPaymentOrder(result.order, { admin: true }),
     credits: result.creditAccount ? publicCreditAccount(result.creditAccount) : null,
+    credit_ledger: result.creditLedger,
   });
 }
 
@@ -1670,6 +1724,7 @@ async function adminDashboard(ctx) {
       manual_orders: data.manual_payment_orders.filter((item) => item.organization_id === organization.id).slice(-50).map((item) => publicManualPaymentOrder(item, { admin: true })),
       manual_payment: getManualPaymentSummary(ctx.env),
       credits: getOrganizationCreditSummary(data, organization.id),
+      credit_ledger: listPublicCreditLedger(data, { organizationId: organization.id, isAdmin: true, limit: 100 }),
     },
   });
 }
@@ -2435,7 +2490,7 @@ function addDays(date, days) {
 
 function applyApprovedPlanOrder(data, organizationId, order) {
   const organization = data.organizations.find((item) => item.id === organizationId);
-  if (!organization || !order.plan) return;
+  if (!organization || !order.plan) return null;
   const now = new Date();
   const currentExpiry = organization.plan === order.plan && organization.plan_expires_at
     ? Date.parse(organization.plan_expires_at)
@@ -2444,6 +2499,7 @@ function applyApprovedPlanOrder(data, organizationId, order) {
   organization.plan = order.plan;
   organization.plan_expires_at = order.duration_days > 0 ? addDays(start, order.duration_days).toISOString() : null;
   organization.updated_at = now.toISOString();
+  return organization;
 }
 
 function getCreditAccount(data, organizationId, userId) {

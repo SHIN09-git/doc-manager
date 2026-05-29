@@ -763,6 +763,13 @@ test("cloud panel keeps local mode safe before login", async ({ page }) => {
   await expect(page.locator("#cloudAdminDashboardBtn")).toHaveCount(0);
   await expect(page.locator("#cloudRecentErrorsBtn")).toHaveCount(0);
   await expect(page.locator("#cloudBillingReport")).toContainText("登录云端后显示套餐");
+  await expect(page.locator("#featureMapGrid")).toContainText("文档管理");
+  await expect(page.locator("#featureMapGrid")).toContainText("套餐与充值");
+  await page.locator('[data-feature-action="draft"]').click();
+  await expect(page.locator("#editorPanel")).toHaveAttribute("data-main-view", "editor");
+  await expect(page.locator("#generatePanel")).toHaveClass(/active/);
+  await expect(page.locator("#generatePrompt")).toBeFocused();
+  await page.locator("#cloudTopBtn").click();
   await page.locator("#cloudBackToEditorBtn").click();
   await expect(page.locator("#editorPanel")).toHaveAttribute("data-main-view", "editor");
   await expect(page.locator("#contentEditor")).toBeVisible();
@@ -820,8 +827,9 @@ test("standalone admin page supports core management actions with API session", 
     { id: "err-2", level: "warn", type: "email", message: "Email bounced", created_at: "2026-05-24T08:00:00.000Z", metadata: { triage_status: "open", sla_at: "2026-05-27" } },
   ];
   let manualOrders = [
-    { id: "mop-1", title: "1000 点 AI 额度", package_id: "credits_1000", amount_cny: 50, credits: 1000, plan: "", duration_days: 0, payment_channel: "wechat", status: "pending", created_at: "2026-05-24T09:00:00.000Z" },
+    { id: "mop-1", user_id: "usr-1", title: "1000 点 AI 额度", package_id: "credits_1000", amount_cny: 50, credits: 1000, plan: "", duration_days: 0, payment_channel: "wechat", payer_note: "微信尾号 1234", proof_text: "交易单号 202605240001", status: "pending", created_at: "2026-05-24T09:00:00.000Z" },
   ];
+  let creditLedger = [];
 
   await page.route("**/mock-api/**", async (route) => {
     const request = route.request();
@@ -864,7 +872,7 @@ test("standalone admin page supports core management actions with API session", 
         feedbacks,
         recent_errors: recentErrors,
         email_deliveries: [],
-        billing: { payment_webhooks: [], manual_orders: manualOrders, credits: { total_balance: 0, account_count: 0 } },
+        billing: { payment_webhooks: [], manual_orders: manualOrders, credits: { total_balance: 0, account_count: 0 }, credit_ledger: creditLedger },
       });
     }
 
@@ -878,6 +886,7 @@ test("standalone admin page supports core management actions with API session", 
         budget: { today_cost: 0.03, month_cost: 0.03, daily_budget_cny: 1, monthly_budget_cny: 10 },
         payment_webhooks: [],
         manual_orders: manualOrders,
+        credit_ledger: creditLedger,
         credits: { balance: 0 },
         manual_payment: { packages: [{ id: "credits_1000", title: "1000 点 AI 额度", amount_cny: 50, credits: 1000 }], methods: [] },
         checkout: { enabled: true, available_plans: [{ plan: "pro", price_id: "price_pro" }] },
@@ -919,7 +928,10 @@ test("standalone admin page supports core management actions with API session", 
     }
     if (path === "/billing/manual-orders/mop-1/review" && method === "POST") {
       manualOrders = manualOrders.map((item) =>
-        item.id === "mop-1" ? { ...item, status: body.action === "reject" ? "rejected" : "approved", reviewed_at: "2026-05-24T10:00:00.000Z" } : item);
+        item.id === "mop-1" ? { ...item, status: body.action === "reject" ? "rejected" : "approved", reviewed_at: "2026-05-24T10:00:00.000Z", review_note: body.review_note || "" } : item);
+      if (body.action !== "reject") {
+        creditLedger = [{ id: "led-1", user_id: "usr-1", user_email: "owner@example.com", order_id: "mop-1", direction: "in", amount: 1000, balance_after: 1000, reason: "manual_payment_approved", order_title: "1000 点 AI 额度", created_at: "2026-05-24T10:00:00.000Z" }];
+      }
       return json(200, { order: manualOrders[0], credits: { balance: 1000 } });
     }
     if (path.startsWith("/feedback/") && path.endsWith("/status") && method === "POST") {
@@ -1024,7 +1036,10 @@ test("standalone admin page supports core management actions with API session", 
   await page.locator('[data-admin-view="billing"]').click();
   await expect(page.locator("#adminContent")).toContainText("人工确认充值");
   await page.locator('[data-admin-action="manual-order-approve"]').click();
+  await expect(page.locator("#adminConfirmModal")).toBeVisible();
+  await page.locator("#adminConfirmModal [data-admin-confirm-ok]").click();
   await expect(page.locator("#adminContent")).toContainText("已确认");
+  await expect(page.locator("#adminContent")).toContainText("额度明细");
   await page.locator('[data-admin-action="billing-checkout"]').click();
   await expect.poll(() => page.evaluate(() => window.__openedAdminUrls.at(-1))).toContain("plan=pro");
 });

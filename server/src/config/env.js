@@ -41,7 +41,7 @@ export function loadEnv(source = process.env) {
     emailCallbackToken: source.EMAIL_CALLBACK_TOKEN || "",
     emailResendApiKey: source.EMAIL_RESEND_API_KEY || "",
     emailResendEndpoint: (source.EMAIL_RESEND_ENDPOINT || "https://api.resend.com/emails").replace(/\/+$/, ""),
-    appUrl: (source.APP_URL || "http://127.0.0.1:4173/index.html").replace(/\/+$/, ""),
+    appUrl: (source.APP_URL || source.APP_BASE_URL || "http://127.0.0.1:4173/index.html").replace(/\/+$/, ""),
     backupDir: path.resolve(source.BACKUP_DIR || path.join(dataDir, "backups")),
     backupRetentionDays: toNumber(source.BACKUP_RETENTION_DAYS, 14),
     backupEncryptionKey: source.BACKUP_ENCRYPTION_KEY || "",

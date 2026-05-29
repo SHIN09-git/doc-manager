@@ -1,4 +1,5 @@
 import { cp, mkdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
@@ -15,5 +16,9 @@ await Promise.all([
   cp(path.join(root, "build", "bundle.js"), path.join(dist, "build", "bundle.js")),
   cp(path.join(root, "src", "admin", "adminPage.js"), path.join(dist, "src", "admin", "adminPage.js")),
 ]);
+
+if (existsSync(path.join(root, "assets"))) {
+  await cp(path.join(root, "assets"), path.join(dist, "assets"), { recursive: true });
+}
 
 console.log(`Static site written to ${dist}`);

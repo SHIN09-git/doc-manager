@@ -19,6 +19,12 @@ import {
 } from "./src/core/storageBootstrap.js";
 import { EVENTS, eventBus } from "./src/core/eventBus.js";
 import { createAiClient } from "./src/modules/ai/aiClient.js";
+import {
+  formatCreditLedgerSummary,
+  formatManualOrderSummary,
+  formatManualPaymentPackage,
+} from "./src/modules/cloud/billingFormatters.js";
+import { getFeatureByAction, getFeatureGroups } from "./src/modules/product/featureCatalog.js";
 import { createDocumentEditor } from "./src/modules/documents/documentEditor.js";
 import { createDocumentManager } from "./src/modules/documents/documentManager.js";
 import { createDocumentRenderer } from "./src/modules/documents/documentRenderer.js";
@@ -503,6 +509,7 @@ function bindElements() {
     "cloudPullDocsBtn",
     "cloudSaveWriterBtn",
     "cloudPullWritersBtn",
+    "featureMapGrid",
     "cloudUsageLabel",
     "cloudUsageReport",
     "cloudBillingLabel",
@@ -896,7 +903,9 @@ function bindEvents() {
   els.cloudSaveWriterBtn.addEventListener("click", cloudSaveCurrentWriter);
   els.cloudPullWritersBtn.addEventListener("click", cloudPullWriters);
   els.cloudManualOrderBtn?.addEventListener("click", cloudSubmitManualOrder);
+  els.cloudManualPackageSelect?.addEventListener("change", renderCloudManualPaymentMethods);
   els.cloudManualPaymentMethodSelect?.addEventListener("change", renderCloudManualPaymentMethods);
+  els.featureMapGrid?.addEventListener("click", handleFeatureMapAction);
   els.cloudExportDataBtn.addEventListener("click", cloudExportMyData);
   els.cloudDeleteAccountBtn.addEventListener("click", cloudDeleteAccount);
   els.cloudSendFeedbackBtn.addEventListener("click", cloudSendFeedback);
@@ -1110,6 +1119,7 @@ function renderCloudPanel() {
   els.cloudAccountCard.innerHTML = authenticated
     ? `<strong>${escapeHtml(cloud.user.email || "")}</strong><span>${escapeHtml(orgName)} · ${escapeHtml(roleLabel(cloud.membership?.role || "owner"))} · ${emailVerified ? "邮箱已验证" : "邮箱未验证"}</span>`
     : "<strong>未连接云端</strong><span>本地数据仍可正常使用，登录后可查看套餐、额度、费用明细并同步个人数据。</span>";
+  renderFeatureMap();
 
   [
     els.cloudSaveDocBtn,
@@ -1156,6 +1166,85 @@ function renderCloudPanel() {
   renderCloudBilling(authenticated);
 }
 
+function renderFeatureMap() {
+  if (!els.featureMapGrid) return;
+  els.featureMapGrid.innerHTML = getFeatureGroups().map((group) => `
+    <section class="feature-map-group" aria-label="${escapeHtml(group.name)}">
+      <div class="feature-map-group-title">${escapeHtml(group.name)}</div>
+      ${group.features.map((feature) => `
+        <article class="feature-card" data-feature-id="${escapeHtml(feature.id)}">
+          <div class="feature-card-head">
+            <strong>${escapeHtml(feature.title)}</strong>
+            <span>${escapeHtml(feature.mode)}</span>
+          </div>
+          <p>${escapeHtml(feature.summary)}</p>
+          <div class="feature-card-meta">入口：${escapeHtml(feature.entry)}</div>
+          <div class="feature-card-tags">
+            ${feature.outputs.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+          </div>
+          <button type="button" data-feature-action="${escapeHtml(feature.action)}">进入</button>
+        </article>`).join("")}
+    </section>`).join("");
+}
+
+function handleFeatureMapAction(event) {
+  const button = event.target.closest("[data-feature-action]");
+  if (!button) return;
+  const feature = getFeatureByAction(button.dataset.featureAction);
+  if (!feature) return;
+  activateFeature(feature.action);
+}
+
+function activateFeature(action) {
+  const focusLater = (element) => window.setTimeout(() => element?.focus?.({ preventScroll: false }), 0);
+  if (action === "documents") {
+    switchMainView("editor");
+    focusLater(els.searchInput);
+    return;
+  }
+  if (action === "editor") {
+    switchMainView("editor");
+    focusLater(els.contentEditor);
+    return;
+  }
+  if (action === "writer-use") {
+    switchMainView("editor");
+    switchTab("style");
+    focusLater(els.styleList || els.newStyleBtn);
+    return;
+  }
+  if (action === "writer-build") {
+    switchMainView("editor");
+    switchTab("style");
+    els.newStyleBtn?.click?.();
+    return;
+  }
+  if (action === "draft") {
+    switchMainView("editor");
+    switchTab("generate");
+    focusLater(els.generatePrompt);
+    return;
+  }
+  if (action === "ppt") {
+    switchMainView("ppt");
+    focusLater(els.pptPromptInput);
+    return;
+  }
+  if (action === "cloud-sync") {
+    switchMainView("cloud");
+    focusLater(els.cloudSaveDocBtn);
+    return;
+  }
+  if (action === "billing") {
+    switchMainView("cloud");
+    focusLater(els.cloudManualPackageSelect);
+    return;
+  }
+  if (action === "admin") {
+    openStandaloneAdminPage();
+  }
+}
+
 function renderCloudBilling(authenticated) {
   if (!els.cloudBillingReport) return;
   const billing = state.cloud?.billing || null;
@@ -1173,8 +1262,11 @@ function renderCloudBilling(authenticated) {
   const plan = billing.organization?.plan || "free";
   const manualOrderRows = Array.isArray(billing.manual_orders) && billing.manual_orders.length
     ? billing.manual_orders.slice(-5).reverse().map((item) =>
-      `${formatManualOrderStatus(item.status)} · ${item.title || item.package_id} · ¥${Number(item.amount_cny || 0)} · ${item.created_at || ""}`).join("\n")
+      formatManualOrderSummary(item)).join("\n")
     : "暂无人工充值订单。";
+  const creditLedgerRows = Array.isArray(billing.credit_ledger) && billing.credit_ledger.length
+    ? billing.credit_ledger.slice(-8).reverse().map((item) => formatCreditLedgerSummary(item)).join("\n")
+    : "暂无额度明细。";
   els.cloudBillingLabel.textContent = `套餐：${plan}`;
   els.cloudBillingReport.textContent = [
     `当前套餐：${plan}`,
@@ -1185,6 +1277,9 @@ function renderCloudBilling(authenticated) {
     "",
     "我的充值订单：",
     manualOrderRows,
+    "",
+    "额度明细：",
+    creditLedgerRows,
   ].join("\n");
 }
 
@@ -1227,10 +1322,14 @@ function renderCloudManualPaymentMethods() {
   if (!els.cloudManualPaymentMethods) return;
   const billing = state.cloud?.billing || null;
   const manual = billing?.manual_payment || {};
+  const packages = Array.isArray(manual.packages) ? manual.packages : [];
   const methods = Array.isArray(manual.methods) ? manual.methods : [];
+  const selectedPackageId = els.cloudManualPackageSelect?.value || packages[0]?.id || "";
+  const selectedPackage = packages.find((item) => item.id === selectedPackageId) || packages[0] || null;
   const selected = els.cloudManualPaymentMethodSelect?.value || methods[0]?.channel || "wechat";
   const method = methods.find((item) => item.channel === selected) || methods[0] || { channel: selected, label: selected, qr_url: "" };
   const receiver = manual.receiver_name ? `<span>收款方：${escapeHtml(manual.receiver_name)}</span>` : "";
+  const packageHint = selectedPackage ? `<span>本次应付：¥${escapeHtml(selectedPackage.amount_cny ?? 0)} · ${escapeHtml(formatManualPaymentPackage(selectedPackage))}</span>` : "";
   const qr = method.qr_url
     ? `<img src="${escapeHtml(method.qr_url)}" alt="${escapeHtml(method.label || method.channel)} 收款码">`
     : `<div class="manual-payment-placeholder">未配置收款码，请向管理员索取。</div>`;
@@ -1240,26 +1339,10 @@ function renderCloudManualPaymentMethods() {
       <div>
         <strong>${escapeHtml(method.label || method.channel || "支付方式")}</strong>
         ${receiver}
+        ${packageHint}
         <span>付款后提交订单，管理员核对后生效。</span>
       </div>
     </div>`;
-}
-
-function formatManualPaymentPackage(item = {}) {
-  const amount = Number(item.amount_cny || 0);
-  const parts = [`${item.title || item.id || "充值套餐"}`];
-  if (amount > 0) parts.push(`¥${amount}`);
-  if (item.plan) parts.push(`${String(item.plan).toUpperCase()} ${Number(item.duration_days || 0) || ""}天`.trim());
-  if (Number(item.credits || 0) > 0) parts.push(`${Number(item.credits).toLocaleString("zh-CN")} 点`);
-  return parts.join(" · ");
-}
-
-function formatManualOrderStatus(status) {
-  const value = String(status || "pending");
-  if (value === "approved") return "已确认";
-  if (value === "rejected") return "已拒绝";
-  if (value === "cancelled") return "已取消";
-  return "待确认";
 }
 
 function roleLabel(role) {
@@ -1576,6 +1659,7 @@ async function refreshCloudBilling(options = {}) {
           manual_payment: data.manual_payment || {},
           manual_orders: data.orders || [],
           credits: data.credits || null,
+          credit_ledger: data.credit_ledger || [],
         };
         return;
       } catch {
@@ -1592,8 +1676,15 @@ async function refreshCloudBilling(options = {}) {
 async function cloudSubmitManualOrder() {
   const packageId = els.cloudManualPackageSelect?.value || "";
   const paymentChannel = els.cloudManualPaymentMethodSelect?.value || "wechat";
+  const payerNote = (els.cloudManualOrderNoteInput?.value || "").trim();
+  const proofText = (els.cloudManualProofInput?.value || "").trim();
   if (!packageId) {
     toast("请选择充值套餐", "warn");
+    return;
+  }
+  if (!payerNote && !proofText) {
+    toast("请填写付款备注或凭证说明，方便管理员核对", "warn");
+    els.cloudManualOrderNoteInput?.focus();
     return;
   }
   await withLoading(els.cloudManualOrderBtn, "提交中", async () => {
@@ -1602,15 +1693,16 @@ async function cloudSubmitManualOrder() {
       body: JSON.stringify({
         package_id: packageId,
         payment_channel: paymentChannel,
-        payer_note: els.cloudManualOrderNoteInput?.value || "",
-        proof_text: els.cloudManualProofInput?.value || "",
+        payer_note: payerNote,
+        proof_text: proofText,
       }),
     });
     if (els.cloudManualOrderNoteInput) els.cloudManualOrderNoteInput.value = "";
     if (els.cloudManualProofInput) els.cloudManualProofInput.value = "";
     await refreshCloudBilling({ silent: true });
     renderCloudPanel();
-    toast(`充值订单已提交：${data.order?.title || packageId}`);
+    const orderId = data.order?.id ? `（订单号：${data.order.id}）` : "";
+    toast(`充值订单已提交：${data.order?.title || packageId}${orderId}`);
   });
 }
 
@@ -3090,14 +3182,17 @@ function savePptStyleAsSkill() {
       must: [
         "输出必须适合转换为可编辑的原生 PowerPoint 页面",
         "每页只表达一个核心观点",
+        "标题、正文、要点、表格和备注必须保留为可编辑文本或表格数据，不得整页截图化",
+        "标题、正文和要点需要控制字数，内容过密时拆成多页",
+        "每页都要补充演讲者备注，备注只服务讲述，不要挤进页面正文",
         "根据内容选择 cover、section、content、data、roadmap、orgchart、imageText、appendix、closing 等布局",
       ],
-      recommended: [styleDescription],
+      recommended: [styleDescription, "正式汇报建议以 cover 开场，以 closing 或 appendix 收束，并在中间穿插数据页、路线图或对比页形成节奏。"],
       optional: [],
     },
-    forbidden: ["不得依赖网页脚本、CSS 动画、本机路径或截图式输出", "不得编造用户未提供的事实、数字、时间和责任人"],
+    forbidden: ["不得依赖网页脚本、CSS 动画、本机路径、外部图片 URL 或截图式输出", "不得编造用户未提供的事实、数字、时间和责任人"],
     generation_steps: ["判断演示目标", "拆分页面结构", "选择页面类型", "控制文字密度", "补充演讲者备注", "执行结构自检"],
-    self_checklist: ["页数是否符合要求", "每页标题是否明确", "表格是否适合演示页", "备注是否完整", "布局是否有节奏变化"],
+    self_checklist: ["页数是否符合要求", "每页标题是否明确", "文字密度是否适合演示页", "表格是否适合演示页", "备注是否完整", "是否存在外部资源或网页效果依赖", "布局是否有节奏变化"],
     ppt_generation: {
       style: "custom",
       styleDescription,

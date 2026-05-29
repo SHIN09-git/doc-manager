@@ -1,3 +1,10 @@
+import {
+  formatCreditLedgerDirection,
+  formatCreditLedgerReason,
+  formatManualOrderStatus,
+  formatManualPaymentChannel,
+} from "../modules/cloud/billingFormatters.js";
+
 const LOCAL_API_BASE_URL = "http://127.0.0.1:8787/api";
 const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 const API_BASE_STORAGE_KEY = "mowen-admin:api-base-url";
@@ -559,6 +566,7 @@ function renderBilling(payments) {
   const billing = state.billing || {};
   const options = Array.isArray(billing.checkout?.available_plans) ? billing.checkout.available_plans : [];
   const manualOrders = getManualPaymentOrders().slice().reverse();
+  const creditLedger = getCreditLedger().slice().reverse();
   const creditSummary = billing.credits || state.dashboard?.billing?.credits || {};
   const planCards = options.length
     ? options.map((item) => `<div class="admin-plan-card">
@@ -584,16 +592,36 @@ function renderBilling(payments) {
     <div class="cloud-admin-list">${manualOrders.length
       ? manualOrders.map((item) => {
         const pending = item.status === "pending";
+        const grantParts = [];
+        if (Number(item.credits || 0) > 0) grantParts.push(`${Number(item.credits || 0).toLocaleString("zh-CN")} 点额度`);
+        if (item.plan) grantParts.push(`${String(item.plan).toUpperCase()} ${Number(item.duration_days || 0) || ""}天`.trim());
+        const note = item.payer_note ? `备注：${item.payer_note}` : "备注：未填写";
+        const proof = item.proof_text ? `凭证：${item.proof_text}` : "凭证：未填写";
+        const review = item.review_note ? `审核：${item.review_note}` : item.reviewed_at ? "审核：未填写备注" : "";
         const actions = pending
-          ? `<span class="cloud-row-actions"><button type="button" data-admin-action="manual-order-approve" data-order-id="${escapeHtml(item.id)}">确认</button><button type="button" data-admin-action="manual-order-reject" data-order-id="${escapeHtml(item.id)}">拒绝</button></span>`
-          : `<span>${escapeHtml(formatManualOrderStatus(item.status))}${item.reviewed_at ? ` · ${escapeHtml(item.reviewed_at)}` : ""}</span>`;
+          ? `<span class="cloud-row-actions"><button type="button" data-admin-action="manual-order-approve" data-order-id="${escapeHtml(item.id)}">确认</button><button type="button" data-admin-action="manual-order-reject" data-order-id="${escapeHtml(item.id)}">拒绝</button><button type="button" data-admin-action="copy-manual-order" data-order-id="${escapeHtml(item.id)}">复制</button></span>`
+          : `<span class="cloud-row-actions"><span>${escapeHtml(formatManualOrderStatus(item.status))}${item.reviewed_at ? ` · ${escapeHtml(item.reviewed_at)}` : ""}</span><button type="button" data-admin-action="copy-manual-order" data-order-id="${escapeHtml(item.id)}">复制</button></span>`;
         return `<div class="cloud-admin-ops-row">
           <strong>${escapeHtml(item.title || item.package_id || "")}</strong>
-          <span>${escapeHtml(formatManualOrderStatus(item.status))} · ${escapeHtml(item.payment_channel || "")} · ¥${escapeHtml(item.amount_cny ?? 0)} · ${escapeHtml(item.created_at || "")}</span>
+          <span>
+            ${escapeHtml(formatManualOrderStatus(item.status))} · ${escapeHtml(formatManualPaymentChannel(item.payment_channel))} · ¥${escapeHtml(item.amount_cny ?? 0)} · ${escapeHtml(grantParts.join(" + ") || "无到账内容")}<br>
+            <span class="admin-row-note">订单号：${escapeHtml(item.id || "")} · 用户：${escapeHtml(item.user_id || "")} · ${escapeHtml(item.created_at || "")}</span><br>
+            <span class="admin-row-note">${escapeHtml(note)} · ${escapeHtml(proof)}${review ? ` · ${escapeHtml(review)}` : ""}</span>
+          </span>
           ${actions}
         </div>`;
       }).join("")
       : emptyRow("暂无人工充值订单")}</div>
+    <div class="admin-toolbar-card">
+      <div>
+        <strong>额度明细</strong>
+        <span>${creditLedger.length} 条最近流水 · 入账 ${creditLedger.filter((item) => item.direction === "in").length} 条 · 扣减 ${creditLedger.filter((item) => item.direction === "out").length} 条</span>
+      </div>
+    </div>
+    <div class="cloud-admin-list">${creditLedger.length
+      ? creditLedger.map((item, index) =>
+        opsRow(`${formatCreditLedgerDirection(item)} ${Number(item.amount || 0).toLocaleString("zh-CN")} 点`, `${item.user_email || item.user_id || ""} · 余额 ${Number(item.balance_after || 0).toLocaleString("zh-CN")} · ${item.order_title || formatCreditLedgerReason(item.reason)} · ${item.created_at || ""}`, "复制", `data-admin-action="copy-credit-ledger" data-ledger-index="${index}"`)).join("")
+      : emptyRow("暂无额度流水")}</div>
     <div class="cloud-admin-list">${state.visiblePayments.length
       ? state.visiblePayments.map((item, index) =>
         opsRow(item.event_type || "", `${item.provider || ""} · ${item.created_at || ""}`, "复制事件", `data-admin-action="copy-payment" data-payment-index="${index}"`)).join("")
@@ -701,6 +729,8 @@ async function handleContentAction(event) {
   if (action === "billing-checkout") return startBillingCheckout(button);
   if (action === "manual-order-approve") return reviewManualOrder(button, "approve");
   if (action === "manual-order-reject") return reviewManualOrder(button, "reject");
+  if (action === "copy-manual-order") return copyManualOrder(button);
+  if (action === "copy-credit-ledger") return copyCreditLedger(button);
   if (action === "copy-usage") return copyUsage(button);
   if (action === "copy-audit") return copyAudit(button);
   if (action === "audit-filter-apply") return applyAuditFilter(button);
@@ -868,15 +898,41 @@ async function startBillingCheckout(button) {
 async function reviewManualOrder(button, action) {
   const orderId = button.dataset.orderId || "";
   if (!orderId) return;
+  const approved = action === "approve";
+  const reviewNote = await confirmAdminAction({
+    title: approved ? "确认充值到账" : "拒绝充值申请",
+    message: approved
+      ? "请确认已核对收款记录、金额、支付方式和用户备注。确认后系统会立即发放额度或开通套餐。"
+      : "拒绝后订单不会发放额度或开通套餐，请留下方便用户理解的原因。",
+    confirmText: approved ? "确认到账" : "拒绝申请",
+    reasonLabel: "审核备注",
+    defaultReason: approved ? "已核对收款记录，确认到账" : "未找到付款记录或付款信息不匹配",
+    danger: !approved,
+  });
+  if (!reviewNote) return;
   await withLoading(button, action === "approve" ? "确认中" : "拒绝中", async () => {
     await apiRequest(`/billing/manual-orders/${orderId}/review`, {
       method: "POST",
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, review_note: reviewNote }),
     });
     await refreshAdminData({ silent: true });
     renderAdmin();
     toast(action === "approve" ? "充值订单已确认" : "充值订单已拒绝");
   });
+}
+
+async function copyManualOrder(button) {
+  const orderId = button.dataset.orderId || "";
+  const order = getManualPaymentOrders().find((item) => item.id === orderId);
+  if (!order) return toast("未找到充值订单", "warn");
+  await copyJson(order, "充值订单详情已复制");
+}
+
+async function copyCreditLedger(button) {
+  const index = Number(button.dataset.ledgerIndex || -1);
+  const ledger = getCreditLedger().slice().reverse()[index];
+  if (!ledger) return toast("未找到额度流水", "warn");
+  await copyJson(ledger, "额度流水详情已复制");
 }
 
 async function updateFeedbackStatus(button) {
@@ -1551,12 +1607,10 @@ function getManualPaymentOrders() {
   return Array.isArray(state.dashboard?.billing?.manual_orders) ? state.dashboard.billing.manual_orders : [];
 }
 
-function formatManualOrderStatus(status) {
-  const value = String(status || "pending");
-  if (value === "approved") return "已确认";
-  if (value === "rejected") return "已拒绝";
-  if (value === "cancelled") return "已取消";
-  return "待确认";
+function getCreditLedger() {
+  const fromBilling = Array.isArray(state.billing?.credit_ledger) ? state.billing.credit_ledger : [];
+  if (fromBilling.length) return fromBilling;
+  return Array.isArray(state.dashboard?.billing?.credit_ledger) ? state.dashboard.billing.credit_ledger : [];
 }
 
 function getActiveOrgId() {

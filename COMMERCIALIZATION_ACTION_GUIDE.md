@@ -133,11 +133,28 @@
 任务：
 
 - 整理 `.env.production` 模板。
+- 运行生产环境配置自检，提前发现占位密钥、缺失数据库、HTTP 地址和未配置收款码。
 - 固化 Docker Compose 生产部署。
 - 配置 Nginx / Cloudflare 反向代理。
 - 检查静态资源、API 地址、跨域和 HTTPS。
 - 增加部署后的健康检查。
 - 明确本地、测试、生产三套环境的启动方式。
+
+当前已经补齐的工程脚手架：
+
+```bash
+copy server\env.production.example server\.env.production
+npm run deploy:check -- server/.env.production
+npm run deploy:health -- https://api.your-domain.example/api
+```
+
+说明：
+
+- `server/src/server.js` 会在 `NODE_ENV=production` 时优先读取 `server/.env.production`。
+- `APP_BASE_URL` 已作为 `APP_URL` 的兼容别名，可用于部署平台里更直观地填写正式站点地址。
+- `npm run deploy:check` 用于上线前配置检查；它不会替你验证真实账号权限，但会拦截明显的占位值、弱配置和缺失项。
+- `npm run deploy:health` 用于部署后检查 `/api/health` 和 `/api/ready`。
+- `assets/` 会在 `npm run build:static` 时复制到 `dist/assets/`，可用于放置公开的收款码、Logo 和帮助图片。
 
 验收：
 
@@ -158,6 +175,22 @@
 - 增加迁移脚本或初始化脚本。
 - 增加自动备份和恢复演练文档。
 
+当前已经补齐的工程脚手架：
+
+```bash
+npm run server:backup
+npm run server:backup:verify -- <backup-file>
+npm run server:backup:drill -- <backup-file>
+npm run server:postgres:import -- <backup-file>
+```
+
+说明：
+
+- `server:backup:verify` 会解析明文或加密备份，并检查所有必要数据表是否存在。
+- `server:backup:drill` 会把备份恢复到一个临时 JSON Store，再比较恢复前后的表计数；默认不会覆盖任何现有数据。
+- `server:postgres:import -- <backup-file>` 可把指定备份导入 PostgreSQL；如果不传备份文件，则沿用本地 `server/.data/db.json`。
+- 加密备份需要设置同一个 `BACKUP_ENCRYPTION_KEY` 后再运行校验、演练或导入。
+
 验收：
 
 - 重启服务后用户、额度、充值和审计数据不丢。
@@ -170,19 +203,25 @@
 
 任务：
 
-- 云端页面展示微信 / 支付宝二维码。
-- 用户提交充值申请：金额、套餐、支付方式、付款备注、截图或交易号。
-- 后台展示充值申请列表。
-- 管理员确认后自动增加会员时长或额度。
-- 生成充值记录和审计日志。
-- 给用户显示充值状态。
+- [x] 云端页面展示微信 / 支付宝二维码。
+- [x] 用户提交充值申请：金额、套餐、支付方式、付款备注、截图或交易号。
+- [x] 后台展示充值申请列表，包含订单号、用户、备注、凭证、到账内容和审核备注。
+- [x] 管理员确认后自动增加会员时长或额度，拒绝时保留原因。
+- [x] 生成充值记录、额度流水和审计日志。
+- [x] 给用户显示充值状态和最近费用明细。
 
 验收：
 
-- 用户可以提交充值申请。
-- 管理员可以确认、驳回、备注。
-- 用户额度或会员状态正确变化。
-- 费用明细可追溯。
+- [x] 用户可以提交充值申请。
+- [x] 管理员可以确认、驳回、备注。
+- [x] 用户额度或会员状态正确变化。
+- [x] 费用明细可追溯。
+
+当前实现说明：
+
+- 用户端：云端页选择套餐和支付方式后，必须填写付款备注或凭证说明；提交后可在“我的充值订单”和“额度明细”里查看状态与到账变化。
+- 管理端：独立后台账单页可复制订单详情、填写审核备注、确认或拒绝订单，并查看最近额度流水。
+- 数据侧：`manual_payment_orders` 保存订单，`credit_ledger` 保存入账/扣减流水，`audit_logs` 记录订单创建、审核、额度发放和会员开通。
 
 ### 阶段 D：邮件与通知
 
@@ -325,6 +364,10 @@
 - [ ] 有客服联系方式。
 - [ ] 有灰度用户反馈渠道。
 - [ ] `npm run check`、`npm test`、`npm run test:e2e` 通过。
+- [ ] `npm run deploy:check -- server/.env.production` 通过。
+- [ ] `npm run deploy:health -- https://api.your-domain.example/api` 通过。
+- [ ] `npm run server:backup:verify -- <backup-file>` 通过。
+- [ ] `npm run server:backup:drill -- <backup-file>` 通过。
 
 ## 七、推荐下一步
 

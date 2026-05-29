@@ -18,7 +18,15 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 function loadDotEnv() {
-  const candidates = [path.resolve("server/.env"), path.resolve(".env")];
+  const explicitFile = process.env.ENV_FILE || process.env.DOTENV_CONFIG_PATH || "";
+  const mode = process.env.NODE_ENV || "";
+  const candidates = [
+    explicitFile ? path.resolve(explicitFile) : "",
+    mode ? path.resolve(`server/.env.${mode}`) : "",
+    mode ? path.resolve(`.env.${mode}`) : "",
+    path.resolve("server/.env"),
+    path.resolve(".env"),
+  ].filter(Boolean);
   const file = candidates.find((candidate) => existsSync(candidate));
   if (!file) return;
   const text = readFileSync(file, "utf8");

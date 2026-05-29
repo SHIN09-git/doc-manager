@@ -7,6 +7,21 @@ import {
 
 export { PPT_STYLE_OPTIONS } from "./pptStyles.js";
 
+const PPT_DENSITY_LIMITS = {
+  titleChars: 34,
+  bodyChars: 150,
+  bulletChars: 52,
+  bulletsPerSlide: 7,
+};
+
+const PPTX_NATIVE_RULES = [
+  "原生 PPTX 可编辑性规则：所有正文、标题、表格、备注都必须是可编辑文本或表格数据，不要把整页当成图片、截图或 HTML 页面。",
+  `文字密度规则：标题建议不超过 ${PPT_DENSITY_LIMITS.titleChars} 字，正文不超过 ${PPT_DENSITY_LIMITS.bodyChars} 字，每页要点不超过 ${PPT_DENSITY_LIMITS.bulletsPerSlide} 条，单条要点不超过 ${PPT_DENSITY_LIMITS.bulletChars} 字；超出时拆成多页。`,
+  "每页都要补充 notes 字段，写给演讲者的提示，不要把备注写进页面正文。",
+  "封面页之后应有清晰的章节或逻辑递进；正式汇报建议以 closing 页收束，给出结论、请求或下一步。",
+  "不要引用外部图片 URL、本机文件路径、网页脚本、CSS 类名或无法在 PowerPoint 中编辑的效果。imageText 只能写图片占位说明。",
+];
+
 export function buildGuizangPptPrompt({ title, style, styleDescription, slideCount, autoSlideCount, content, skillPrompt }) {
   const styleGuide = buildRegisteredPptStyleGuide(style, styleDescription);
   const slideCountInstruction = autoSlideCount
@@ -20,6 +35,7 @@ export function buildGuizangPptPrompt({ title, style, styleDescription, slideCou
     "不要使用 emoji；不要引用本机路径；不要把网页交互、CSS、脚本写进结果。",
     "可用页面类型：cover、section、content、bullets、timeline、comparison、quote、data、roadmap、orgchart、imageText、appendix、closing。",
     "请根据内容选择合适页面类型：数据页用于指标/数字，路线图用于阶段安排，组织图用于职责层级，图文页用于图片占位+说明，附录页用于补充材料。",
+    PPTX_NATIVE_RULES.join("\n"),
     styleGuide,
     skillPrompt ? `额外执笔人规则：\n${skillPrompt}` : "",
     "JSON 结构：",
@@ -124,6 +140,41 @@ export function inspectPptSpec(spec, options = {}) {
     addCheck("layout-variety", "布局丰富度", "warn", "页面类型较少，建议加入数据页、路线图、图文页或附录页增强节奏。");
   } else {
     addCheck("layout-variety", "布局丰富度", "pass", `已使用 ${layoutSet.size} 种页面类型。`, "info");
+  }
+
+  const denseSlides = normalized.slides
+    .map((slide, index) => {
+      const issues = [];
+      if (countChars(slide.title) > PPT_DENSITY_LIMITS.titleChars) issues.push("标题过长");
+      if (countChars(slide.body) > PPT_DENSITY_LIMITS.bodyChars) issues.push("正文过长");
+      if ((slide.bullets || []).length > PPT_DENSITY_LIMITS.bulletsPerSlide) issues.push("要点过多");
+      if ((slide.bullets || []).some((item) => countChars(item) > PPT_DENSITY_LIMITS.bulletChars)) issues.push("要点过长");
+      return issues.length ? `${index + 1}页(${issues.join("、")})` : null;
+    })
+    .filter(Boolean);
+  if (denseSlides.length) {
+    addCheck("text-density", "文字密度", "warn", `部分页面文字偏多，建议拆页或压缩表达：${denseSlides.join("、")}。`);
+  } else {
+    addCheck("text-density", "文字密度", "pass", "页面文字密度适合 PPTX 阅读和编辑。", "info");
+  }
+
+  const firstType = normalized.slides[0]?.type || "";
+  const lastType = normalized.slides.at(-1)?.type || "";
+  if (normalized.slides.length >= 3 && firstType !== "cover") {
+    addCheck("deck-flow", "演示流程", "warn", "首屏不是封面页，建议补充 cover 页明确主题和对象。");
+  } else if (normalized.slides.length >= 5 && lastType !== "closing" && lastType !== "appendix") {
+    addCheck("deck-flow", "演示流程", "warn", "结尾缺少 closing 或 appendix 收束页，建议补充结论、请求或后续安排。");
+  } else {
+    addCheck("deck-flow", "演示流程", "pass", "演示结构具备明确起止。", "info");
+  }
+
+  const externalRefs = normalized.slides
+    .map((slide, index) => (hasExternalOrLocalReference(slide) ? index + 1 : null))
+    .filter(Boolean);
+  if (externalRefs.length) {
+    addCheck("native-editability", "原生可编辑性", "warn", `第 ${externalRefs.join("、")} 页含外部链接、本机路径或网页效果描述，导出 PPTX 后可能不可编辑。`);
+  } else {
+    addCheck("native-editability", "原生可编辑性", "pass", "未发现外部资源路径或网页效果依赖。", "info");
   }
 
   return {
@@ -252,6 +303,23 @@ function asText(value) {
   if (value == null) return "";
   if (typeof value === "string") return value.trim();
   return String(value).trim();
+}
+
+function countChars(value) {
+  return asText(value).replace(/\s+/g, "").length;
+}
+
+function hasExternalOrLocalReference(slide) {
+  const text = [
+    slide.title,
+    slide.subtitle,
+    slide.kicker,
+    slide.body,
+    slide.notes,
+    ...(slide.bullets || []),
+    ...(slide.table?.rows || []).flat(),
+  ].map((item) => asText(item)).join("\n");
+  return /(https?:\/\/|file:\/\/|[a-zA-Z]:\\|\.css\b|<script\b|<\/?html\b|<\/?div\b)/i.test(text);
 }
 
 function isAutoSlideCount(value) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import JSZip from "jszip";
 import {
+  buildGuizangPptPrompt,
   formatPptQualityReport,
   inspectPptSpec,
   normalizePptSpec,
@@ -85,6 +86,19 @@ test("PPT auto slide count keeps generated pages instead of forcing manual count
   assert.equal(report.checks.find((check) => check.id === "slide-count")?.status, "pass");
 });
 
+test("PPT generation prompt emphasizes native editable PPTX constraints", () => {
+  const prompt = buildGuizangPptPrompt({
+    title: "培训方案",
+    style: "officialBlue",
+    slideCount: 8,
+    content: "围绕培训目标、课程安排、保障措施生成 PPT。",
+  });
+
+  assert.match(prompt, /原生 PPTX 可编辑性规则/);
+  assert.match(prompt, /每页都要补充 notes 字段/);
+  assert.match(prompt, /不要引用外部图片 URL/);
+});
+
 test("inspectPptSpec reports page count, missing titles, large tables, and empty notes", () => {
   const report = inspectPptSpec(
     {
@@ -110,6 +124,31 @@ test("inspectPptSpec reports page count, missing titles, large tables, and empty
   assert.match(text, /缺少明确标题/);
   assert.match(text, /表格过大/);
   assert.match(text, /没有演讲者备注/);
+});
+
+test("inspectPptSpec warns about dense text, weak flow, and non-native references", () => {
+  const report = inspectPptSpec(
+    {
+      title: "问题稿件",
+      slides: [
+        {
+          type: "content",
+          title: "这是一个非常非常非常非常非常非常长的标题，已经不适合作为单页 PPT 标题",
+          body: "这是一段很长的正文。".repeat(30),
+          bullets: Array.from({ length: 8 }, (_, index) => `第 ${index + 1} 条要点非常长，需要拆页处理，否则会影响原生 PPTX 的可读性和编辑体验`),
+          notes: "含本机路径 C:\\demo\\image.png 和外部图片 https://example.com/a.png",
+        },
+        { type: "content", title: "第二页", body: "继续说明" },
+        { type: "content", title: "第三页", body: "继续说明" },
+      ],
+    },
+    { slideCount: 3 },
+  );
+
+  assert.equal(report.ok, true);
+  assert.equal(report.checks.find((check) => check.id === "text-density")?.status, "warn");
+  assert.equal(report.checks.find((check) => check.id === "deck-flow")?.status, "warn");
+  assert.equal(report.checks.find((check) => check.id === "native-editability")?.status, "warn");
 });
 
 test("createPptxArrayBuffer generates an editable pptx package", async () => {
