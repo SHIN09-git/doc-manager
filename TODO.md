@@ -21,6 +21,8 @@
 - [x] 新增 AI 代理模式校验和 live 缺密钥回归测试，避免配置拼写错误或密钥缺失导致商业环境出现伪生成结果。
 - [x] 加固生产环境外部 URL 校验：live AI 的 `AI_BASE_URL`、支付 checkout/成功/取消地址、人工收款码和备份失败 webhook 一旦配置就必须使用 HTTPS。
 - [x] 新增外部 URL 生产配置回归测试，避免上线后才发现支付跳转、收款码或运维告警地址不安全/不可用。
+- [x] 补齐生产邮件与对象存储 URL 校验：`EMAIL_WEBHOOK_URL`、`EMAIL_RESEND_ENDPOINT` 和 S3-compatible `BACKUP_OBJECT_STORAGE_ENDPOINT` 在生产环境必须使用 HTTPS。
+- [x] 将生产邮件模式测试改为 HTTPS `fetch` mock，避免测试依赖本地 HTTP 接收器而掩盖真实生产配置约束。
 
 ## 2026-05-29 功能内容结构优化记录
 

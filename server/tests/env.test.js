@@ -133,3 +133,31 @@ test("production optional public urls must use HTTPS when configured", () => {
     }), new RegExp(`${key} must be an HTTPS URL`));
   });
 });
+
+test("production email webhook mode requires HTTPS provider urls", () => {
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    EMAIL_WEBHOOK_URL: "http://mail.example.com/send",
+  }), /EMAIL_WEBHOOK_URL must be an HTTPS URL/);
+
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    EMAIL_PROVIDER: "resend",
+    EMAIL_RESEND_API_KEY: "re_test_key",
+    EMAIL_RESEND_ENDPOINT: "http://api.resend.local/emails",
+  }), /EMAIL_RESEND_ENDPOINT must be an HTTPS URL/);
+});
+
+test("production S3-compatible backup storage requires an HTTPS endpoint", () => {
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    BACKUP_OBJECT_STORAGE_MODE: "s3-compatible",
+    BACKUP_OBJECT_STORAGE_ENDPOINT: "http://storage.example.com",
+    BACKUP_OBJECT_STORAGE_BUCKET: "mowen-backups",
+    BACKUP_OBJECT_STORAGE_ACCESS_KEY_ID: "access-key",
+    BACKUP_OBJECT_STORAGE_SECRET_ACCESS_KEY: "secret-key",
+  }), /BACKUP_OBJECT_STORAGE_ENDPOINT must be an HTTPS URL/);
+});

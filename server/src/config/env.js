@@ -174,6 +174,15 @@ function validateEnv(env) {
   if (env.paymentCheckoutMode === "webhook" && !env.paymentCheckoutUrl) {
     throw new Error("PAYMENT_CHECKOUT_URL is required when PAYMENT_CHECKOUT_MODE=webhook in production");
   }
+  if (env.emailMode === "webhook" && env.emailProvider === "generic-webhook") {
+    assertHttpsUrl("EMAIL_WEBHOOK_URL", env.emailWebhookUrl);
+  }
+  if (env.emailMode === "webhook" && env.emailProvider === "resend") {
+    assertHttpsUrl("EMAIL_RESEND_ENDPOINT", env.emailResendEndpoint);
+  }
+  if (env.backupObjectStorageMode === "s3-compatible") {
+    assertHttpsUrl("BACKUP_OBJECT_STORAGE_ENDPOINT", env.backupObjectStorageEndpoint);
+  }
   assertOptionalHttpsUrl("PAYMENT_CHECKOUT_URL", env.paymentCheckoutUrl);
   assertOptionalHttpsUrl("PAYMENT_SUCCESS_URL", env.paymentSuccessUrl);
   assertOptionalHttpsUrl("PAYMENT_CANCEL_URL", env.paymentCancelUrl);

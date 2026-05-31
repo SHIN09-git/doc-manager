@@ -1,7 +1,6 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { createServer as createHttpServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -139,15 +138,12 @@ test("password reset revokes previous sessions", async () => {
 
 test("production email mode sends through webhook without returning tokens", async () => {
   const emails = [];
-  const receiver = createHttpServer(async (request, response) => {
-    let body = "";
-    for await (const chunk of request) body += chunk;
-    emails.push(JSON.parse(body));
-    response.writeHead(202, { "Content-Type": "application/json" });
-    response.end("{}");
+  const receiverUrl = "https://mail.example.test/send";
+  const restoreFetch = installFetchMock(async (url, init) => {
+    if (url !== receiverUrl) return null;
+    emails.push(JSON.parse(String(init.body || "{}")));
+    return new Response("{}", { status: 202, headers: { "Content-Type": "application/json" } });
   });
-  await new Promise((resolve) => receiver.listen(0, "127.0.0.1", resolve));
-  const receiverUrl = `http://127.0.0.1:${receiver.address().port}`;
   const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-email-api-"));
   const emailServer = createApp({
     env: {
@@ -178,23 +174,20 @@ test("production email mode sends through webhook without returning tokens", asy
     assert.equal(emails[0].to, "prod-email@example.com");
     assert.ok(emails[0].metadata.delivery_id);
   } finally {
+    restoreFetch();
     await new Promise((resolve) => emailServer.close(resolve));
-    await new Promise((resolve) => receiver.close(resolve));
     await rm(temp, { recursive: true, force: true });
   }
 });
 
 test("production email mode can send through Resend adapter", async () => {
   const emails = [];
-  const receiver = createHttpServer(async (request, response) => {
-    let body = "";
-    for await (const chunk of request) body += chunk;
-    emails.push({ headers: request.headers, body: JSON.parse(body) });
-    response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ id: "resend_email_123" }));
+  const receiverUrl = "https://api.resend.test/emails";
+  const restoreFetch = installFetchMock(async (url, init) => {
+    if (url !== receiverUrl) return null;
+    emails.push({ headers: normalizeHeaderObject(init.headers), body: JSON.parse(String(init.body || "{}")) });
+    return new Response(JSON.stringify({ id: "resend_email_123" }), { status: 200, headers: { "Content-Type": "application/json" } });
   });
-  await new Promise((resolve) => receiver.listen(0, "127.0.0.1", resolve));
-  const receiverUrl = `http://127.0.0.1:${receiver.address().port}`;
   const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-resend-api-"));
   const emailServer = createApp({
     env: {
@@ -237,8 +230,8 @@ test("production email mode can send through Resend adapter", async () => {
     assert.equal(delivery.provider, "resend");
     assert.equal(delivery.metadata.message_id, "resend_email_123");
   } finally {
+    restoreFetch();
     await new Promise((resolve) => emailServer.close(resolve));
-    await new Promise((resolve) => receiver.close(resolve));
     await rm(temp, { recursive: true, force: true });
   }
 });
@@ -1013,6 +1006,22 @@ test("payment webhook requires a signed request and is idempotent", async () => 
 
 function signWebhook(secret, timestamp, body) {
   return crypto.createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
+}
+
+function installFetchMock(handler) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = typeof input === "string" ? input : input?.url;
+    const mocked = await handler(url, init);
+    return mocked || originalFetch(input, init);
+  };
+  return () => {
+    globalThis.fetch = originalFetch;
+  };
+}
+
+function normalizeHeaderObject(headers = {}) {
+  return Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]));
 }
 
 test("production mode rejects default secrets", () => {
