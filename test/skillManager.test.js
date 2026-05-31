@@ -130,6 +130,50 @@ test("parseImportedSkillPackage preserves object ruleJson", () => {
   assert.deepEqual(ruleJson.style_rules.must, ["客观记录会议事项"]);
 });
 
+test("parseImportedSkillPackage strips raw version source text", () => {
+  const imported = parseImportedSkillPackage({
+    schema: SKILL_PACKAGE_SCHEMA,
+    skill: {
+      name: "Shared writer",
+      handle: "shared",
+      ruleJson: { name: "Shared writer", handle: "shared" },
+      sourceDocuments: [{ name: "sample.docx", text: "private source text 13800138000" }],
+      versions: [
+        {
+          version: 3,
+          sourceExamples: [{ name: "sample.docx", text: "private source text 13800138000" }],
+        },
+      ],
+    },
+  });
+
+  assert.equal(imported.examples[0].text.includes("private source text"), false);
+  assert.equal(imported.examples[0].originalLength, "private source text 13800138000".length);
+  assert.equal(imported.versions[0].sourceExamples[0].text, undefined);
+  assert.equal(imported.versions[0].sourceExamples[0].length, "private source text 13800138000".length);
+  assert.equal(JSON.stringify(imported.versions).includes("13800138000"), false);
+});
+
+test("normalizeSkill strips raw text from legacy version source examples", () => {
+  const manager = createSkillManager({
+    state: { styles: [] },
+    ui: {},
+    els: {},
+    persist: () => {},
+    eventBus: { emit: () => {} },
+    toast: () => {},
+    getSkillLocation: (skill) => `@${skill.handle}`,
+  });
+
+  const normalized = manager.normalizeSkill({
+    name: "Legacy writer",
+    versions: [{ sourceExamples: [{ name: "legacy.docx", text: "legacy private source" }] }],
+  });
+
+  assert.equal(normalized.versions[0].sourceExamples[0].text, undefined);
+  assert.equal(normalized.versions[0].sourceExamples[0].length, "legacy private source".length);
+});
+
 test("importSkillPackage deduplicates max-length handles without hanging", () => {
   const state = {
     styles: [{ id: "existing", name: "已有", handle: "abcdefghijklmnopqrstuvwx", enabled: true }],

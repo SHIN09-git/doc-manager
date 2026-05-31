@@ -33776,20 +33776,13 @@ ${JSON.stringify(result2, null, 2)}`
     const versionSources = (skill.versions || []).flatMap((version) => version.sourceExamples || []).filter(Boolean);
     const examples = Array.isArray(skill.examples) ? skill.examples : [];
     const sources = versionSources.length ? versionSources : examples;
-    return sources.map((source) => ({
-      name: source.name || "\u672A\u547D\u540D\u793A\u8303",
-      length: Number(source.length || source.text?.length || 0),
-      addedAt: source.addedAt || source.createdAt || ""
-    }));
+    return sources.map((source) => summarizeSourceDocument(source));
   }
   function summarizeSkillVersions(versions = []) {
     return (Array.isArray(versions) ? versions : []).map((version, index) => ({
       version: Number(version.version || index + 1),
       createdAt: version.createdAt || "",
-      sourceExamples: (version.sourceExamples || []).map((source) => ({
-        name: source.name || "\u672A\u547D\u540D\u793A\u8303",
-        length: Number(source.length || 0)
-      })),
+      sourceExamples: (version.sourceExamples || []).map((source) => summarizeSourceDocument(source)),
       summary: version.summary || "",
       skillJson: version.skillJson || "",
       qualityReport: version.qualityReport || null
@@ -33800,7 +33793,7 @@ ${JSON.stringify(result2, null, 2)}`
       id: createId(),
       version: Number(version.version || index + 1),
       createdAt: version.createdAt || now(),
-      sourceExamples: Array.isArray(version.sourceExamples) ? version.sourceExamples : [],
+      sourceExamples: Array.isArray(version.sourceExamples) ? version.sourceExamples.map((source) => summarizeVersionSourceExample(source)) : [],
       analyses: Array.isArray(version.analyses) ? version.analyses : [],
       analysis: version.analysis || "",
       aggregation: version.aggregation || "",
@@ -33816,11 +33809,29 @@ ${JSON.stringify(result2, null, 2)}`
     return (Array.isArray(sourceDocuments) ? sourceDocuments : []).map((source) => ({
       id: createId(),
       name: source.name || "\u5BFC\u5165\u793A\u8303\u6458\u8981",
-      text: `\uFF08\u5BFC\u5165\u5305\u4EC5\u5305\u542B\u793A\u8303\u6458\u8981\uFF0C\u4E0D\u5305\u542B\u539F\u59CB\u5168\u6587\u3002\u539F\u6587\u957F\u5EA6\uFF1A${Number(source.length || 0)} \u5B57\u7B26\uFF09`,
+      text: `\uFF08\u5BFC\u5165\u5305\u4EC5\u5305\u542B\u793A\u8303\u6458\u8981\uFF0C\u4E0D\u5305\u542B\u539F\u59CB\u5168\u6587\u3002\u539F\u6587\u957F\u5EA6\uFF1A${getSourceDocumentLength(source)} \u5B57\u7B26\uFF09`,
       addedAt: source.addedAt || now(),
       importedSummary: true,
-      originalLength: Number(source.length || 0)
+      originalLength: getSourceDocumentLength(source)
     }));
+  }
+  function getSourceDocumentLength(source = {}) {
+    return Number(source.length || source.originalLength || source.text?.length || 0);
+  }
+  function summarizeSourceDocument(source = {}) {
+    return {
+      name: source.name || "\u672A\u547D\u540D\u793A\u8303",
+      length: getSourceDocumentLength(source),
+      addedAt: source.addedAt || source.createdAt || ""
+    };
+  }
+  function summarizeVersionSourceExample(source = {}) {
+    return {
+      id: source.id || createId(),
+      ...summarizeSourceDocument(source),
+      importedSummary: Boolean(source.importedSummary),
+      originalLength: getSourceDocumentLength(source)
+    };
   }
   function normalizeSkillInputContract(skillJson) {
     const inputContract = skillJson.input_contract;
@@ -33901,7 +33912,7 @@ ${JSON.stringify(result2, null, 2)}`
           id: version.id || createId(),
           version: Number(version.version || index + 1),
           createdAt: version.createdAt || now(),
-          sourceExamples: Array.isArray(version.sourceExamples) ? version.sourceExamples : [],
+          sourceExamples: Array.isArray(version.sourceExamples) ? version.sourceExamples.map((source) => summarizeVersionSourceExample(source)) : [],
           analyses: Array.isArray(version.analyses) ? version.analyses : [],
           analysis: version.analysis || "",
           aggregation: version.aggregation || "",

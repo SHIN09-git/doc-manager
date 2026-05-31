@@ -135,21 +135,14 @@ function summarizeSkillSourceDocuments(skill = {}) {
     .filter(Boolean);
   const examples = Array.isArray(skill.examples) ? skill.examples : [];
   const sources = versionSources.length ? versionSources : examples;
-  return sources.map((source) => ({
-    name: source.name || "未命名示范",
-    length: Number(source.length || source.text?.length || 0),
-    addedAt: source.addedAt || source.createdAt || "",
-  }));
+  return sources.map((source) => summarizeSourceDocument(source));
 }
 
 function summarizeSkillVersions(versions = []) {
   return (Array.isArray(versions) ? versions : []).map((version, index) => ({
     version: Number(version.version || index + 1),
     createdAt: version.createdAt || "",
-    sourceExamples: (version.sourceExamples || []).map((source) => ({
-      name: source.name || "未命名示范",
-      length: Number(source.length || 0),
-    })),
+    sourceExamples: (version.sourceExamples || []).map((source) => summarizeSourceDocument(source)),
     summary: version.summary || "",
     skillJson: version.skillJson || "",
     qualityReport: version.qualityReport || null,
@@ -161,7 +154,9 @@ function normalizeImportedVersions(versions = []) {
     id: createId(),
     version: Number(version.version || index + 1),
     createdAt: version.createdAt || now(),
-    sourceExamples: Array.isArray(version.sourceExamples) ? version.sourceExamples : [],
+    sourceExamples: Array.isArray(version.sourceExamples)
+      ? version.sourceExamples.map((source) => summarizeVersionSourceExample(source))
+      : [],
     analyses: Array.isArray(version.analyses) ? version.analyses : [],
     analysis: version.analysis || "",
     aggregation: version.aggregation || "",
@@ -178,11 +173,32 @@ function normalizeImportedSourceDocuments(sourceDocuments = []) {
   return (Array.isArray(sourceDocuments) ? sourceDocuments : []).map((source) => ({
     id: createId(),
     name: source.name || "导入示范摘要",
-    text: `（导入包仅包含示范摘要，不包含原始全文。原文长度：${Number(source.length || 0)} 字符）`,
+    text: `（导入包仅包含示范摘要，不包含原始全文。原文长度：${getSourceDocumentLength(source)} 字符）`,
     addedAt: source.addedAt || now(),
     importedSummary: true,
-    originalLength: Number(source.length || 0),
+    originalLength: getSourceDocumentLength(source),
   }));
+}
+
+function getSourceDocumentLength(source = {}) {
+  return Number(source.length || source.originalLength || source.text?.length || 0);
+}
+
+function summarizeSourceDocument(source = {}) {
+  return {
+    name: source.name || "未命名示范",
+    length: getSourceDocumentLength(source),
+    addedAt: source.addedAt || source.createdAt || "",
+  };
+}
+
+function summarizeVersionSourceExample(source = {}) {
+  return {
+    id: source.id || createId(),
+    ...summarizeSourceDocument(source),
+    importedSummary: Boolean(source.importedSummary),
+    originalLength: getSourceDocumentLength(source),
+  };
 }
 
 function normalizeSkillInputContract(skillJson) {
@@ -269,7 +285,9 @@ export function createSkillManager(deps) {
             id: version.id || createId(),
             version: Number(version.version || index + 1),
             createdAt: version.createdAt || now(),
-            sourceExamples: Array.isArray(version.sourceExamples) ? version.sourceExamples : [],
+            sourceExamples: Array.isArray(version.sourceExamples)
+              ? version.sourceExamples.map((source) => summarizeVersionSourceExample(source))
+              : [],
             analyses: Array.isArray(version.analyses) ? version.analyses : [],
             analysis: version.analysis || "",
             aggregation: version.aggregation || "",
