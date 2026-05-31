@@ -1,9 +1,10 @@
 import path from "node:path";
 
 export function loadEnv(source = process.env) {
+  const nodeEnv = source.NODE_ENV || "development";
   const dataDir = path.resolve(source.DATA_DIR || "server/.data");
   const env = {
-    nodeEnv: source.NODE_ENV || "development",
+    nodeEnv,
     host: source.HOST || "127.0.0.1",
     port: toNumber(source.PORT, 8787),
     storeDriver: source.STORE_DRIVER || "json",
@@ -13,7 +14,9 @@ export function loadEnv(source = process.env) {
     encryptionSecret: source.APP_ENCRYPTION_SECRET || "dev-only-change-this-commercial-api-encryption-secret",
     sessionSecret: source.SESSION_SECRET || "dev-only-change-this-commercial-api-session-secret",
     sessionSecure: source.SESSION_SECURE === "true",
-    corsOrigin: source.CORS_ORIGIN || "http://127.0.0.1:4173",
+    corsOrigin: source.CORS_ORIGIN
+      ? normalizeCorsOrigin(source.CORS_ORIGIN)
+      : (nodeEnv === "production" ? "" : "http://127.0.0.1:4173"),
     aiProxyMode: source.AI_PROXY_MODE || "mock",
     aiBaseUrl: (source.AI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, ""),
     aiModel: source.AI_MODEL || "",
@@ -95,6 +98,16 @@ function parseJsonArray(value) {
   }
 }
 
+function normalizeCorsOrigin(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return raw.replace(/\/+$/, "");
+  }
+}
+
 function validateEnv(env) {
   if (env.storeDriver !== "json" && env.storeDriver !== "postgres") {
     throw new Error("STORE_DRIVER must be either json or postgres");
@@ -138,10 +151,21 @@ function validateEnv(env) {
   if (!env.corsOrigin) {
     throw new Error("CORS_ORIGIN is required in production");
   }
+  if (!isHttpsUrl(env.corsOrigin)) {
+    throw new Error("CORS_ORIGIN must be an HTTPS origin in production");
+  }
 }
 
 function assertStrongSecret(name, value, defaultValue) {
   if (!value || value === defaultValue || value.length < 32) {
     throw new Error(`${name} must be set to a non-default value with at least 32 characters in production`);
+  }
+}
+
+function isHttpsUrl(value) {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
   }
 }
