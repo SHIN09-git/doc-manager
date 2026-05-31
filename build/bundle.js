@@ -34414,6 +34414,143 @@ ${JSON.stringify(payload, null, 2)}`
     );
   }
 
+  // src/modules/skills/skillVersionDiff.js
+  function buildSkillVersionDiff(current = {}, previous = null) {
+    const currentSnapshot = createVersionSnapshot(current);
+    const previousSnapshot = previous ? createVersionSnapshot(previous) : null;
+    if (!previousSnapshot) {
+      return {
+        sections: [
+          listSection("\u5F53\u524D\u5F3A\u89C4\u5219", currentSnapshot.mustRules, { empty: "\u6682\u65E0\u5F3A\u89C4\u5219" }),
+          listSection("\u5F53\u524D\u5019\u9009\u89C4\u5219", currentSnapshot.candidateRules, { empty: "\u6682\u65E0\u5019\u9009\u89C4\u5219" }),
+          listSection("\u5F53\u524D\u7981\u6B62\u4E8B\u9879", currentSnapshot.forbiddenRules, { empty: "\u6682\u65E0\u7981\u6B62\u4E8B\u9879" }),
+          listSection("\u5F53\u524D\u5E38\u7528\u8868\u8FBE", currentSnapshot.expressions, { empty: "\u6682\u65E0\u5E38\u7528\u8868\u8FBE" }),
+          testSection(currentSnapshot.testResult, null)
+        ].filter(Boolean),
+        text: ""
+      };
+    }
+    const sections = [
+      diffSection("\u5F3A\u89C4\u5219\u53D8\u5316", diffLists(previousSnapshot.mustRules, currentSnapshot.mustRules)),
+      diffSection("\u5019\u9009\u89C4\u5219\u53D8\u5316", diffLists(previousSnapshot.candidateRules, currentSnapshot.candidateRules)),
+      diffSection("\u7981\u6B62\u4E8B\u9879\u53D8\u5316", diffLists(previousSnapshot.forbiddenRules, currentSnapshot.forbiddenRules)),
+      diffSection("\u5E38\u7528\u8868\u8FBE\u53D8\u5316", diffLists(previousSnapshot.expressions, currentSnapshot.expressions)),
+      testSection(currentSnapshot.testResult, previousSnapshot.testResult)
+    ].filter(Boolean);
+    return {
+      sections,
+      text: sections.map((section) => section.lines.join("\n")).join("\n\n")
+    };
+  }
+  function createVersionSnapshot(version = {}) {
+    const skillJson = parseJsonObject(version.skillJson);
+    const aggregation = version.aggregationData && typeof version.aggregationData === "object" ? version.aggregationData : parseJsonObject(version.aggregation);
+    return {
+      mustRules: normalizeTextList(skillJson.style_rules?.must),
+      candidateRules: uniqueTextList([
+        ...normalizeRuleList(aggregation.candidate_rules),
+        ...normalizeTextList(skillJson.style_rules?.recommended),
+        ...normalizeTextList(skillJson.style_rules?.optional)
+      ]),
+      forbiddenRules: uniqueTextList([
+        ...normalizeTextList(skillJson.forbidden),
+        ...normalizeTextList(skillJson.case_specific_exclusions),
+        ...normalizeTextList(skillJson.privacy_filters)
+      ]),
+      expressions: normalizeTextList(skillJson.common_expression_library || skillJson.reusable_expressions),
+      testResult: normalizeTestReport(version.testReport)
+    };
+  }
+  function diffLists(before2 = [], after2 = []) {
+    const beforeSet = new Set(before2);
+    const afterSet = new Set(after2);
+    return {
+      added: after2.filter((item) => !beforeSet.has(item)),
+      removed: before2.filter((item) => !afterSet.has(item)),
+      kept: after2.filter((item) => beforeSet.has(item))
+    };
+  }
+  function diffSection(title, diff) {
+    if (!diff.added.length && !diff.removed.length) {
+      return { title, lines: [title, "\u65E0\u53D8\u5316"] };
+    }
+    const lines = [title];
+    diff.added.forEach((item) => lines.push(`+ ${item}`));
+    diff.removed.forEach((item) => lines.push(`- ${item}`));
+    if (diff.kept.length) lines.push(`= \u4FDD\u7559 ${diff.kept.length} \u6761`);
+    return { title, lines };
+  }
+  function listSection(title, items, options = {}) {
+    const lines = [title];
+    if (!items.length) {
+      lines.push(options.empty || "\u6682\u65E0");
+    } else {
+      items.forEach((item) => lines.push(`- ${item}`));
+    }
+    return { title, lines };
+  }
+  function testSection(current, previous) {
+    if (!current && !previous) return null;
+    const lines = ["\u6D4B\u8BD5\u7ED3\u679C\u53D8\u5316"];
+    if (!previous) {
+      lines.push(formatTestResult("\u5F53\u524D", current));
+      return { title: "\u6D4B\u8BD5\u7ED3\u679C\u53D8\u5316", lines };
+    }
+    lines.push(`${formatTestResult("\u4E0A\u4E00\u7248", previous)} -> ${formatTestResult("\u5F53\u524D", current)}`);
+    const currentIssues = current?.issueCount || 0;
+    const previousIssues = previous?.issueCount || 0;
+    if (currentIssues !== previousIssues) lines.push(`\u95EE\u9898\u6570\uFF1A${previousIssues} -> ${currentIssues}`);
+    return { title: "\u6D4B\u8BD5\u7ED3\u679C\u53D8\u5316", lines };
+  }
+  function formatTestResult(label, result2) {
+    if (!result2) return `${label}\uFF1A\u65E0\u6D4B\u8BD5\u8BB0\u5F55`;
+    const passed = result2.passed ? "\u901A\u8FC7" : "\u672A\u901A\u8FC7";
+    const score = Number.isFinite(result2.score) ? `\uFF0C\u5206\u6570 ${result2.score}` : "";
+    const gate = result2.saveAllowed === false ? "\uFF0C\u7981\u6B62\u6B63\u5F0F\u4FDD\u5B58" : "";
+    return `${label}\uFF1A${passed}${score}${gate}`;
+  }
+  function normalizeTestReport(value) {
+    const report = parseJsonObject(value);
+    if (!Object.keys(report).length) return value ? { passed: false, score: null, issueCount: 1, saveAllowed: false } : null;
+    const overall = report.overall_result || report.overall || report;
+    const cases = Array.isArray(report.test_cases) ? report.test_cases : [];
+    const issueCount = cases.reduce((sum, item) => sum + coerceArray(item.issues).length, 0) + Number(overall.must_rule_miss_count || 0) + Number(overall.privacy_leak_count || 0) + Number(overall.case_specific_leak_count || 0) + Number(overall.fabrication_risk_count || 0);
+    return {
+      passed: Boolean(overall.passed ?? report.passed),
+      score: Number.isFinite(Number(overall.score)) ? Number(overall.score) : null,
+      saveAllowed: overall.save_allowed !== false,
+      issueCount
+    };
+  }
+  function normalizeRuleList(value) {
+    return coerceArray(value).map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") return String(item.rule || item.text || item.name || "").trim();
+      return "";
+    }).filter(Boolean);
+  }
+  function normalizeTextList(value) {
+    return coerceArray(value).map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") return String(item.rule || item.text || item.name || "").trim();
+      return String(item || "").trim();
+    }).filter(Boolean);
+  }
+  function uniqueTextList(items = []) {
+    return Array.from(new Set(items.map((item) => String(item || "").trim()).filter(Boolean)));
+  }
+  function parseJsonObject(value) {
+    if (!value) return {};
+    if (typeof value === "object" && !Array.isArray(value)) return value;
+    const raw = String(value || "").trim();
+    if (!raw) return {};
+    try {
+      return JSON.parse(extractJsonObject(raw) || raw);
+    } catch {
+      return {};
+    }
+  }
+
   // src/modules/skills/skillRenderer.js
   function createSkillRenderer(deps) {
     const {
@@ -34612,6 +34749,7 @@ ${JSON.stringify(payload, null, 2)}`
         `\u89C4\u5219 JSON \u5B57\u6570\uFF1A${(version.skillJson || "").length}`
       ];
       if (previous) {
+        const structuredDiff = buildSkillVersionDiff(version, previous);
         lines.push(
           "",
           "\u4E0E\u4E0A\u4E00\u7248\u5BF9\u6BD4\uFF1A",
@@ -34619,6 +34757,9 @@ ${JSON.stringify(payload, null, 2)}`
           `\u89C4\u5219 JSON\uFF1A${describeLengthChange((version.skillJson || "").length - (previous.skillJson || "").length)}`,
           `\u8BAD\u7EC3\u6587\u672C\uFF1A${(version.sourceExamples || []).length} / ${(previous.sourceExamples || []).length} \u4EFD`
         );
+        if (structuredDiff.text) {
+          lines.push("", structuredDiff.text);
+        }
       }
       if (version.aggregation) {
         lines.push("", "\u805A\u5408\u6458\u8981\uFF1A", version.aggregation.slice(0, 1200));

@@ -8,6 +8,7 @@ import {
   normalizeHandle,
   now,
 } from "../../utils/helpers.js";
+import { buildSkillVersionDiff } from "./skillVersionDiff.js";
 
 export function createSkillRenderer(deps) {
   const {
@@ -212,6 +213,7 @@ export function createSkillRenderer(deps) {
       `规则 JSON 字数：${(version.skillJson || "").length}`,
     ];
     if (previous) {
+      const structuredDiff = buildSkillVersionDiff(version, previous);
       lines.push(
         "",
         "与上一版对比：",
@@ -219,6 +221,9 @@ export function createSkillRenderer(deps) {
         `规则 JSON：${describeLengthChange((version.skillJson || "").length - (previous.skillJson || "").length)}`,
         `训练文本：${(version.sourceExamples || []).length} / ${(previous.sourceExamples || []).length} 份`,
       );
+      if (structuredDiff.text) {
+        lines.push("", structuredDiff.text);
+      }
     }
     if (version.aggregation) {
       lines.push("", "聚合摘要：", version.aggregation.slice(0, 1200));
