@@ -29,6 +29,7 @@ import { createDocumentEditor } from "./src/modules/documents/documentEditor.js"
 import { createDocumentManager } from "./src/modules/documents/documentManager.js";
 import { createDocumentRenderer } from "./src/modules/documents/documentRenderer.js";
 import { createTrashController } from "./src/modules/documents/trashController.js";
+import { createEditorContextMenuController } from "./src/modules/editor/editorContextMenuController.js";
 import { createGenerationController } from "./src/modules/generation/generationController.js";
 import { createBrowserFileSystemAdapter } from "./src/modules/folders/fileSystemAdapter.js";
 import { createFolderManager } from "./src/modules/folders/folderManager.js";
@@ -282,6 +283,18 @@ const generationController = createGenerationController({
   recordEditorUndoPoint,
   saveEditor,
   getDocumentLocation,
+  getSelectionOrLine,
+});
+const editorContextMenuController = createEditorContextMenuController({
+  state,
+  ui,
+  els,
+  toast,
+  generationController,
+  getCurrentDoc,
+  isSkillEnabled,
+  recordEditorUndoPoint,
+  saveEditor,
   getSelectionOrLine,
 });
 const pptController = createPptController({
@@ -770,18 +783,16 @@ function bindEvents() {
     event.preventDefault();
     findNext();
   });
-  els.contentEditor.addEventListener("contextmenu", showEditorMenu);
-  els.editorMenu.addEventListener("click", handleEditorMenuAction);
-  els.editorMenu.addEventListener("keydown", handleEditorMenuKeydown);
+  editorContextMenuController.bindEvents();
   document.addEventListener("click", (event) => {
-    if (!event.target.closest("#editorMenu")) hideEditorMenu();
+    if (!event.target.closest("#editorMenu")) editorContextMenuController.hide();
     if (!event.target.closest("#skillMentionPanel") && !event.target.matches("#generatePrompt, #contentEditor")) {
       hideSkillMentionPanel();
     }
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      hideEditorMenu({ restoreFocus: true });
+      editorContextMenuController.hide({ restoreFocus: true });
       hideSkillMentionPanel();
       if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
       layoutController.closeResponsiveInspector();
@@ -2259,24 +2270,6 @@ function updateUndoButtonState() {
   els.undoEditBtn.title = ui.editorUndoStack.length === 0 ? "暂无可撤销的正文编辑" : "撤销正文编辑";
 }
 
-function formatCurrentDocument() {
-  const editor = els.contentEditor;
-  const formatted = editor.value
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line.replace(/[ \t]+$/g, "").replace(/^[ \t]+/g, ""))
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-  if (formatted === editor.value) {
-    toast("当前格式已经比较规整");
-    return;
-  }
-  recordEditorUndoPoint();
-  editor.value = formatted;
-  saveEditor(true);
-}
-
 function toggleReplaceBar() {
   const shouldOpen = els.replaceBar.hidden;
   els.replaceBar.hidden = !shouldOpen;
@@ -2287,159 +2280,8 @@ function toggleReplaceBar() {
   }
 }
 
-function showEditorMenu(event) {
-  event.preventDefault();
-  ui.editorMenuReturnFocus = document.activeElement;
-  els.contentEditor.focus();
-  syncEditorSkillSelectDefault();
-  const panel = document.querySelector(".editor-panel");
-  const panelRect = panel.getBoundingClientRect();
-  const menu = els.editorMenu;
-  menu.hidden = false;
-
-  const width = menu.offsetWidth || 196;
-  const height = menu.offsetHeight || 164;
-  const left = Math.min(Math.max(8, event.clientX - panelRect.left), panelRect.width - width - 8);
-  const top = Math.min(Math.max(8, event.clientY - panelRect.top), panelRect.height - height - 8);
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
-  if (window.lucide) window.lucide.createIcons();
-  window.setTimeout(() => getEditorMenuItems()[0]?.focus(), 0);
-}
-
-function syncEditorSkillSelectDefault() {
-  if (!els.editorSkillSelect) return;
-  const preferred = els.styleSelect?.value || getCurrentDoc()?.styleId || "";
-  const hasPreferred = Array.from(els.editorSkillSelect.options || []).some((option) => option.value === preferred);
-  if (hasPreferred) {
-    els.editorSkillSelect.value = preferred;
-  }
-}
-
-function hideEditorMenu(options = {}) {
-  if (!els.editorMenu || els.editorMenu.hidden) return;
-  els.editorMenu.hidden = true;
-  if (options.restoreFocus) {
-    const target = ui.editorMenuReturnFocus?.isConnected ? ui.editorMenuReturnFocus : els.contentEditor;
-    target?.focus?.();
-  }
-  ui.editorMenuReturnFocus = null;
-}
-
-async function handleEditorMenuAction(event) {
-  const button = event.target.closest("button[data-editor-action]");
-  if (!button) return;
-  const action = button.dataset.editorAction;
-  if (action === "copy") {
-    await copyEditorText();
-  }
-  if (action === "delete") {
-    deleteEditorText();
-  }
-  if (action === "rewrite") {
-    await generationController.rewriteSelection({
-      triggerButton: button,
-      mode: button.dataset.rewriteMode || "preserve",
-      skillId: els.editorSkillSelect.value,
-    });
-  }
-  if (action === "format") {
-    formatCurrentDocument();
-  }
-  if (action === "insert-skill") {
-    insertSkillIntoEditor(els.editorSkillSelect.value);
-  }
-  hideEditorMenu({ restoreFocus: true });
-}
-
-function handleEditorMenuKeydown(event) {
-  if (event.key === "Escape") {
-    event.preventDefault();
-    hideEditorMenu({ restoreFocus: true });
-    return;
-  }
-  if (event.key === "Tab") {
-    hideEditorMenu({ restoreFocus: false });
-    return;
-  }
-  if (event.target === els.editorSkillSelect) return;
-  const items = getEditorMenuItems();
-  const currentIndex = items.indexOf(document.activeElement);
-  const keyMap = {
-    ArrowDown: currentIndex < 0 ? 0 : (currentIndex + 1) % items.length,
-    ArrowRight: currentIndex < 0 ? 0 : (currentIndex + 1) % items.length,
-    ArrowUp: currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length,
-    ArrowLeft: currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length,
-    Home: 0,
-    End: items.length - 1,
-  };
-  if (!(event.key in keyMap)) return;
-  event.preventDefault();
-  items[keyMap[event.key]]?.focus();
-}
-
-function getEditorMenuItems() {
-  return Array.from(els.editorMenu?.querySelectorAll("button[data-editor-action]") || []);
-}
-
-async function copyEditorText() {
-  const selection = getSelectionOrLine();
-  if (!selection.text.trim()) {
-    toast("没有可复制的内容", "warn");
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(selection.text);
-  } catch {
-    const helper = document.createElement("textarea");
-    helper.value = selection.text;
-    helper.style.position = "fixed";
-    helper.style.opacity = "0";
-    document.body.appendChild(helper);
-    helper.select();
-    document.execCommand("copy");
-    helper.remove();
-  }
-  toast("已复制内容");
-}
-
-function deleteEditorText() {
-  const selection = getSelectionOrLine();
-  if (!selection.text) {
-    toast("没有可删除的内容", "warn");
-    return;
-  }
-  const content = els.contentEditor.value;
-  recordEditorUndoPoint();
-  els.contentEditor.value = content.slice(0, selection.start) + content.slice(selection.end);
-  els.contentEditor.focus();
-  els.contentEditor.setSelectionRange(selection.start, selection.start);
-  saveEditor(true);
-}
-
 async function syncDocumentToRealFolder(doc) {
   return folderManager.syncDocumentToRealFolder(doc);
-}
-
-function insertSkillIntoEditor(skillId) {
-  const skill = state.styles.find((item) => item.id === skillId);
-  if (!skill) return;
-  if (!isSkillEnabled(skill)) {
-    toast(`@${skill.handle} 尚未启用`, "warn");
-    return;
-  }
-  recordEditorUndoPoint();
-  insertTextAtCursor(els.contentEditor, `@${skill.handle} `);
-  saveEditor(true);
-  toast(`已插入 @${skill.handle}`);
-}
-
-function insertTextAtCursor(textarea, text) {
-  const start = textarea.selectionStart || 0;
-  const end = textarea.selectionEnd || start;
-  textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
-  textarea.focus();
-  textarea.setSelectionRange(start + text.length, start + text.length);
 }
 
 function appendDocumentToGeneratePrompt(docId) {

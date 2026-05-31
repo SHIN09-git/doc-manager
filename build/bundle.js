@@ -25493,6 +25493,204 @@ ${doc.content}`.toLowerCase().includes(query);
     };
   }
 
+  // src/modules/editor/editorContextMenuController.js
+  function createEditorContextMenuController(deps = {}) {
+    const {
+      state: state2,
+      ui: ui2,
+      els: els2,
+      toast: toast2 = () => {
+      },
+      generationController: generationController2,
+      getCurrentDoc: getCurrentDoc2 = () => null,
+      isSkillEnabled: isSkillEnabled2 = () => true,
+      recordEditorUndoPoint: recordEditorUndoPoint2 = () => {
+      },
+      saveEditor: saveEditor2 = () => {
+      },
+      getSelectionOrLine: getSelectionOrLine2 = () => ({ start: 0, end: 0, text: "" }),
+      getPanelElement = () => globalThis.document?.querySelector?.(".editor-panel"),
+      createIcons: createIcons2 = () => globalThis.window?.lucide?.createIcons?.(),
+      clipboard = () => globalThis.navigator?.clipboard,
+      documentRef = () => globalThis.document,
+      setTimeoutRef = (callback, delay) => globalThis.window?.setTimeout?.(callback, delay) ?? setTimeout(callback, delay)
+    } = deps;
+    function bindEvents2() {
+      els2.contentEditor?.addEventListener("contextmenu", show);
+      els2.editorMenu?.addEventListener("click", handleAction);
+      els2.editorMenu?.addEventListener("keydown", handleKeydown);
+    }
+    function show(event) {
+      event.preventDefault();
+      ui2.editorMenuReturnFocus = documentRef()?.activeElement || null;
+      els2.contentEditor.focus();
+      syncSkillSelectDefault();
+      const panel = getPanelElement();
+      const panelRect = panel?.getBoundingClientRect?.() || { left: 0, top: 0, width: 360, height: 240 };
+      const menu = els2.editorMenu;
+      menu.hidden = false;
+      const width = menu.offsetWidth || 196;
+      const height = menu.offsetHeight || 164;
+      const left = Math.min(Math.max(8, event.clientX - panelRect.left), panelRect.width - width - 8);
+      const top = Math.min(Math.max(8, event.clientY - panelRect.top), panelRect.height - height - 8);
+      menu.style.left = `${left}px`;
+      menu.style.top = `${top}px`;
+      createIcons2();
+      setTimeoutRef(() => getMenuItems()[0]?.focus?.(), 0);
+    }
+    function hide(options = {}) {
+      if (!els2.editorMenu || els2.editorMenu.hidden) return;
+      els2.editorMenu.hidden = true;
+      if (options.restoreFocus) {
+        const target = ui2.editorMenuReturnFocus?.isConnected ? ui2.editorMenuReturnFocus : els2.contentEditor;
+        target?.focus?.();
+      }
+      ui2.editorMenuReturnFocus = null;
+    }
+    async function handleAction(event) {
+      const button = event.target.closest("button[data-editor-action]");
+      if (!button) return;
+      const action = button.dataset.editorAction;
+      if (action === "copy") {
+        await copyText();
+      }
+      if (action === "delete") {
+        deleteText();
+      }
+      if (action === "rewrite") {
+        await generationController2.rewriteSelection({
+          triggerButton: button,
+          mode: button.dataset.rewriteMode || "preserve",
+          skillId: els2.editorSkillSelect.value
+        });
+      }
+      if (action === "format") {
+        formatDocument();
+      }
+      if (action === "insert-skill") {
+        insertSkill(els2.editorSkillSelect.value);
+      }
+      hide({ restoreFocus: true });
+    }
+    function handleKeydown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        hide({ restoreFocus: true });
+        return;
+      }
+      if (event.key === "Tab") {
+        hide({ restoreFocus: false });
+        return;
+      }
+      if (event.target === els2.editorSkillSelect) return;
+      const items = getMenuItems();
+      if (items.length === 0) return;
+      const currentIndex = items.indexOf(documentRef()?.activeElement);
+      const keyMap = {
+        ArrowDown: currentIndex < 0 ? 0 : (currentIndex + 1) % items.length,
+        ArrowRight: currentIndex < 0 ? 0 : (currentIndex + 1) % items.length,
+        ArrowUp: currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length,
+        ArrowLeft: currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length,
+        Home: 0,
+        End: items.length - 1
+      };
+      if (!(event.key in keyMap)) return;
+      event.preventDefault();
+      items[keyMap[event.key]]?.focus?.();
+    }
+    function syncSkillSelectDefault() {
+      if (!els2.editorSkillSelect) return;
+      const preferred = els2.styleSelect?.value || getCurrentDoc2()?.styleId || "";
+      const hasPreferred = Array.from(els2.editorSkillSelect.options || []).some((option) => option.value === preferred);
+      if (hasPreferred) {
+        els2.editorSkillSelect.value = preferred;
+      }
+    }
+    function getMenuItems() {
+      return Array.from(els2.editorMenu?.querySelectorAll("button[data-editor-action]") || []);
+    }
+    async function copyText() {
+      const selection = getSelectionOrLine2();
+      if (!selection.text.trim()) {
+        toast2("\u6CA1\u6709\u53EF\u590D\u5236\u7684\u5185\u5BB9", "warn");
+        return false;
+      }
+      try {
+        await clipboard()?.writeText(selection.text);
+      } catch {
+        const doc = documentRef();
+        const helper = doc.createElement("textarea");
+        helper.value = selection.text;
+        helper.style.position = "fixed";
+        helper.style.opacity = "0";
+        doc.body.appendChild(helper);
+        helper.select();
+        doc.execCommand("copy");
+        helper.remove();
+      }
+      toast2("\u5DF2\u590D\u5236\u5185\u5BB9");
+      return true;
+    }
+    function deleteText() {
+      const selection = getSelectionOrLine2();
+      if (!selection.text) {
+        toast2("\u6CA1\u6709\u53EF\u5220\u9664\u7684\u5185\u5BB9", "warn");
+        return false;
+      }
+      const content = els2.contentEditor.value;
+      recordEditorUndoPoint2();
+      els2.contentEditor.value = content.slice(0, selection.start) + content.slice(selection.end);
+      els2.contentEditor.focus();
+      els2.contentEditor.setSelectionRange(selection.start, selection.start);
+      saveEditor2(true);
+      return true;
+    }
+    function formatDocument() {
+      const editor = els2.contentEditor;
+      const formatted = editor.value.replace(/\r\n/g, "\n").split("\n").map((line) => line.replace(/[ \t]+$/g, "").replace(/^[ \t]+/g, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+      if (formatted === editor.value) {
+        toast2("\u5F53\u524D\u683C\u5F0F\u5DF2\u7ECF\u6BD4\u8F83\u89C4\u6574");
+        return false;
+      }
+      recordEditorUndoPoint2();
+      editor.value = formatted;
+      saveEditor2(true);
+      return true;
+    }
+    function insertSkill(skillId) {
+      const skill = state2.styles.find((item) => item.id === skillId);
+      if (!skill) return false;
+      if (!isSkillEnabled2(skill)) {
+        toast2(`@${skill.handle} \u5C1A\u672A\u542F\u7528`, "warn");
+        return false;
+      }
+      recordEditorUndoPoint2();
+      insertTextAtCursor(els2.contentEditor, `@${skill.handle} `);
+      saveEditor2(true);
+      toast2(`\u5DF2\u63D2\u5165 @${skill.handle}`);
+      return true;
+    }
+    return {
+      bindEvents: bindEvents2,
+      show,
+      hide,
+      handleAction,
+      handleKeydown,
+      syncSkillSelectDefault,
+      copyText,
+      deleteText,
+      formatDocument,
+      insertSkill
+    };
+  }
+  function insertTextAtCursor(textarea, text) {
+    const start = textarea.selectionStart || 0;
+    const end = textarea.selectionEnd || start;
+    textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
+    textarea.focus();
+    textarea.setSelectionRange(start + text.length, start + text.length);
+  }
+
   // src/modules/generation/generationController.js
   var EDITOR_REWRITE_PRESETS = {
     preserve: "\u4FDD\u7559\u539F\u6BB5\u843D\u7684\u4E8B\u5B9E\u3001\u610F\u601D\u548C\u4FE1\u606F\u987A\u5E8F\uFF0C\u53EA\u63D0\u5347\u8868\u8FBE\u7684\u89C4\u8303\u6027\u3001\u6E05\u6670\u5EA6\u548C\u6B63\u5F0F\u7A0B\u5EA6\u3002",
@@ -35709,6 +35907,18 @@ ${JSON.stringify(payload, null, 2)}`
     getDocumentLocation,
     getSelectionOrLine
   });
+  var editorContextMenuController = createEditorContextMenuController({
+    state,
+    ui,
+    els,
+    toast,
+    generationController,
+    getCurrentDoc,
+    isSkillEnabled,
+    recordEditorUndoPoint,
+    saveEditor,
+    getSelectionOrLine
+  });
   var pptController = createPptController({
     els,
     ui,
@@ -36167,18 +36377,16 @@ ${JSON.stringify(payload, null, 2)}`
       event.preventDefault();
       findNext();
     });
-    els.contentEditor.addEventListener("contextmenu", showEditorMenu);
-    els.editorMenu.addEventListener("click", handleEditorMenuAction);
-    els.editorMenu.addEventListener("keydown", handleEditorMenuKeydown);
+    editorContextMenuController.bindEvents();
     document.addEventListener("click", (event) => {
-      if (!event.target.closest("#editorMenu")) hideEditorMenu();
+      if (!event.target.closest("#editorMenu")) editorContextMenuController.hide();
       if (!event.target.closest("#skillMentionPanel") && !event.target.matches("#generatePrompt, #contentEditor")) {
         hideSkillMentionPanel();
       }
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
-        hideEditorMenu({ restoreFocus: true });
+        editorContextMenuController.hide({ restoreFocus: true });
         hideSkillMentionPanel();
         if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
         layoutController.closeResponsiveInspector();
@@ -37509,17 +37717,6 @@ ${JSON.stringify(payload, null, 2)}`
     els.undoEditBtn.disabled = ui.editorUndoStack.length === 0;
     els.undoEditBtn.title = ui.editorUndoStack.length === 0 ? "\u6682\u65E0\u53EF\u64A4\u9500\u7684\u6B63\u6587\u7F16\u8F91" : "\u64A4\u9500\u6B63\u6587\u7F16\u8F91";
   }
-  function formatCurrentDocument() {
-    const editor = els.contentEditor;
-    const formatted = editor.value.replace(/\r\n/g, "\n").split("\n").map((line) => line.replace(/[ \t]+$/g, "").replace(/^[ \t]+/g, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-    if (formatted === editor.value) {
-      toast("\u5F53\u524D\u683C\u5F0F\u5DF2\u7ECF\u6BD4\u8F83\u89C4\u6574");
-      return;
-    }
-    recordEditorUndoPoint();
-    editor.value = formatted;
-    saveEditor(true);
-  }
   function toggleReplaceBar() {
     const shouldOpen = els.replaceBar.hidden;
     els.replaceBar.hidden = !shouldOpen;
@@ -37529,148 +37726,8 @@ ${JSON.stringify(payload, null, 2)}`
       els.findInput.focus();
     }
   }
-  function showEditorMenu(event) {
-    event.preventDefault();
-    ui.editorMenuReturnFocus = document.activeElement;
-    els.contentEditor.focus();
-    syncEditorSkillSelectDefault();
-    const panel = document.querySelector(".editor-panel");
-    const panelRect = panel.getBoundingClientRect();
-    const menu = els.editorMenu;
-    menu.hidden = false;
-    const width = menu.offsetWidth || 196;
-    const height = menu.offsetHeight || 164;
-    const left = Math.min(Math.max(8, event.clientX - panelRect.left), panelRect.width - width - 8);
-    const top = Math.min(Math.max(8, event.clientY - panelRect.top), panelRect.height - height - 8);
-    menu.style.left = `${left}px`;
-    menu.style.top = `${top}px`;
-    if (window.lucide) window.lucide.createIcons();
-    window.setTimeout(() => getEditorMenuItems()[0]?.focus(), 0);
-  }
-  function syncEditorSkillSelectDefault() {
-    if (!els.editorSkillSelect) return;
-    const preferred = els.styleSelect?.value || getCurrentDoc()?.styleId || "";
-    const hasPreferred = Array.from(els.editorSkillSelect.options || []).some((option) => option.value === preferred);
-    if (hasPreferred) {
-      els.editorSkillSelect.value = preferred;
-    }
-  }
-  function hideEditorMenu(options = {}) {
-    if (!els.editorMenu || els.editorMenu.hidden) return;
-    els.editorMenu.hidden = true;
-    if (options.restoreFocus) {
-      const target = ui.editorMenuReturnFocus?.isConnected ? ui.editorMenuReturnFocus : els.contentEditor;
-      target?.focus?.();
-    }
-    ui.editorMenuReturnFocus = null;
-  }
-  async function handleEditorMenuAction(event) {
-    const button = event.target.closest("button[data-editor-action]");
-    if (!button) return;
-    const action = button.dataset.editorAction;
-    if (action === "copy") {
-      await copyEditorText();
-    }
-    if (action === "delete") {
-      deleteEditorText();
-    }
-    if (action === "rewrite") {
-      await generationController.rewriteSelection({
-        triggerButton: button,
-        mode: button.dataset.rewriteMode || "preserve",
-        skillId: els.editorSkillSelect.value
-      });
-    }
-    if (action === "format") {
-      formatCurrentDocument();
-    }
-    if (action === "insert-skill") {
-      insertSkillIntoEditor(els.editorSkillSelect.value);
-    }
-    hideEditorMenu({ restoreFocus: true });
-  }
-  function handleEditorMenuKeydown(event) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      hideEditorMenu({ restoreFocus: true });
-      return;
-    }
-    if (event.key === "Tab") {
-      hideEditorMenu({ restoreFocus: false });
-      return;
-    }
-    if (event.target === els.editorSkillSelect) return;
-    const items = getEditorMenuItems();
-    const currentIndex = items.indexOf(document.activeElement);
-    const keyMap = {
-      ArrowDown: currentIndex < 0 ? 0 : (currentIndex + 1) % items.length,
-      ArrowRight: currentIndex < 0 ? 0 : (currentIndex + 1) % items.length,
-      ArrowUp: currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length,
-      ArrowLeft: currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length,
-      Home: 0,
-      End: items.length - 1
-    };
-    if (!(event.key in keyMap)) return;
-    event.preventDefault();
-    items[keyMap[event.key]]?.focus();
-  }
-  function getEditorMenuItems() {
-    return Array.from(els.editorMenu?.querySelectorAll("button[data-editor-action]") || []);
-  }
-  async function copyEditorText() {
-    const selection = getSelectionOrLine();
-    if (!selection.text.trim()) {
-      toast("\u6CA1\u6709\u53EF\u590D\u5236\u7684\u5185\u5BB9", "warn");
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(selection.text);
-    } catch {
-      const helper = document.createElement("textarea");
-      helper.value = selection.text;
-      helper.style.position = "fixed";
-      helper.style.opacity = "0";
-      document.body.appendChild(helper);
-      helper.select();
-      document.execCommand("copy");
-      helper.remove();
-    }
-    toast("\u5DF2\u590D\u5236\u5185\u5BB9");
-  }
-  function deleteEditorText() {
-    const selection = getSelectionOrLine();
-    if (!selection.text) {
-      toast("\u6CA1\u6709\u53EF\u5220\u9664\u7684\u5185\u5BB9", "warn");
-      return;
-    }
-    const content = els.contentEditor.value;
-    recordEditorUndoPoint();
-    els.contentEditor.value = content.slice(0, selection.start) + content.slice(selection.end);
-    els.contentEditor.focus();
-    els.contentEditor.setSelectionRange(selection.start, selection.start);
-    saveEditor(true);
-  }
   async function syncDocumentToRealFolder(doc) {
     return folderManager.syncDocumentToRealFolder(doc);
-  }
-  function insertSkillIntoEditor(skillId) {
-    const skill = state.styles.find((item) => item.id === skillId);
-    if (!skill) return;
-    if (!isSkillEnabled(skill)) {
-      toast(`@${skill.handle} \u5C1A\u672A\u542F\u7528`, "warn");
-      return;
-    }
-    recordEditorUndoPoint();
-    insertTextAtCursor(els.contentEditor, `@${skill.handle} `);
-    saveEditor(true);
-    toast(`\u5DF2\u63D2\u5165 @${skill.handle}`);
-  }
-  function insertTextAtCursor(textarea, text) {
-    const start = textarea.selectionStart || 0;
-    const end = textarea.selectionEnd || start;
-    textarea.value = textarea.value.slice(0, start) + text + textarea.value.slice(end);
-    textarea.focus();
-    textarea.setSelectionRange(start + text.length, start + text.length);
   }
   function appendDocumentToGeneratePrompt(docId) {
     const doc = state.docs.find((item) => item.id === docId);
