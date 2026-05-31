@@ -23,6 +23,8 @@
 - [x] 新增外部 URL 生产配置回归测试，避免上线后才发现支付跳转、收款码或运维告警地址不安全/不可用。
 - [x] 补齐生产邮件与对象存储 URL 校验：`EMAIL_WEBHOOK_URL`、`EMAIL_RESEND_ENDPOINT` 和 S3-compatible `BACKUP_OBJECT_STORAGE_ENDPOINT` 在生产环境必须使用 HTTPS。
 - [x] 将生产邮件模式测试改为 HTTPS `fetch` mock，避免测试依赖本地 HTTP 接收器而掩盖真实生产配置约束。
+- [x] 加固 Cookie 会话写操作来源校验：带 Cookie 的 `POST/PUT/PATCH/DELETE` 请求如携带 `Origin`/`Referer`，必须来自工作台可信 origin。
+- [x] 新增跨站来源回归测试，确认恶意 origin 的 Cookie 写操作会被拒绝，同时 Bearer 调用和可信工作台 origin 保持可用。
 
 ## 2026-05-29 功能内容结构优化记录
 

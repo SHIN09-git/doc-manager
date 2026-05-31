@@ -39,6 +39,7 @@ const EMAIL_REQUEST_WINDOW_MS = 1000 * 60 * 10;
 const EMAIL_REQUEST_LIMIT = 3;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ADMIN_ROLES = new Set(["owner", "admin"]);
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 export function createApp(options = {}) {
   const env = loadEnv(options.env || process.env);
@@ -68,6 +69,7 @@ export function createApp(options = {}) {
         url,
         auth: await resolveAuth(request, store),
       };
+      enforceTrustedOrigin(context);
       await route(context);
     } catch (error) {
       await recordRequestError(store, context, request, error).catch(() => null);
@@ -1994,7 +1996,7 @@ async function deleteOwnAccount(ctx) {
 }
 
 async function resolveAuth(request, store) {
-  const token = getSessionToken(request);
+  const { token, source } = getSessionTokenDetails(request);
   if (!token) return null;
   const tokenHash = sha256(token);
   const now = Date.now();
@@ -2002,13 +2004,44 @@ async function resolveAuth(request, store) {
   const session = data.sessions.find((item) => item.token_hash === tokenHash && Date.parse(item.expires_at) > now);
   if (!session) return null;
   const user = data.users.find((item) => item.id === session.user_id && !item.disabled_at);
-  return user ? { user, session } : null;
+  return user ? { user, session, source } : null;
 }
 
 function getSessionToken(request) {
+  return getSessionTokenDetails(request).token;
+}
+
+function getSessionTokenDetails(request) {
   const auth = String(request.headers.authorization || "");
-  if (auth.startsWith("Bearer ")) return auth.slice(7).trim();
-  return parseCookies(request.headers.cookie).get(SESSION_COOKIE) || "";
+  if (auth.startsWith("Bearer ")) return { token: auth.slice(7).trim(), source: "bearer" };
+  return { token: parseCookies(request.headers.cookie).get(SESSION_COOKIE) || "", source: "cookie" };
+}
+
+function enforceTrustedOrigin(ctx) {
+  if (!UNSAFE_METHODS.has(ctx.request.method)) return;
+  if (ctx.auth?.source !== "cookie") return;
+  const requestOrigin = readRequestOrigin(ctx.request);
+  if (!requestOrigin) return;
+  const trustedOrigin = normalizeTrustedOrigin(ctx.env.corsOrigin || ctx.env.appUrl);
+  if (requestOrigin !== trustedOrigin) {
+    throw new HttpError(403, "请求来源不可信，请从工作台页面重试", "untrusted_origin");
+  }
+}
+
+function readRequestOrigin(request) {
+  const origin = String(request.headers.origin || "").trim();
+  if (origin) return normalizeTrustedOrigin(origin) || "invalid";
+  const referer = String(request.headers.referer || request.headers.referrer || "").trim();
+  if (referer) return normalizeTrustedOrigin(referer) || "invalid";
+  return "";
+}
+
+function normalizeTrustedOrigin(value) {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return "";
+  }
 }
 
 function createSession(data, userId) {

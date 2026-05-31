@@ -350,6 +350,34 @@ test("documents are organization scoped and soft deleted", async () => {
   assert.equal(active.json.documents.length, 0);
 });
 
+test("cookie authenticated writes reject untrusted browser origins", async () => {
+  const owner = await register("origin-owner@example.com");
+  const blocked = await api("/api/documents", {
+    method: "POST",
+    cookie: owner.cookie,
+    headers: { Origin: "https://evil.example" },
+    body: { title: "Blocked", content: "cross-site" },
+  });
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.json.error.code, "untrusted_origin");
+
+  const allowed = await api("/api/documents", {
+    method: "POST",
+    cookie: owner.cookie,
+    headers: { Origin: "http://127.0.0.1:4173" },
+    body: { title: "Allowed", content: "same workbench origin" },
+  });
+  assert.equal(allowed.status, 201);
+
+  const token = extractSessionToken(owner.cookie);
+  const bearerAllowed = await api("/api/documents", {
+    method: "POST",
+    headers: { Origin: "https://evil.example", Authorization: `Bearer ${token}` },
+    body: { title: "Bearer", content: "api client" },
+  });
+  assert.equal(bearerAllowed.status, 201);
+});
+
 test("writers keep versions and support restore", async () => {
   const owner = await register("writer-owner@example.com");
   const created = await api("/api/writers", {
@@ -1022,6 +1050,11 @@ function installFetchMock(handler) {
 
 function normalizeHeaderObject(headers = {}) {
   return Object.fromEntries(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]));
+}
+
+function extractSessionToken(cookieHeader) {
+  const match = String(cookieHeader || "").match(/(?:^|;\s*)mowen_session=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
 }
 
 test("production mode rejects default secrets", () => {
