@@ -3,6 +3,7 @@ import path from "node:path";
 export function loadEnv(source = process.env) {
   const nodeEnv = source.NODE_ENV || "development";
   const dataDir = path.resolve(source.DATA_DIR || "server/.data");
+  const appUrlSource = source.APP_URL || source.APP_BASE_URL || (nodeEnv === "production" ? "" : "http://127.0.0.1:4173/index.html");
   const env = {
     nodeEnv,
     host: source.HOST || "127.0.0.1",
@@ -44,7 +45,7 @@ export function loadEnv(source = process.env) {
     emailCallbackToken: source.EMAIL_CALLBACK_TOKEN || "",
     emailResendApiKey: source.EMAIL_RESEND_API_KEY || "",
     emailResendEndpoint: (source.EMAIL_RESEND_ENDPOINT || "https://api.resend.com/emails").replace(/\/+$/, ""),
-    appUrl: (source.APP_URL || source.APP_BASE_URL || "http://127.0.0.1:4173/index.html").replace(/\/+$/, ""),
+    appUrl: normalizeAppUrl(appUrlSource),
     backupDir: path.resolve(source.BACKUP_DIR || path.join(dataDir, "backups")),
     backupRetentionDays: toNumber(source.BACKUP_RETENTION_DAYS, 14),
     backupEncryptionKey: source.BACKUP_ENCRYPTION_KEY || "",
@@ -108,6 +109,10 @@ function normalizeCorsOrigin(value) {
   }
 }
 
+function normalizeAppUrl(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
 function validateEnv(env) {
   if (env.storeDriver !== "json" && env.storeDriver !== "postgres") {
     throw new Error("STORE_DRIVER must be either json or postgres");
@@ -153,6 +158,12 @@ function validateEnv(env) {
   }
   if (!isHttpsUrl(env.corsOrigin)) {
     throw new Error("CORS_ORIGIN must be an HTTPS origin in production");
+  }
+  if (!env.appUrl) {
+    throw new Error("APP_URL or APP_BASE_URL is required in production");
+  }
+  if (!isHttpsUrl(env.appUrl)) {
+    throw new Error("APP_URL must be an HTTPS URL in production");
   }
 }
 
