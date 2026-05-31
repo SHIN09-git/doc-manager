@@ -2877,11 +2877,8 @@ function getProviderKey(data, organizationId, provider, env) {
 }
 
 async function callAiProvider({ env, providerKey, body }) {
-  if (env.aiProxyMode === "mock" || !providerKey) {
-    const prompt = body.messages.map((item) => item.content).filter(Boolean).join("\n").slice(0, 120);
-    const reply = `【云端 AI 代理 Mock】已接收 ${body.messages.length} 条消息。摘要：${prompt || "无内容"}`;
-    return { reply, mocked: true, usage: { prompt_tokens: estimateTokens(prompt), completion_tokens: estimateTokens(reply), total_tokens: estimateTokens(prompt) + estimateTokens(reply) } };
-  }
+  if (env.aiProxyMode === "mock") return mockAiResponse(body);
+  if (!providerKey) throw new HttpError(400, "请先配置组织接口 API Key", "missing_provider_key");
   const endpoint = `${env.aiBaseUrl}/chat/completions`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), env.aiRequestTimeoutMs);
@@ -2914,6 +2911,22 @@ async function callAiProvider({ env, providerKey, body }) {
     reply: json.choices?.[0]?.message?.content || "",
     mocked: false,
     usage: json.usage || null,
+  };
+}
+
+function mockAiResponse(body) {
+  const prompt = body.messages.map((item) => item.content).filter(Boolean).join("\n").slice(0, 120);
+  const reply = `【云端 AI 代理 Mock】已接收 ${body.messages.length} 条消息。摘要：${prompt || "无内容"}`;
+  const promptTokens = estimateTokens(prompt);
+  const completionTokens = estimateTokens(reply);
+  return {
+    reply,
+    mocked: true,
+    usage: {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens,
+    },
   };
 }
 

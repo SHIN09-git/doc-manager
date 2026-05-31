@@ -33,6 +33,12 @@ test("CORS_ORIGIN normalizes full urls to origins", () => {
   assert.equal(env.corsOrigin, "https://mowen.example.com");
 });
 
+test("AI_PROXY_MODE rejects unknown modes", () => {
+  assert.throws(() => loadEnv({
+    AI_PROXY_MODE: "liv",
+  }), /AI_PROXY_MODE must be mock or live/);
+});
+
 test("production mode requires secure session cookies", () => {
   assert.throws(() => loadEnv(PRODUCTION_ENV), /SESSION_SECURE=true/);
 });

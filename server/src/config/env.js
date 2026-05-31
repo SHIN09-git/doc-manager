@@ -123,6 +123,9 @@ function validateEnv(env) {
   if (!["generic-webhook", "resend"].includes(env.emailProvider)) {
     throw new Error("EMAIL_PROVIDER must be generic-webhook or resend");
   }
+  if (!["mock", "live"].includes(env.aiProxyMode)) {
+    throw new Error("AI_PROXY_MODE must be mock or live");
+  }
   if (!["disabled", "mock", "webhook"].includes(env.paymentCheckoutMode)) {
     throw new Error("PAYMENT_CHECKOUT_MODE must be disabled, mock, or webhook");
   }

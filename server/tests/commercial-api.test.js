@@ -423,6 +423,44 @@ test("AI proxy records usage and enforces request limits", async () => {
   assert.ok(usage.json.usage.estimated_cost > 0);
 });
 
+test("live AI proxy fails clearly when no API key is configured", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-live-ai-api-"));
+  const liveServer = createApp({
+    env: {
+      DATA_DIR: temp,
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "live",
+    },
+  });
+  await new Promise((resolve) => liveServer.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${liveServer.address().port}`;
+  try {
+    const registered = await fetch(`${url}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "live-ai-owner@example.com", password: "password123", name: "Live AI" }),
+    });
+    const cookie = registered.headers.get("set-cookie") || "";
+    const response = await fetch(`${url}/api/ai/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ task_type: "live_missing_key", messages: [{ role: "user", content: "hello" }] }),
+    });
+    const json = await response.json();
+    assert.equal(response.status, 400);
+    assert.equal(json.error.code, "missing_provider_key");
+    const data = await liveServer.store.read();
+    assert.equal(data.ai_usage.length, 1);
+    assert.equal(data.ai_usage[0].status, "failed");
+    assert.equal(data.ai_usage[0].error, "请先配置组织接口 API Key");
+    assert.ok(data.system_events.some((item) => item.type === "ai.proxy.failed" && item.metadata?.usage_id === data.ai_usage[0].id));
+  } finally {
+    await new Promise((resolve) => liveServer.close(resolve));
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 test("manual recharge orders grant credits after admin approval", async () => {
   const owner = await register("manual-billing-owner@example.com");
   const summary = await api("/api/billing/summary", { cookie: owner.cookie });
