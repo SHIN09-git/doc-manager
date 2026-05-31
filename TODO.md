@@ -25,6 +25,8 @@
 - [x] 将生产邮件模式测试改为 HTTPS `fetch` mock，避免测试依赖本地 HTTP 接收器而掩盖真实生产配置约束。
 - [x] 加固 Cookie 会话写操作来源校验：带 Cookie 的 `POST/PUT/PATCH/DELETE` 请求如携带 `Origin`/`Referer`，必须来自工作台可信 origin。
 - [x] 新增跨站来源回归测试，确认恶意 origin 的 Cookie 写操作会被拒绝，同时 Bearer 调用和可信工作台 origin 保持可用。
+- [x] 修复来源校验与 CORS 在本地开发中的兼容问题：开发环境同时信任 `http://127.0.0.1:4173` 与 `http://localhost:4173`。
+- [x] 统一可信 origin 判断和 CORS 回显逻辑，浏览器从 `localhost` 打开工作台时会收到匹配的 `Access-Control-Allow-Origin`。
 
 ## 2026-05-29 功能内容结构优化记录
 

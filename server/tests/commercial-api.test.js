@@ -369,6 +369,15 @@ test("cookie authenticated writes reject untrusted browser origins", async () =>
   });
   assert.equal(allowed.status, 201);
 
+  const localhostAllowed = await api("/api/documents", {
+    method: "POST",
+    cookie: owner.cookie,
+    headers: { Origin: "http://localhost:4173" },
+    body: { title: "Localhost", content: "local dev origin" },
+  });
+  assert.equal(localhostAllowed.status, 201);
+  assert.equal(localhostAllowed.headers.get("access-control-allow-origin"), "http://localhost:4173");
+
   const token = extractSessionToken(owner.cookie);
   const bearerAllowed = await api("/api/documents", {
     method: "POST",
@@ -1178,6 +1187,7 @@ async function api(pathname, options = {}) {
   const cookie = response.headers.get("set-cookie") || options.cookie || "";
   return {
     status: response.status,
+    headers: response.headers,
     cookie,
     json: text ? JSON.parse(text) : null,
   };

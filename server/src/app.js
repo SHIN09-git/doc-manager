@@ -21,6 +21,8 @@ import {
   HttpError,
   clearSessionCookie,
   createSessionCookie,
+  isTrustedOrigin,
+  normalizeOrigin,
   parseCookies,
   readJsonBody,
   readRawBody,
@@ -47,7 +49,7 @@ export function createApp(options = {}) {
 
   const server = createServer(async (request, response) => {
     const startedAt = Date.now();
-    setSecurityHeaders(response, env);
+    setSecurityHeaders(response, env, request);
     if (request.method === "OPTIONS") {
       response.writeHead(204, {
         "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
@@ -2022,26 +2024,17 @@ function enforceTrustedOrigin(ctx) {
   if (ctx.auth?.source !== "cookie") return;
   const requestOrigin = readRequestOrigin(ctx.request);
   if (!requestOrigin) return;
-  const trustedOrigin = normalizeTrustedOrigin(ctx.env.corsOrigin || ctx.env.appUrl);
-  if (requestOrigin !== trustedOrigin) {
+  if (!isTrustedOrigin(ctx.env, requestOrigin)) {
     throw new HttpError(403, "请求来源不可信，请从工作台页面重试", "untrusted_origin");
   }
 }
 
 function readRequestOrigin(request) {
   const origin = String(request.headers.origin || "").trim();
-  if (origin) return normalizeTrustedOrigin(origin) || "invalid";
+  if (origin) return normalizeOrigin(origin) || "invalid";
   const referer = String(request.headers.referer || request.headers.referrer || "").trim();
-  if (referer) return normalizeTrustedOrigin(referer) || "invalid";
+  if (referer) return normalizeOrigin(referer) || "invalid";
   return "";
-}
-
-function normalizeTrustedOrigin(value) {
-  try {
-    return new URL(value).origin;
-  } catch {
-    return "";
-  }
 }
 
 function createSession(data, userId) {

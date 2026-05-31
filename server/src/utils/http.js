@@ -76,13 +76,47 @@ export function clearSessionCookie(name, options = {}) {
   return createSessionCookie(name, "", { ...options, maxAgeSeconds: 0 });
 }
 
-export function setSecurityHeaders(response, env) {
+export function setSecurityHeaders(response, env, request = null) {
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("Referrer-Policy", "no-referrer");
   response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-  if (env.corsOrigin) {
-    response.setHeader("Access-Control-Allow-Origin", env.corsOrigin);
+  const requestOrigin = normalizeOrigin(request?.headers?.origin || "");
+  const allowedOrigin = requestOrigin && isTrustedOrigin(env, requestOrigin)
+    ? requestOrigin
+    : getDefaultTrustedOrigin(env);
+  if (allowedOrigin) {
+    response.setHeader("Access-Control-Allow-Origin", allowedOrigin);
     response.setHeader("Access-Control-Allow-Credentials", "true");
     response.setHeader("Vary", "Origin");
   }
+}
+
+export function isTrustedOrigin(env, value) {
+  const origin = normalizeOrigin(value);
+  return Boolean(origin && getTrustedOrigins(env).has(origin));
+}
+
+export function normalizeOrigin(value) {
+  try {
+    return new URL(String(value || "").trim()).origin;
+  } catch {
+    return "";
+  }
+}
+
+function getDefaultTrustedOrigin(env) {
+  const origins = Array.from(getTrustedOrigins(env));
+  return origins[0] || "";
+}
+
+function getTrustedOrigins(env) {
+  const origins = new Set([
+    normalizeOrigin(env?.corsOrigin),
+    normalizeOrigin(env?.appUrl),
+  ].filter(Boolean));
+  if (env?.nodeEnv !== "production") {
+    origins.add("http://127.0.0.1:4173");
+    origins.add("http://localhost:4173");
+  }
+  return origins;
 }
