@@ -6,6 +6,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createApp } from "../src/app.js";
+import { normalizeData } from "../src/db/jsonStore.js";
+import { sha256 } from "../src/utils/crypto.js";
 
 let server;
 let baseUrl;
@@ -938,6 +940,89 @@ function signWebhook(secret, timestamp, body) {
 
 test("production mode rejects default secrets", () => {
   assert.throws(() => createApp({ env: { NODE_ENV: "production" } }), /APP_ENCRYPTION_SECRET/);
+});
+
+test("unexpected request errors are recorded under the active organization", async () => {
+  const token = "scoped-error-session-token";
+  const now = new Date().toISOString();
+  const data = normalizeData({
+    users: [{
+      id: "usr_error",
+      email: "error-owner@example.com",
+      name: "Error Owner",
+      password_hash: "",
+      disabled_at: null,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_error",
+      name: "Error Org",
+      slug: "error-org",
+      plan: "free",
+      created_by: "usr_error",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_error",
+      organization_id: "org_error",
+      user_id: "usr_error",
+      role: "owner",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_error",
+      user_id: "usr_error",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+  });
+  let failNextWrite = true;
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      if (failNextWrite) {
+        failNextWrite = false;
+        throw new Error("simulated document write failure");
+      }
+      return mutator(data);
+    },
+  };
+  const scopedServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+    },
+    store,
+  });
+  await new Promise((resolve) => scopedServer.listen(0, "127.0.0.1", resolve));
+  const address = scopedServer.address();
+  const scopedBaseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${scopedBaseUrl}/api/documents`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `mowen_session=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({ title: "Broken", content: "body" }),
+    });
+
+    assert.equal(response.status, 500);
+    assert.ok(data.system_events.some((item) =>
+      item.organization_id === "org_error" &&
+      item.user_id === "usr_error" &&
+      item.type === "http.request.failed" &&
+      item.metadata.url === "/api/documents"));
+  } finally {
+    await new Promise((resolve) => scopedServer.close(resolve));
+  }
 });
 
 async function register(email, options = {}) {

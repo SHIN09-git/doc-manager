@@ -2,6 +2,8 @@
 
 ## 2026-05-31 全量审阅发现问题修复记录
 
+- [x] 修复后端 500 错误缺少组织归属的问题：`loadOrg` 会把当前组织写入请求上下文，`recordRequestError` 会按当前组织、请求头或用户默认组织归档系统错误，避免管理后台近期错误漏报。
+- [x] 新增服务端回归测试，模拟已登录用户创建文档时写入失败，确认 `http.request.failed` 事件会进入对应组织的 `system_events`。
 - [x] 修复静态发布目录中的管理后台缺失 ESM 依赖问题：`admin.html` 会加载 `src/admin/adminPage.js`，该文件依赖 `src/modules/cloud/billingFormatters.js`，现在 `npm run build:static` 会一并复制该模块。
 - [x] `scripts/build-static.mjs` 改为显式静态文件清单并导出构建函数，便于测试和后续维护。
 - [x] 新增静态构建清单测试，确保后台页面新增相对 import 时必须进入发布目录。

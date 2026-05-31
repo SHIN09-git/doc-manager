@@ -2098,6 +2098,7 @@ async function loadOrg(ctx) {
   const data = await ctx.store.read();
   const organization = resolveOrganization(ctx, data, true);
   const membership = getMembership(data, ctx.auth.user.id, organization.id);
+  ctx.activeOrganizationId = organization.id;
   return { data, organization, membership };
 }
 
@@ -3043,12 +3044,27 @@ async function recordRequestError(store, ctx, request, error) {
   const status = error instanceof HttpError ? error.status : 500;
   if (status < 500) return;
   await store.write((data) => {
-    addSystemEvent(data, ctx?.auth?.organization_id || null, ctx?.auth?.user?.id || null, "error", "http.request.failed", error.message || "接口异常", {
+    const organizationId = resolveRequestErrorOrganizationId(ctx, data);
+    addSystemEvent(data, organizationId, ctx?.auth?.user?.id || null, "error", "http.request.failed", error.message || "接口异常", {
       method: request.method,
       url: request.url,
       status,
     });
   });
+}
+
+function resolveRequestErrorOrganizationId(ctx, data) {
+  const userId = ctx?.auth?.user?.id;
+  if (!userId) return null;
+  const activeOrganizationId = ctx?.activeOrganizationId;
+  if (activeOrganizationId && getMembership(data, userId, activeOrganizationId)) {
+    return activeOrganizationId;
+  }
+  const requestedOrgId = ctx?.request?.headers?.["x-organization-id"] || ctx?.url?.searchParams?.get("organization_id");
+  if (requestedOrgId && getMembership(data, userId, requestedOrgId)) {
+    return requestedOrgId;
+  }
+  return data.memberships.find((item) => item.user_id === userId)?.organization_id || null;
 }
 
 function logRequest(env, request, response, startedAt) {
