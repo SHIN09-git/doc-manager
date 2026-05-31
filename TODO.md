@@ -11,6 +11,8 @@
 - [x] 修复静态发布目录中的管理后台缺失 ESM 依赖问题：`admin.html` 会加载 `src/admin/adminPage.js`，该文件依赖 `src/modules/cloud/billingFormatters.js`，现在 `npm run build:static` 会一并复制该模块。
 - [x] `scripts/build-static.mjs` 改为显式静态文件清单并导出构建函数，便于测试和后续维护。
 - [x] 新增静态构建清单测试，确保后台页面新增相对 import 时必须进入发布目录。
+- [x] 加固生产环境启动校验：`NODE_ENV=production` 时必须显式设置 `SESSION_SECURE=true`，避免正式站点误发非 Secure 会话 Cookie。
+- [x] 新增生产配置回归测试，并更新生产邮件相关测试环境变量，确保运行时校验与部署文档保持一致。
 
 ## 2026-05-29 功能内容结构优化记录
 

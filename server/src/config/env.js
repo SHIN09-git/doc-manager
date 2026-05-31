@@ -132,6 +132,9 @@ function validateEnv(env) {
   if (env.emailMode === "log") {
     throw new Error("EMAIL_MODE=webhook is required in production");
   }
+  if (!env.sessionSecure) {
+    throw new Error("SESSION_SECURE=true is required in production");
+  }
   if (!env.corsOrigin) {
     throw new Error("CORS_ORIGIN is required in production");
   }
