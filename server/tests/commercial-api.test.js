@@ -58,6 +58,16 @@ test("cloud APIs require authentication while /api/me preserves local mode", asy
   assert.equal(docs.status, 401);
 });
 
+test("malformed cookies do not break anonymous auth resolution", async () => {
+  const me = await api("/api/me", { cookie: "mowen_session=%E0%A4%A" });
+  assert.equal(me.status, 200);
+  assert.equal(me.json.authenticated, false);
+
+  const docs = await api("/api/documents", { cookie: "mowen_session=%E0%A4%A" });
+  assert.equal(docs.status, 401);
+  assert.equal(docs.json.error.code, "unauthorized");
+});
+
 test("email verification gates sensitive team and API key actions", async () => {
   const owner = await register("verify-owner@example.com", { verify: false });
   const blockedInvite = await api(`/api/orgs/${owner.orgId}/invitations`, {

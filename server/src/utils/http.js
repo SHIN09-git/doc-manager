@@ -47,9 +47,17 @@ export function parseCookies(header = "") {
   for (const part of String(header).split(";")) {
     const [key, ...rest] = part.trim().split("=");
     if (!key) continue;
-    cookies.set(key, decodeURIComponent(rest.join("=") || ""));
+    cookies.set(key, safeDecodeCookieValue(rest.join("=") || ""));
   }
   return cookies;
+}
+
+function safeDecodeCookieValue(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 export function createSessionCookie(name, value, options = {}) {
