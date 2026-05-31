@@ -33653,16 +33653,115 @@ ${JSON.stringify(result2, null, 2)}`
     };
   }
 
+  // src/utils/privacyScan.js
+  var SENSITIVE_KEY_RE = /(api[-_]?key|secret|token|password|authorization|credential|private[_-]?key|手机号|身份证|邮箱|电话|密钥|令牌|密码)/i;
+  var DEFAULT_IGNORED_KEYS = /* @__PURE__ */ new Set([
+    "id",
+    "createdat",
+    "updatedat",
+    "addedat",
+    "exportedat",
+    "lastbuildat",
+    "created_at",
+    "updated_at",
+    "added_at",
+    "exported_at"
+  ]);
+  var TEXT_PATTERNS = [
+    { label: "\u624B\u673A\u53F7", pattern: /(?<!\d)1[3-9]\d{9}(?!\d)/g, mask: maskPhone },
+    { label: "\u90AE\u7BB1", pattern: /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, mask: maskEmail },
+    { label: "\u8EAB\u4EFD\u8BC1\u53F7", pattern: /(?<!\d)\d{17}[\dXx](?!\d)/g, mask: maskIdCard },
+    { label: "\u7591\u4F3C\u5BC6\u94A5", pattern: /\b(?:sk-[A-Za-z0-9_-]{16,}|re_[A-Za-z0-9_-]{16,})\b/g, mask: maskSecret },
+    { label: "\u5177\u4F53\u65E5\u671F", pattern: /(?:19|20)\d{2}[年\/.-]\d{1,2}[月\/.-]\d{1,2}(?:日)?|\d{1,2}月\d{1,2}日/g, mask: maskPlain },
+    { label: "\u7591\u4F3C\u5730\u5740/\u5730\u70B9", pattern: /[\u4e00-\u9fa5A-Za-z0-9]{2,}(?:省|市|区|县|镇|街道|路|号楼|校区|会议室|办公室)[\u4e00-\u9fa5A-Za-z0-9-]{0,20}/g, mask: maskPlain }
+  ];
+  function scanPrivacyRisksInText(text, options = {}) {
+    const source = String(text || "");
+    const path = options.path || "text";
+    const maxFindings = Number(options.maxFindings || 24);
+    const findings = [];
+    if (!source) return findings;
+    for (const { label, pattern, mask } of TEXT_PATTERNS) {
+      pattern.lastIndex = 0;
+      let match;
+      while ((match = pattern.exec(source)) && findings.length < maxFindings) {
+        findings.push({
+          label,
+          path,
+          sample: mask(match[0])
+        });
+      }
+      if (findings.length >= maxFindings) break;
+    }
+    return findings;
+  }
+  function scanPrivacyRisksInObject(value, options = {}) {
+    const findings = [];
+    const maxFindings = Number(options.maxFindings || 24);
+    const ignoredKeys = /* @__PURE__ */ new Set([
+      ...DEFAULT_IGNORED_KEYS,
+      ...(options.ignoredKeys || []).map((key) => String(key).toLowerCase())
+    ]);
+    scanNode(value, {
+      path: options.path || "data",
+      findings,
+      maxFindings,
+      ignoredKeys
+    });
+    return findings;
+  }
+  function formatPrivacyRiskSummary(findings = [], limit = 8) {
+    const items = findings.slice(0, limit);
+    const lines = items.map(
+      (finding) => `- ${finding.label}\uFF1A${finding.path}${finding.sample ? `\uFF08${finding.sample}\uFF09` : ""}`
+    );
+    if (findings.length > limit) lines.push(`- \u53E6\u6709 ${findings.length - limit} \u9879\u672A\u5C55\u793A`);
+    return lines.join("\n");
+  }
+  function scanNode(value, context) {
+    if (context.findings.length >= context.maxFindings) return;
+    if (Array.isArray(value)) {
+      value.slice(0, 100).forEach((item, index) => scanNode(item, { ...context, path: `${context.path}[${index}]` }));
+      return;
+    }
+    if (value && typeof value === "object") {
+      Object.entries(value).slice(0, 180).forEach(([key, item]) => {
+        if (context.findings.length >= context.maxFindings) return;
+        const normalizedKey = String(key).toLowerCase();
+        if (context.ignoredKeys.has(normalizedKey)) return;
+        const childPath = `${context.path}.${key}`;
+        if (SENSITIVE_KEY_RE.test(key)) {
+          context.findings.push({ label: "\u654F\u611F\u5B57\u6BB5\u540D", path: childPath, sample: "" });
+        }
+        scanNode(item, { ...context, path: childPath });
+      });
+      return;
+    }
+    if (typeof value === "string") {
+      const remaining = context.maxFindings - context.findings.length;
+      context.findings.push(...scanPrivacyRisksInText(value, { path: context.path, maxFindings: remaining }));
+    }
+  }
+  function maskPhone(value) {
+    return `${value.slice(0, 3)}****${value.slice(-4)}`;
+  }
+  function maskEmail(value) {
+    const [name, domain] = value.split("@");
+    return `${name.slice(0, 2)}***@${domain || "***"}`;
+  }
+  function maskIdCard(value) {
+    return `${value.slice(0, 6)}********${value.slice(-2)}`;
+  }
+  function maskSecret(value) {
+    return `${value.slice(0, 5)}...${value.slice(-4)}`;
+  }
+  function maskPlain(value) {
+    return value.length > 24 ? `${value.slice(0, 24)}...` : value;
+  }
+
   // src/modules/skills/skillManager.js
   var DEFAULT_MISSING_FACT_POLICY = `\u4E8B\u5B9E\u7F3A\u5931\u65F6\u4F7F\u7528${MISSING_FACT_PLACEHOLDER}\uFF0C\u4E0D\u7F16\u9020\u5177\u4F53\u4EBA\u540D\u3001\u65F6\u95F4\u3001\u5730\u70B9\u3001\u5355\u4F4D\u3001\u6570\u636E\u3001\u7ED3\u8BBA\u3001\u653F\u7B56\u4F9D\u636E\u548C\u843D\u6B3E\u3002`;
   var SKILL_PACKAGE_SCHEMA = "mowen-nibi-workbench.skill-package.v1";
-  var SENSITIVE_KEY_RE = /(api[-_]?key|secret|token|password|authorization|credential|private[_-]?key|手机号|身份证|邮箱|电话|密钥|令牌|密码)/i;
-  var SENSITIVE_VALUE_PATTERNS = [
-    { label: "\u624B\u673A\u53F7", pattern: /(?<!\d)1[3-9]\d{9}(?!\d)/g },
-    { label: "\u90AE\u7BB1", pattern: /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi },
-    { label: "\u8EAB\u4EFD\u8BC1\u53F7", pattern: /(?<!\d)\d{17}[\dXx](?!\d)/g },
-    { label: "\u7591\u4F3C\u5BC6\u94A5", pattern: /\b(?:sk-[A-Za-z0-9_-]{16,}|re_[A-Za-z0-9_-]{16,})\b/g }
-  ];
   function buildSkillRuntimePayload(skillJson, skill = {}, fallbackConfidence = "low") {
     const handle = normalizeHandle(skillJson.handle || skill.handle || skillJson.name || skill.name);
     const mustRules = coerceArray(skillJson.style_rules?.must);
@@ -33849,7 +33948,7 @@ ${JSON.stringify(result2, null, 2)}`
     const sourceCount = sourceSummaries.length;
     const versionCount = (draft.versions || []).length;
     const sourceLength = sourceSummaries.reduce((sum, source) => sum + Number(source.originalLength || source.length || 0), 0);
-    const findings = detectSensitivePackageFindings(payload);
+    const findings = scanPrivacyRisksInObject(payload, { path: "package" });
     const summary = {
       name: draft.name,
       handle: draft.handle,
@@ -33897,30 +33996,6 @@ ${JSON.stringify(result2, null, 2)}`
       if (findings.length > 8) lines.push(`- \u53E6\u6709 ${findings.length - 8} \u9879\u672A\u5C55\u793A`);
     }
     return lines.join("\n");
-  }
-  function detectSensitivePackageFindings(value, path = "package", findings = []) {
-    if (findings.length >= 24) return findings;
-    if (Array.isArray(value)) {
-      value.slice(0, 80).forEach((item, index) => detectSensitivePackageFindings(item, `${path}[${index}]`, findings));
-      return findings;
-    }
-    if (value && typeof value === "object") {
-      Object.entries(value).slice(0, 160).forEach(([key, item]) => {
-        const childPath = `${path}.${key}`;
-        if (SENSITIVE_KEY_RE.test(key)) {
-          findings.push({ label: "\u654F\u611F\u5B57\u6BB5\u540D", path: childPath });
-        }
-        detectSensitivePackageFindings(item, childPath, findings);
-      });
-      return findings;
-    }
-    if (typeof value === "string") {
-      SENSITIVE_VALUE_PATTERNS.forEach(({ label, pattern }) => {
-        pattern.lastIndex = 0;
-        if (pattern.test(value)) findings.push({ label, path });
-      });
-    }
-    return findings;
   }
   function normalizeSkillInputContract(skillJson) {
     const inputContract = skillJson.input_contract;
@@ -37832,6 +37907,11 @@ ${mention} ` : `${mention} `;
       return;
     }
     const packageData = skillManager.createSkillPackage(skill);
+    const findings = scanPrivacyRisksInObject(packageData.skill || packageData, { path: "\u6267\u7B14\u4EBA\u5305" });
+    if (!confirmPrivacyRiskNotice("\u5BFC\u51FA\u7684\u6267\u7B14\u4EBA\u5305\u53EF\u80FD\u5305\u542B\u654F\u611F\u6216\u4E2A\u6848\u4FE1\u606F\u3002", findings)) {
+      toast("\u5DF2\u53D6\u6D88\u5BFC\u51FA\u6267\u7B14\u4EBA\u5305", "warn");
+      return;
+    }
     const fileName = `${sanitizeFileName(skill.name)}.skill.json`;
     downloadBlob(fileName, JSON.stringify(packageData, null, 2), "application/json;charset=utf-8");
     toast(`\u5DF2\u5BFC\u51FA\u6267\u7B14\u4EBA\u5305\u5230\uFF1A${getDownloadLocation(fileName)}`);
@@ -37894,6 +37974,17 @@ ${mention} ` : `${mention} `;
     return window.confirm(`${header}
 
 \u786E\u8BA4\u5BFC\u5165\uFF1F`) ? "rename" : "cancel";
+  }
+  function confirmPrivacyRiskNotice(intro, findings = []) {
+    if (!findings.length) return true;
+    return window.confirm([
+      intro,
+      "",
+      "\u672C\u5730\u9884\u68C0\u53D1\u73B0\u4EE5\u4E0B\u7591\u4F3C\u654F\u611F\u6216\u4E2A\u6848\u4FE1\u606F\uFF1A",
+      formatPrivacyRiskSummary(findings),
+      "",
+      "\u5EFA\u8BAE\u5148\u8131\u654F\u6216\u79FB\u9664\u4E0D\u5E94\u53D1\u9001/\u5206\u4EAB\u7684\u5185\u5BB9\u3002\u662F\u5426\u7EE7\u7EED\uFF1F"
+    ].join("\n"));
   }
   async function linkRealFolder() {
     return folderManager.linkRealFolder();
@@ -38164,6 +38255,14 @@ ${mention} ` : `${mention} `;
     if (style.examples.length < 2) {
       const ok = window.confirm("\u53EA\u6709 1 \u7BC7\u793A\u8303\u53EA\u80FD\u751F\u6210\u4E0D\u7A33\u5B9A\u8349\u6848\uFF0C\u5EFA\u8BAE\u81F3\u5C11 3-5 \u7BC7\u3002\u662F\u5426\u7EE7\u7EED\u751F\u6210\u8349\u6848\uFF1F");
       if (!ok) return;
+    }
+    const findings = scanPrivacyRisksInObject(
+      (style.examples || []).map((example) => ({ name: example.name, text: example.text })),
+      { path: "\u8BAD\u7EC3\u6837\u672C" }
+    );
+    if (!confirmPrivacyRiskNotice("\u8BAD\u7EC3\u6837\u672C\u5C06\u53D1\u9001\u7ED9\u5DF2\u914D\u7F6E\u7684 AI \u63A5\u53E3\u7528\u4E8E\u751F\u6210\u6267\u7B14\u4EBA\u3002", findings)) {
+      toast("\u5DF2\u53D6\u6D88\u751F\u6210\u6267\u7B14\u4EBA", "warn");
+      return;
     }
     style.status = "building";
     style.buildProgress = { message: "\u51C6\u5907\u6784\u5EFA\u6267\u7B14\u4EBA", progress: 8 };

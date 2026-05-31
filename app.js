@@ -64,6 +64,7 @@ import { buildUnsupportedFileMessage, canImportFile, readImportFileText } from "
 import { isFileDragData } from "./src/utils/dragDrop.js";
 import { getDropImportTarget } from "./src/utils/dropRouting.js";
 import { filterImportableFilesBySize } from "./src/utils/importGuards.js";
+import { formatPrivacyRiskSummary, scanPrivacyRisksInObject } from "./src/utils/privacyScan.js";
 
 const state = {};
 const ui = {
@@ -2966,6 +2967,11 @@ function exportSkillPackage() {
     return;
   }
   const packageData = skillManager.createSkillPackage(skill);
+  const findings = scanPrivacyRisksInObject(packageData.skill || packageData, { path: "执笔人包" });
+  if (!confirmPrivacyRiskNotice("导出的执笔人包可能包含敏感或个案信息。", findings)) {
+    toast("已取消导出执笔人包", "warn");
+    return;
+  }
   const fileName = `${sanitizeFileName(skill.name)}.skill.json`;
   downloadBlob(fileName, JSON.stringify(packageData, null, 2), "application/json;charset=utf-8");
   toast(`已导出执笔人包到：${getDownloadLocation(fileName)}`);
@@ -3029,6 +3035,18 @@ function confirmSkillPackageImport(fileName, preview) {
     return "cancel";
   }
   return window.confirm(`${header}\n\n确认导入？`) ? "rename" : "cancel";
+}
+
+function confirmPrivacyRiskNotice(intro, findings = []) {
+  if (!findings.length) return true;
+  return window.confirm([
+    intro,
+    "",
+    "本地预检发现以下疑似敏感或个案信息：",
+    formatPrivacyRiskSummary(findings),
+    "",
+    "建议先脱敏或移除不应发送/分享的内容。是否继续？",
+  ].join("\n"));
 }
 
 async function linkRealFolder() {
@@ -3329,6 +3347,14 @@ async function summarizeStyle() {
   if (style.examples.length < 2) {
     const ok = window.confirm("只有 1 篇示范只能生成不稳定草案，建议至少 3-5 篇。是否继续生成草案？");
     if (!ok) return;
+  }
+  const findings = scanPrivacyRisksInObject(
+    (style.examples || []).map((example) => ({ name: example.name, text: example.text })),
+    { path: "训练样本" },
+  );
+  if (!confirmPrivacyRiskNotice("训练样本将发送给已配置的 AI 接口用于生成执笔人。", findings)) {
+    toast("已取消生成执笔人", "warn");
+    return;
   }
 
   style.status = "building";

@@ -3,16 +3,10 @@ import { clone, createId, normalizeHandle, now } from "../../utils/helpers.js";
 import { coerceArray } from "../../utils/validation.js";
 import { EVENTS } from "../../core/eventBus.js";
 import { MISSING_FACT_PLACEHOLDER, SKILL_RUNTIME_PRIORITY_RULES } from "../../config/constants.js";
+import { scanPrivacyRisksInObject } from "../../utils/privacyScan.js";
 
 const DEFAULT_MISSING_FACT_POLICY = `事实缺失时使用${MISSING_FACT_PLACEHOLDER}，不编造具体人名、时间、地点、单位、数据、结论、政策依据和落款。`;
 export const SKILL_PACKAGE_SCHEMA = "mowen-nibi-workbench.skill-package.v1";
-const SENSITIVE_KEY_RE = /(api[-_]?key|secret|token|password|authorization|credential|private[_-]?key|手机号|身份证|邮箱|电话|密钥|令牌|密码)/i;
-const SENSITIVE_VALUE_PATTERNS = [
-  { label: "手机号", pattern: /(?<!\d)1[3-9]\d{9}(?!\d)/g },
-  { label: "邮箱", pattern: /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi },
-  { label: "身份证号", pattern: /(?<!\d)\d{17}[\dXx](?!\d)/g },
-  { label: "疑似密钥", pattern: /\b(?:sk-[A-Za-z0-9_-]{16,}|re_[A-Za-z0-9_-]{16,})\b/g },
-];
 
 export function buildSkillRuntimePayload(skillJson, skill = {}, fallbackConfidence = "low") {
   const handle = normalizeHandle(skillJson.handle || skill.handle || skillJson.name || skill.name);
@@ -220,7 +214,7 @@ function createPackageImportPreview(draft, payload, duplicate = null) {
   const sourceCount = sourceSummaries.length;
   const versionCount = (draft.versions || []).length;
   const sourceLength = sourceSummaries.reduce((sum, source) => sum + Number(source.originalLength || source.length || 0), 0);
-  const findings = detectSensitivePackageFindings(payload);
+  const findings = scanPrivacyRisksInObject(payload, { path: "package" });
   const summary = {
     name: draft.name,
     handle: draft.handle,
@@ -269,31 +263,6 @@ function formatPackageImportPreview(summary, findings = []) {
     if (findings.length > 8) lines.push(`- 另有 ${findings.length - 8} 项未展示`);
   }
   return lines.join("\n");
-}
-
-function detectSensitivePackageFindings(value, path = "package", findings = []) {
-  if (findings.length >= 24) return findings;
-  if (Array.isArray(value)) {
-    value.slice(0, 80).forEach((item, index) => detectSensitivePackageFindings(item, `${path}[${index}]`, findings));
-    return findings;
-  }
-  if (value && typeof value === "object") {
-    Object.entries(value).slice(0, 160).forEach(([key, item]) => {
-      const childPath = `${path}.${key}`;
-      if (SENSITIVE_KEY_RE.test(key)) {
-        findings.push({ label: "敏感字段名", path: childPath });
-      }
-      detectSensitivePackageFindings(item, childPath, findings);
-    });
-    return findings;
-  }
-  if (typeof value === "string") {
-    SENSITIVE_VALUE_PATTERNS.forEach(({ label, pattern }) => {
-      pattern.lastIndex = 0;
-      if (pattern.test(value)) findings.push({ label, path });
-    });
-  }
-  return findings;
 }
 
 function normalizeSkillInputContract(skillJson) {
