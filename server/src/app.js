@@ -3002,18 +3002,41 @@ function summarizeUsageBudget(todayItems, monthItems, env) {
 function filterByQuery(items, url) {
   const from = url.searchParams.get("from");
   const to = url.searchParams.get("to");
+  const fromBound = normalizeDateLowerBound(from);
+  const toBound = normalizeDateUpperBound(to);
   const taskType = url.searchParams.get("task_type");
   const status = url.searchParams.get("status");
   const action = url.searchParams.get("action");
   return items.filter((item) => {
     const createdAt = item.created_at || "";
-    if (from && createdAt < from) return false;
-    if (to && createdAt > to) return false;
+    if (fromBound && createdAt < fromBound) return false;
+    if (toBound && createdAt >= toBound) return false;
     if (taskType && item.task_type !== taskType) return false;
     if (status && item.status !== status) return false;
     if (action && item.action !== action) return false;
     return true;
   });
+}
+
+function normalizeDateLowerBound(value) {
+  const raw = String(value || "").trim();
+  return raw ? normalizeDateOnlyBound(raw) : "";
+}
+
+function normalizeDateUpperBound(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const date = new Date(`${raw}T00:00:00.000Z`);
+    if (Number.isNaN(date.getTime())) return raw;
+    date.setUTCDate(date.getUTCDate() + 1);
+    return date.toISOString();
+  }
+  return normalizeDateOnlyBound(raw);
+}
+
+function normalizeDateOnlyBound(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00.000Z` : value;
 }
 
 function getQueryLimit(url, fallback, max) {

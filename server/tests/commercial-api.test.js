@@ -755,6 +755,31 @@ test("data export, recent errors, readiness, and account deletion work", async (
   assert.equal(afterDelete.status, 401);
 });
 
+test("JSON store date filters include the full selected end date", async () => {
+  const owner = await register("date-filter-owner@example.com");
+  await server.store.write((data) => {
+    data.audit_logs.push(
+      { id: "aud-before-date", organization_id: owner.orgId, user_id: owner.userId, action: "date.filter", target_type: "test", target_id: "before", metadata: {}, created_at: "2026-05-23T23:59:59.000Z" },
+      { id: "aud-on-date", organization_id: owner.orgId, user_id: owner.userId, action: "date.filter", target_type: "test", target_id: "on", metadata: {}, created_at: "2026-05-24T12:00:00.000Z" },
+      { id: "aud-after-date", organization_id: owner.orgId, user_id: owner.userId, action: "date.filter", target_type: "test", target_id: "after", metadata: {}, created_at: "2026-05-25T00:00:00.000Z" },
+    );
+    data.ai_usage.push(
+      { id: "use-before-date", organization_id: owner.orgId, user_id: owner.userId, provider: "mock", model: "mock", task_type: "date_filter", prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, estimated_cost: 0, status: "success", error: "", created_at: "2026-05-23T23:59:59.000Z" },
+      { id: "use-on-date", organization_id: owner.orgId, user_id: owner.userId, provider: "mock", model: "mock", task_type: "date_filter", prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, estimated_cost: 0, status: "success", error: "", created_at: "2026-05-24T12:00:00.000Z" },
+      { id: "use-after-date", organization_id: owner.orgId, user_id: owner.userId, provider: "mock", model: "mock", task_type: "date_filter", prompt_tokens: 1, completion_tokens: 0, total_tokens: 1, estimated_cost: 0, status: "success", error: "", created_at: "2026-05-25T00:00:00.000Z" },
+    );
+  });
+
+  const audit = await api("/api/audit?action=date.filter&to=2026-05-24", { cookie: owner.cookie });
+  assert.equal(audit.status, 200);
+  assert.ok(audit.json.audit_logs.some((item) => item.id === "aud-on-date"));
+  assert.equal(audit.json.audit_logs.some((item) => item.id === "aud-after-date"), false);
+
+  const usage = await api("/api/usage/history?task_type=date_filter&from=2026-05-24&to=2026-05-24", { cookie: owner.cookie });
+  assert.equal(usage.status, 200);
+  assert.deepEqual(usage.json.usage.map((item) => item.id), ["use-on-date"]);
+});
+
 test("billing checkout is admin-only and returns configured checkout URLs", async () => {
   const owner = await register("checkout-owner@example.com");
   const invitee = await register("checkout-member@example.com");
