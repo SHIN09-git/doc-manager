@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { STATIC_FILE_COPIES } from "../scripts/build-static.mjs";
 import { buildProductionChecks, parseDotEnv } from "../scripts/verify-production.mjs";
 
 test("parseDotEnv reads simple quoted and unquoted values", () => {
@@ -52,4 +55,21 @@ test("production checks reject placeholder launch configuration", () => {
   assert.ok(failedNames.includes("SESSION_SECRET"));
   assert.ok(failedNames.includes("APP_URL"));
   assert.ok(failedNames.includes("MANUAL_PAYMENT_PACKAGES"));
+});
+
+test("static build manifest includes admin page module dependencies", () => {
+  const copiedSources = new Set(STATIC_FILE_COPIES.map(([source]) => source.replace(/\\/g, "/")));
+  const adminSource = "src/admin/adminPage.js";
+  const adminContent = readFileSync(adminSource, "utf8");
+  const imports = Array.from(adminContent.matchAll(/from\s+["'](\.\.?\/[^"']+)["']/g))
+    .map((match) => {
+      const resolved = path
+        .normalize(path.join(path.dirname(adminSource), match[1]))
+        .replace(/\\/g, "/");
+      return path.extname(resolved) ? resolved : `${resolved}.js`;
+    });
+
+  imports.forEach((source) => {
+    assert.ok(copiedSources.has(source), `${source} must be copied for dist/admin.html`);
+  });
 });

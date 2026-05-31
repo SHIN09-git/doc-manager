@@ -1,5 +1,11 @@
 # TODO
 
+## 2026-05-31 全量审阅发现问题修复记录
+
+- [x] 修复静态发布目录中的管理后台缺失 ESM 依赖问题：`admin.html` 会加载 `src/admin/adminPage.js`，该文件依赖 `src/modules/cloud/billingFormatters.js`，现在 `npm run build:static` 会一并复制该模块。
+- [x] `scripts/build-static.mjs` 改为显式静态文件清单并导出构建函数，便于测试和后续维护。
+- [x] 新增静态构建清单测试，确保后台页面新增相对 import 时必须进入发布目录。
+
 ## 2026-05-29 功能内容结构优化记录
 
 - [x] 新增 `src/modules/product/featureCatalog.js`，用统一目录描述文档、编辑、执笔人、AI 起草、PPT、云端同步、充值和后台管理等核心能力。

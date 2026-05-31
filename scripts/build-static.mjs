@@ -1,24 +1,35 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = process.cwd();
-const dist = path.join(root, "dist");
+export const STATIC_FILE_COPIES = [
+  ["index.html", "index.html"],
+  ["admin.html", "admin.html"],
+  ["styles.css", "styles.css"],
+  ["build/bundle.js", "build/bundle.js"],
+  ["src/admin/adminPage.js", "src/admin/adminPage.js"],
+  ["src/modules/cloud/billingFormatters.js", "src/modules/cloud/billingFormatters.js"],
+];
 
-await rm(dist, { recursive: true, force: true });
-await mkdir(path.join(dist, "build"), { recursive: true });
-await mkdir(path.join(dist, "src", "admin"), { recursive: true });
+export async function buildStaticSite({ root = process.cwd(), dist = path.join(root, "dist") } = {}) {
+  await rm(dist, { recursive: true, force: true });
 
-await Promise.all([
-  cp(path.join(root, "index.html"), path.join(dist, "index.html")),
-  cp(path.join(root, "admin.html"), path.join(dist, "admin.html")),
-  cp(path.join(root, "styles.css"), path.join(dist, "styles.css")),
-  cp(path.join(root, "build", "bundle.js"), path.join(dist, "build", "bundle.js")),
-  cp(path.join(root, "src", "admin", "adminPage.js"), path.join(dist, "src", "admin", "adminPage.js")),
-]);
+  await Promise.all(STATIC_FILE_COPIES.map(async ([source, target]) => {
+    const outputPath = path.join(dist, target);
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await cp(path.join(root, source), outputPath);
+  }));
 
-if (existsSync(path.join(root, "assets"))) {
-  await cp(path.join(root, "assets"), path.join(dist, "assets"), { recursive: true });
+  if (existsSync(path.join(root, "assets"))) {
+    await cp(path.join(root, "assets"), path.join(dist, "assets"), { recursive: true });
+  }
+
+  return dist;
 }
 
-console.log(`Static site written to ${dist}`);
+const currentFile = fileURLToPath(import.meta.url);
+if (process.argv[1] && path.resolve(process.argv[1]) === currentFile) {
+  const dist = await buildStaticSite();
+  console.log(`Static site written to ${dist}`);
+}
