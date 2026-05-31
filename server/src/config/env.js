@@ -168,6 +168,18 @@ function validateEnv(env) {
   if (!isHttpsUrl(env.appUrl)) {
     throw new Error("APP_URL must be an HTTPS URL in production");
   }
+  if (env.aiProxyMode === "live") {
+    assertHttpsUrl("AI_BASE_URL", env.aiBaseUrl);
+  }
+  if (env.paymentCheckoutMode === "webhook" && !env.paymentCheckoutUrl) {
+    throw new Error("PAYMENT_CHECKOUT_URL is required when PAYMENT_CHECKOUT_MODE=webhook in production");
+  }
+  assertOptionalHttpsUrl("PAYMENT_CHECKOUT_URL", env.paymentCheckoutUrl);
+  assertOptionalHttpsUrl("PAYMENT_SUCCESS_URL", env.paymentSuccessUrl);
+  assertOptionalHttpsUrl("PAYMENT_CANCEL_URL", env.paymentCancelUrl);
+  assertOptionalHttpsUrl("MANUAL_PAYMENT_WECHAT_QR_URL", env.manualPaymentWechatQrUrl);
+  assertOptionalHttpsUrl("MANUAL_PAYMENT_ALIPAY_QR_URL", env.manualPaymentAlipayQrUrl);
+  assertOptionalHttpsUrl("BACKUP_FAILURE_WEBHOOK_URL", env.backupFailureWebhookUrl);
 }
 
 function assertStrongSecret(name, value, defaultValue) {
@@ -182,4 +194,14 @@ function isHttpsUrl(value) {
   } catch {
     return false;
   }
+}
+
+function assertHttpsUrl(name, value) {
+  if (!isHttpsUrl(value)) {
+    throw new Error(`${name} must be an HTTPS URL in production`);
+  }
+}
+
+function assertOptionalHttpsUrl(name, value) {
+  if (String(value || "").trim()) assertHttpsUrl(name, value);
 }

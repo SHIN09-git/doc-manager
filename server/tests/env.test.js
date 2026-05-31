@@ -92,3 +92,44 @@ test("production mode accepts APP_BASE_URL as the app url alias", () => {
   });
   assert.equal(env.appUrl, "https://mowen.example.com/workbench");
 });
+
+test("production live AI mode requires an HTTPS AI base url", () => {
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    AI_PROXY_MODE: "live",
+    AI_BASE_URL: "http://api.example.com/v1",
+  }), /AI_BASE_URL must be an HTTPS URL/);
+});
+
+test("production payment webhook checkout requires a configured HTTPS url", () => {
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    PAYMENT_CHECKOUT_MODE: "webhook",
+  }), /PAYMENT_CHECKOUT_URL is required/);
+
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    PAYMENT_CHECKOUT_MODE: "webhook",
+    PAYMENT_CHECKOUT_URL: "http://pay.example.com/checkout",
+  }), /PAYMENT_CHECKOUT_URL must be an HTTPS URL/);
+});
+
+test("production optional public urls must use HTTPS when configured", () => {
+  const cases = [
+    ["PAYMENT_SUCCESS_URL", "http://mowen.example.com/success"],
+    ["PAYMENT_CANCEL_URL", "http://mowen.example.com/cancel"],
+    ["MANUAL_PAYMENT_WECHAT_QR_URL", "http://mowen.example.com/wechat.png"],
+    ["MANUAL_PAYMENT_ALIPAY_QR_URL", "http://mowen.example.com/alipay.png"],
+    ["BACKUP_FAILURE_WEBHOOK_URL", "http://ops.example.com/backup"],
+  ];
+  cases.forEach(([key, value]) => {
+    assert.throws(() => loadEnv({
+      ...PRODUCTION_ENV,
+      SESSION_SECURE: "true",
+      [key]: value,
+    }), new RegExp(`${key} must be an HTTPS URL`));
+  });
+});
