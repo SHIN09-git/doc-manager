@@ -39,6 +39,8 @@
 - [x] 统一可信 origin 判断和 CORS 回显逻辑，浏览器从 `localhost` 打开工作台时会收到匹配的 `Access-Control-Allow-Origin`。
 - [x] 从 `app.js` 拆出 `editorContextMenuController`，集中管理编辑器右键菜单、键盘导航、复制、删除、整理格式和插入执笔人调用名。
 - [x] 新增编辑器右键菜单控制器单元测试，覆盖事件绑定、格式整理、删除、插入执笔人、段落改写参数传递、键盘焦点移动和默认执笔人同步。
+- [x] 从 `app.js` 拆出 `skillBuilderModalController`，集中管理执笔人生成弹窗、焦点陷阱、分类自定义、训练样本文档选择和基础表单同步。
+- [x] 新增执笔人生成弹窗控制器单元测试，覆盖新建/重训开窗、文档库样本添加、分类展开、事件绑定和键盘焦点闭环。
 
 ## 2026-05-29 功能内容结构优化记录
 
@@ -322,7 +324,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：109 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：116 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
 
 ## 已完成
 
@@ -391,7 +393,7 @@
 ### 1. 继续拆分 `app.js`
 
 - [ ] 拆出 `skillWorkbenchController`
-- [ ] 拆出 `skillBuilderModalController`
+- [x] 拆出 `skillBuilderModalController`
 - [ ] 拆出 `documentPanelController`
 - [x] 拆出 `apiSettingsController`
 - [x] 拆出 `editorContextMenuController`

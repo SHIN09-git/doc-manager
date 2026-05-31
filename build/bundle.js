@@ -33950,6 +33950,234 @@ ${JSON.stringify(result2, null, 2)}`
     };
   }
 
+  // src/modules/skills/skillBuilderModalController.js
+  var BUILT_IN_SKILL_CATEGORIES = ["\u516C\u6587\u5199\u4F5C", "\u6587\u98CE\u683C\u5F0F", "\u6750\u6599\u6574\u7406", "\u6BB5\u843D\u6539\u5199", "\u81EA\u5B9A\u4E49"];
+  function createSkillBuilderModalController(deps = {}) {
+    const {
+      state: state2 = { styles: [], docs: [] },
+      ui: ui2 = {},
+      els: els2 = {},
+      eventBus: eventBus2 = { emit: () => {
+      } },
+      toast: toast2 = () => {
+      },
+      createEmptyStyle: createEmptyStyle2 = () => ({}),
+      flushSkillMarkdownEdits: flushSkillMarkdownEdits2 = () => {
+      },
+      hideSkillDetailMenu: hideSkillDetailMenu2 = () => {
+      },
+      renderStyleExamples: renderStyleExamples2 = () => {
+      },
+      renderSkillDetailExamples = () => {
+      },
+      setupFileDrop: setupFileDrop2 = () => {
+      },
+      importStyleExamples: importStyleExamples2 = () => {
+      },
+      importStyleDropFiles: importStyleDropFiles2 = () => {
+      },
+      summarizeStyle: summarizeStyle2 = () => {
+      },
+      saveStyle: saveStyle2 = () => {
+      },
+      deleteStyle: deleteStyle2 = () => {
+      },
+      getFocusableElements: getFocusableElements2 = () => [],
+      documentRef = () => globalThis.document,
+      setTimeoutRef = (callback, delay = 0) => globalThis.window?.setTimeout?.(callback, delay) ?? setTimeout(callback, delay),
+      createIcons: createIcons2 = () => globalThis.window?.lucide?.createIcons?.()
+    } = deps;
+    function bindEvents2() {
+      els2.newStyleBtn?.addEventListener("click", () => open());
+      els2.styleFileInput?.addEventListener("change", importStyleExamples2);
+      if (els2.styleDropZone) {
+        setupFileDrop2(els2.styleDropZone, importStyleDropFiles2);
+        els2.styleDropZone.addEventListener("click", (event) => {
+          event.preventDefault();
+          els2.styleFileInput?.click?.();
+        });
+        els2.styleDropZone.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            els2.styleFileInput?.click?.();
+          }
+        });
+      }
+      els2.closeSkillBuilderModalBtn?.addEventListener("click", () => close());
+      els2.skillBuilderCancelBtn?.addEventListener("click", () => close());
+      els2.skillBuilderModal?.addEventListener("mousedown", (event) => {
+        if (event.target === els2.skillBuilderModal) close();
+      });
+      els2.skillBuilderModal?.addEventListener("keydown", handleKeydown);
+      els2.summarizeStyleBtn?.addEventListener("click", summarizeStyle2);
+      els2.saveStyleBtn?.addEventListener("click", saveStyle2);
+      els2.deleteStyleBtn?.addEventListener("click", deleteStyle2);
+      els2.styleNameInput?.addEventListener("input", syncNameInput);
+      els2.skillCategorySelect?.addEventListener("change", handleCategoryChange);
+      els2.skillCustomCategoryInput?.addEventListener("input", () => {
+        if (ui2.editingStyle) ui2.editingStyle.category = getSelectedCategory();
+      });
+      els2.skillDescriptionInput?.addEventListener("input", () => {
+        if (ui2.editingStyle) ui2.editingStyle.description = els2.skillDescriptionInput.value;
+      });
+      els2.addSourceDocsToSkillBtn?.addEventListener("click", addSelectedDocsAsExamples);
+      els2.skillEnabledInput?.addEventListener("change", () => {
+        if (ui2.editingStyle) ui2.editingStyle.enabled = els2.skillEnabledInput.checked;
+        eventBus2.emit(EVENTS.RENDER_STYLE_SELECT);
+        eventBus2.emit(EVENTS.RENDER_STYLE_LIST);
+      });
+      els2.skillAnalysisInput?.addEventListener("input", () => {
+        if (ui2.editingStyle) ui2.editingStyle.analysis = els2.skillAnalysisInput.value;
+      });
+      els2.skillAggregationInput?.addEventListener("input", () => {
+        if (ui2.editingStyle) ui2.editingStyle.aggregation = els2.skillAggregationInput.value;
+      });
+    }
+    function open(skillId = null) {
+      flushSkillMarkdownEdits2();
+      const skill = skillId ? state2.styles.find((item) => item.id === skillId) : null;
+      const activeElement = documentRef()?.activeElement;
+      ui2.skillBuilderReturnFocus = activeElement && typeof activeElement.focus === "function" ? activeElement : null;
+      ui2.editingStyle = clone(skill || createEmptyStyle2());
+      if (!skill) {
+        ui2.editingStyle.handle = normalizeHandle(ui2.editingStyle.name || "");
+      }
+      hideSkillDetailMenu2();
+      eventBus2.emit(EVENTS.RENDER_STYLE_EDITOR);
+      renderDocumentPicker();
+      updateCategoryCustomState(ui2.editingStyle.category);
+      if (els2.skillBuilderModalTitle) {
+        els2.skillBuilderModalTitle.textContent = skill ? `\u91CD\u8BAD\uFF1A${skill.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA"}` : "\u65B0\u5EFA\u6267\u7B14\u4EBA";
+      }
+      if (els2.skillBuilderModeLabel) {
+        els2.skillBuilderModeLabel.textContent = skill ? `\u5DF2\u6709 ${(skill.examples || []).length} \u7BC7\u5386\u53F2\u6837\u672C\u5C06\u4E00\u5E76\u53C2\u4E0E\u8BAD\u7EC3\uFF0C\u53EF\u79FB\u9664\u540E\u91CD\u8BAD\u3002` : "\u62D6\u5165\u540C\u7C7B\u6B63\u5F0F\u6587\u6863\uFF0C\u751F\u6210\u53EF\u590D\u7528\u7684\u5199\u4F5C\u89C4\u5219\u3002";
+      }
+      if (els2.saveStyleBtn) els2.saveStyleBtn.hidden = !skill;
+      if (els2.deleteStyleBtn) els2.deleteStyleBtn.hidden = !skill;
+      if (els2.skillBuilderModal) els2.skillBuilderModal.hidden = false;
+      setTimeoutRef(() => {
+        els2.styleNameInput?.focus?.();
+        createIcons2();
+      }, 0);
+    }
+    function close({ restoreFocus = true } = {}) {
+      if (!els2.skillBuilderModal || els2.skillBuilderModal.hidden) return;
+      els2.skillBuilderModal.hidden = true;
+      if (restoreFocus && ui2.skillBuilderReturnFocus) {
+        ui2.skillBuilderReturnFocus.focus?.();
+      }
+      ui2.skillBuilderReturnFocus = null;
+    }
+    function handleKeydown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = getFocusableElements2(els2.skillBuilderModal);
+      if (focusable.length === 0) return;
+      const first2 = focusable[0];
+      const last2 = focusable[focusable.length - 1];
+      const activeElement = documentRef()?.activeElement;
+      if (event.shiftKey && activeElement === first2) {
+        event.preventDefault();
+        last2.focus?.();
+      } else if (!event.shiftKey && activeElement === last2) {
+        event.preventDefault();
+        first2.focus?.();
+      }
+    }
+    function getSelectedCategory() {
+      if (els2.skillCategorySelect?.value === "\u81EA\u5B9A\u4E49") {
+        return els2.skillCustomCategoryInput?.value.trim() || "\u81EA\u5B9A\u4E49";
+      }
+      return els2.skillCategorySelect?.value || "\u81EA\u5B9A\u4E49";
+    }
+    function updateCategoryCustomState(category = getSelectedCategory()) {
+      if (!els2.skillCustomCategoryInput || !els2.skillCategorySelect) return;
+      const shouldUseCustom = !BUILT_IN_SKILL_CATEGORIES.includes(category) || els2.skillCategorySelect.value === "\u81EA\u5B9A\u4E49";
+      if (!BUILT_IN_SKILL_CATEGORIES.includes(category)) {
+        els2.skillCategorySelect.value = "\u81EA\u5B9A\u4E49";
+        els2.skillCustomCategoryInput.value = category || "";
+      }
+      if (els2.skillCustomCategoryField) els2.skillCustomCategoryField.hidden = !shouldUseCustom;
+    }
+    function renderDocumentPicker() {
+      if (!els2.skillSourceDocSelect) return;
+      const docs = (state2.docs || []).filter((doc) => !doc.deletedAt && String(doc.content || "").trim());
+      if (docs.length === 0) {
+        els2.skillSourceDocSelect.innerHTML = "<option disabled>\u6587\u6863\u5E93\u6682\u65E0\u53EF\u7528\u6B63\u6587</option>";
+        els2.skillSourceDocSelect.disabled = true;
+        if (els2.addSourceDocsToSkillBtn) els2.addSourceDocsToSkillBtn.disabled = true;
+        return;
+      }
+      els2.skillSourceDocSelect.disabled = false;
+      if (els2.addSourceDocsToSkillBtn) els2.addSourceDocsToSkillBtn.disabled = false;
+      els2.skillSourceDocSelect.innerHTML = docs.map((doc) => `<option value="${escapeHtml(doc.id)}">${escapeHtml(doc.title || "\u672A\u547D\u540D\u6587\u6863")}</option>`).join("");
+    }
+    function addSelectedDocsAsExamples() {
+      if (!ui2.editingStyle) {
+        toast2("\u8BF7\u5148\u6253\u5F00\u6267\u7B14\u4EBA\u751F\u6210\u7A97\u53E3", "warn");
+        return 0;
+      }
+      const selectedIds = Array.from(els2.skillSourceDocSelect?.selectedOptions || []).map((option) => option.value);
+      if (selectedIds.length === 0) {
+        toast2("\u8BF7\u5148\u9009\u62E9\u8981\u52A0\u5165\u8BAD\u7EC3\u7684\u6587\u6863", "warn");
+        return 0;
+      }
+      ui2.editingStyle.examples = Array.isArray(ui2.editingStyle.examples) ? ui2.editingStyle.examples : [];
+      const existingSourceIds = new Set(ui2.editingStyle.examples.map((example) => example.sourceDocId).filter(Boolean));
+      let addedCount = 0;
+      selectedIds.forEach((docId) => {
+        if (existingSourceIds.has(docId)) return;
+        const doc = state2.docs.find((item) => item.id === docId && !item.deletedAt);
+        if (!doc || !String(doc.content || "").trim()) return;
+        ui2.editingStyle.examples.push({
+          id: createId(),
+          sourceDocId: doc.id,
+          name: `${doc.title || "\u672A\u547D\u540D\u6587\u6863"}.txt`,
+          text: doc.content,
+          addedAt: now(),
+          importedFrom: "workspace-doc"
+        });
+        existingSourceIds.add(docId);
+        addedCount += 1;
+      });
+      if (addedCount === 0) {
+        toast2("\u6240\u9009\u6587\u6863\u5DF2\u5728\u8BAD\u7EC3\u6837\u672C\u4E2D", "warn");
+        return 0;
+      }
+      renderStyleExamples2();
+      renderSkillDetailExamples();
+      toast2(`\u5DF2\u52A0\u5165 ${addedCount} \u4EFD\u6587\u6863\u5E93\u6837\u672C`);
+      return addedCount;
+    }
+    function syncNameInput() {
+      if (!ui2.editingStyle) return;
+      ui2.editingStyle.name = els2.styleNameInput.value;
+      ui2.editingStyle.handle = normalizeHandle(els2.styleNameInput.value);
+      if (els2.skillHandleInput) els2.skillHandleInput.value = ui2.editingStyle.handle;
+    }
+    function handleCategoryChange() {
+      updateCategoryCustomState();
+      if (ui2.editingStyle) ui2.editingStyle.category = getSelectedCategory();
+      if (els2.skillCategorySelect.value === "\u81EA\u5B9A\u4E49") {
+        setTimeoutRef(() => els2.skillCustomCategoryInput?.focus?.(), 0);
+      }
+    }
+    return {
+      bindEvents: bindEvents2,
+      open,
+      close,
+      handleKeydown,
+      getSelectedCategory,
+      updateCategoryCustomState,
+      renderDocumentPicker,
+      addSelectedDocsAsExamples
+    };
+  }
+
   // src/utils/privacyScan.js
   var SENSITIVE_KEY_RE = /(api[-_]?key|secret|token|password|authorization|credential|private[_-]?key|手机号|身份证|邮箱|电话|密钥|令牌|密码)/i;
   var DEFAULT_IGNORED_KEYS = /* @__PURE__ */ new Set([
@@ -35817,6 +36045,25 @@ ${JSON.stringify(payload, null, 2)}`
     onRetrySkill: (skillId) => openSkillBuilderModal(skillId),
     onCancelSkillBuild: cancelSkillBuild
   });
+  var skillBuilderModalController = createSkillBuilderModalController({
+    state,
+    ui,
+    els,
+    eventBus,
+    toast,
+    createEmptyStyle,
+    flushSkillMarkdownEdits,
+    hideSkillDetailMenu,
+    renderStyleExamples,
+    renderSkillDetailExamples: () => skillRenderer.renderSkillDetailExamples(),
+    setupFileDrop,
+    importStyleExamples,
+    importStyleDropFiles,
+    summarizeStyle,
+    saveStyle,
+    deleteStyle,
+    getFocusableElements
+  });
   var documentRenderer = createDocumentRenderer({
     state,
     ui,
@@ -36418,64 +36665,13 @@ ${JSON.stringify(payload, null, 2)}`
     setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
     setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
     pptController.bindEvents();
-    els.newStyleBtn.addEventListener("click", () => openSkillBuilderModal());
+    skillBuilderModalController.bindEvents();
     els.skillCategoryFilter.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
     els.skillEnabledOnlyInput.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
     els.skillSearchInput.addEventListener("input", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
-    els.styleFileInput.addEventListener("change", importStyleExamples);
-    setupFileDrop(els.styleDropZone, importStyleDropFiles);
-    els.styleDropZone.addEventListener("click", (event) => {
-      event.preventDefault();
-      els.styleFileInput.click();
-    });
-    els.styleDropZone.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        els.styleFileInput.click();
-      }
-    });
-    els.closeSkillBuilderModalBtn.addEventListener("click", () => closeSkillBuilderModal());
-    els.skillBuilderCancelBtn.addEventListener("click", () => closeSkillBuilderModal());
-    els.skillBuilderModal.addEventListener("mousedown", (event) => {
-      if (event.target === els.skillBuilderModal) closeSkillBuilderModal();
-    });
-    els.skillBuilderModal.addEventListener("keydown", handleSkillBuilderModalKeydown);
     els.importSkillPackageBtn.addEventListener("click", () => els.importSkillPackageInput.click());
     els.exportSkillPackageBtn.addEventListener("click", exportSkillPackage);
     els.importSkillPackageInput.addEventListener("change", importSkillPackages);
-    els.summarizeStyleBtn.addEventListener("click", summarizeStyle);
-    els.saveStyleBtn.addEventListener("click", saveStyle);
-    els.deleteStyleBtn.addEventListener("click", deleteStyle);
-    els.styleNameInput.addEventListener("input", () => {
-      ui.editingStyle.name = els.styleNameInput.value;
-      ui.editingStyle.handle = normalizeHandle(els.styleNameInput.value);
-      els.skillHandleInput.value = ui.editingStyle.handle;
-    });
-    els.skillCategorySelect.addEventListener("change", () => {
-      updateSkillCategoryCustomState();
-      ui.editingStyle.category = getSelectedSkillCategory();
-      if (els.skillCategorySelect.value === "\u81EA\u5B9A\u4E49") {
-        window.setTimeout(() => els.skillCustomCategoryInput.focus(), 0);
-      }
-    });
-    els.skillCustomCategoryInput.addEventListener("input", () => {
-      ui.editingStyle.category = getSelectedSkillCategory();
-    });
-    els.skillDescriptionInput.addEventListener("input", () => {
-      ui.editingStyle.description = els.skillDescriptionInput.value;
-    });
-    els.addSourceDocsToSkillBtn.addEventListener("click", addSelectedDocsAsSkillExamples);
-    els.skillEnabledInput.addEventListener("change", () => {
-      ui.editingStyle.enabled = els.skillEnabledInput.checked;
-      eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
-      eventBus.emit(EVENTS.RENDER_STYLE_LIST);
-    });
-    els.skillAnalysisInput.addEventListener("input", () => {
-      ui.editingStyle.analysis = els.skillAnalysisInput.value;
-    });
-    els.skillAggregationInput.addEventListener("input", () => {
-      ui.editingStyle.aggregation = els.skillAggregationInput.value;
-    });
     els.styleSummaryInput.addEventListener("input", () => {
       if (!ui.editingStyle) return;
       ui.editingStyle.summary = els.styleSummaryInput.value;
@@ -37902,117 +38098,13 @@ ${JSON.stringify(payload, null, 2)}`
     return documentManager.exportWorkspaceBackup();
   }
   function openSkillBuilderModal(skillId = null) {
-    flushSkillMarkdownEdits();
-    const skill = skillId ? state.styles.find((item) => item.id === skillId) : null;
-    ui.skillBuilderReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    ui.editingStyle = clone(skill || createEmptyStyle());
-    if (!skill) {
-      ui.editingStyle.handle = normalizeHandle(ui.editingStyle.name || "");
-    }
-    hideSkillDetailMenu();
-    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-    renderSkillBuilderDocumentPicker();
-    updateSkillCategoryCustomState(ui.editingStyle.category);
-    els.skillBuilderModalTitle.textContent = skill ? `\u91CD\u8BAD\uFF1A${skill.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA"}` : "\u65B0\u5EFA\u6267\u7B14\u4EBA";
-    els.skillBuilderModeLabel.textContent = skill ? `\u5DF2\u6709 ${(skill.examples || []).length} \u7BC7\u5386\u53F2\u6837\u672C\u5C06\u4E00\u5E76\u53C2\u4E0E\u8BAD\u7EC3\uFF0C\u53EF\u79FB\u9664\u540E\u91CD\u8BAD\u3002` : "\u62D6\u5165\u540C\u7C7B\u6B63\u5F0F\u6587\u6863\uFF0C\u751F\u6210\u53EF\u590D\u7528\u7684\u5199\u4F5C\u89C4\u5219\u3002";
-    els.saveStyleBtn.hidden = !skill;
-    els.deleteStyleBtn.hidden = !skill;
-    els.skillBuilderModal.hidden = false;
-    window.setTimeout(() => {
-      els.styleNameInput.focus();
-      if (window.lucide) window.lucide.createIcons();
-    }, 0);
+    return skillBuilderModalController.open(skillId);
   }
   function closeSkillBuilderModal({ restoreFocus = true } = {}) {
-    if (!els.skillBuilderModal || els.skillBuilderModal.hidden) return;
-    els.skillBuilderModal.hidden = true;
-    if (restoreFocus && ui.skillBuilderReturnFocus) {
-      ui.skillBuilderReturnFocus.focus();
-    }
-    ui.skillBuilderReturnFocus = null;
-  }
-  function handleSkillBuilderModalKeydown(event) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeSkillBuilderModal();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const focusable = getFocusableElements(els.skillBuilderModal);
-    if (focusable.length === 0) return;
-    const first2 = focusable[0];
-    const last2 = focusable[focusable.length - 1];
-    if (event.shiftKey && document.activeElement === first2) {
-      event.preventDefault();
-      last2.focus();
-    } else if (!event.shiftKey && document.activeElement === last2) {
-      event.preventDefault();
-      first2.focus();
-    }
-  }
-  function getBuiltInSkillCategories() {
-    return ["\u516C\u6587\u5199\u4F5C", "\u6587\u98CE\u683C\u5F0F", "\u6750\u6599\u6574\u7406", "\u6BB5\u843D\u6539\u5199", "\u81EA\u5B9A\u4E49"];
+    return skillBuilderModalController.close({ restoreFocus });
   }
   function getSelectedSkillCategory() {
-    if (els.skillCategorySelect.value === "\u81EA\u5B9A\u4E49") {
-      return els.skillCustomCategoryInput.value.trim() || "\u81EA\u5B9A\u4E49";
-    }
-    return els.skillCategorySelect.value || "\u81EA\u5B9A\u4E49";
-  }
-  function updateSkillCategoryCustomState(category = getSelectedSkillCategory()) {
-    if (!els.skillCustomCategoryInput || !els.skillCategorySelect) return;
-    const builtIns = getBuiltInSkillCategories();
-    const shouldUseCustom = !builtIns.includes(category) || els.skillCategorySelect.value === "\u81EA\u5B9A\u4E49";
-    if (!builtIns.includes(category)) {
-      els.skillCategorySelect.value = "\u81EA\u5B9A\u4E49";
-      els.skillCustomCategoryInput.value = category || "";
-    }
-    if (els.skillCustomCategoryField) els.skillCustomCategoryField.hidden = !shouldUseCustom;
-  }
-  function renderSkillBuilderDocumentPicker() {
-    if (!els.skillSourceDocSelect) return;
-    const docs = (state.docs || []).filter((doc) => !doc.deletedAt && String(doc.content || "").trim());
-    if (docs.length === 0) {
-      els.skillSourceDocSelect.innerHTML = "<option disabled>\u6587\u6863\u5E93\u6682\u65E0\u53EF\u7528\u6B63\u6587</option>";
-      els.skillSourceDocSelect.disabled = true;
-      els.addSourceDocsToSkillBtn.disabled = true;
-      return;
-    }
-    els.skillSourceDocSelect.disabled = false;
-    els.addSourceDocsToSkillBtn.disabled = false;
-    els.skillSourceDocSelect.innerHTML = docs.map((doc) => `<option value="${escapeHtml(doc.id)}">${escapeHtml(doc.title || "\u672A\u547D\u540D\u6587\u6863")}</option>`).join("");
-  }
-  function addSelectedDocsAsSkillExamples() {
-    const selectedIds = Array.from(els.skillSourceDocSelect.selectedOptions || []).map((option) => option.value);
-    if (selectedIds.length === 0) {
-      toast("\u8BF7\u5148\u9009\u62E9\u8981\u52A0\u5165\u8BAD\u7EC3\u7684\u6587\u6863", "warn");
-      return;
-    }
-    ui.editingStyle.examples = Array.isArray(ui.editingStyle.examples) ? ui.editingStyle.examples : [];
-    const existingSourceIds = new Set(ui.editingStyle.examples.map((example) => example.sourceDocId).filter(Boolean));
-    let addedCount = 0;
-    selectedIds.forEach((docId) => {
-      if (existingSourceIds.has(docId)) return;
-      const doc = state.docs.find((item) => item.id === docId && !item.deletedAt);
-      if (!doc || !String(doc.content || "").trim()) return;
-      ui.editingStyle.examples.push({
-        id: createId(),
-        sourceDocId: doc.id,
-        name: `${doc.title || "\u672A\u547D\u540D\u6587\u6863"}.txt`,
-        text: doc.content,
-        addedAt: now(),
-        importedFrom: "workspace-doc"
-      });
-      existingSourceIds.add(docId);
-      addedCount += 1;
-    });
-    if (addedCount === 0) {
-      toast("\u6240\u9009\u6587\u6863\u5DF2\u5728\u8BAD\u7EC3\u6837\u672C\u4E2D", "warn");
-      return;
-    }
-    renderStyleExamples();
-    skillRenderer.renderSkillDetailExamples();
-    toast(`\u5DF2\u52A0\u5165 ${addedCount} \u4EFD\u6587\u6863\u5E93\u6837\u672C`);
+    return skillBuilderModalController.getSelectedCategory();
   }
   function updateSkillBuildState(skillId, patch) {
     const index = state.styles.findIndex((style) => style.id === skillId);

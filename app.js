@@ -47,6 +47,7 @@ import { createPptController } from "./src/modules/ppt/pptController.js";
 import { createPptxBlob } from "./src/modules/ppt/pptxBuilder.js";
 import { createApiSettingsController } from "./src/modules/settings/apiSettingsController.js";
 import { createSkillBuilder } from "./src/modules/skills/skillBuilder.js";
+import { createSkillBuilderModalController } from "./src/modules/skills/skillBuilderModalController.js";
 import { createSkillManager } from "./src/modules/skills/skillManager.js";
 import { createSkillRenderer } from "./src/modules/skills/skillRenderer.js";
 import { createProgressController } from "./src/ui/components/progress.js";
@@ -194,6 +195,25 @@ const skillRenderer = createSkillRenderer({
   onDeleteSkill: deleteSkillById,
   onRetrySkill: (skillId) => openSkillBuilderModal(skillId),
   onCancelSkillBuild: cancelSkillBuild,
+});
+const skillBuilderModalController = createSkillBuilderModalController({
+  state,
+  ui,
+  els,
+  eventBus,
+  toast,
+  createEmptyStyle,
+  flushSkillMarkdownEdits,
+  hideSkillDetailMenu,
+  renderStyleExamples,
+  renderSkillDetailExamples: () => skillRenderer.renderSkillDetailExamples(),
+  setupFileDrop,
+  importStyleExamples,
+  importStyleDropFiles,
+  summarizeStyle,
+  saveStyle,
+  deleteStyle,
+  getFocusableElements,
 });
 const documentRenderer = createDocumentRenderer({
   state,
@@ -827,64 +847,13 @@ function bindEvents() {
   setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
   pptController.bindEvents();
 
-  els.newStyleBtn.addEventListener("click", () => openSkillBuilderModal());
+  skillBuilderModalController.bindEvents();
   els.skillCategoryFilter.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
   els.skillEnabledOnlyInput.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
   els.skillSearchInput.addEventListener("input", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
-  els.styleFileInput.addEventListener("change", importStyleExamples);
-  setupFileDrop(els.styleDropZone, importStyleDropFiles);
-  els.styleDropZone.addEventListener("click", (event) => {
-    event.preventDefault();
-    els.styleFileInput.click();
-  });
-  els.styleDropZone.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      els.styleFileInput.click();
-    }
-  });
-  els.closeSkillBuilderModalBtn.addEventListener("click", () => closeSkillBuilderModal());
-  els.skillBuilderCancelBtn.addEventListener("click", () => closeSkillBuilderModal());
-  els.skillBuilderModal.addEventListener("mousedown", (event) => {
-    if (event.target === els.skillBuilderModal) closeSkillBuilderModal();
-  });
-  els.skillBuilderModal.addEventListener("keydown", handleSkillBuilderModalKeydown);
   els.importSkillPackageBtn.addEventListener("click", () => els.importSkillPackageInput.click());
   els.exportSkillPackageBtn.addEventListener("click", exportSkillPackage);
   els.importSkillPackageInput.addEventListener("change", importSkillPackages);
-  els.summarizeStyleBtn.addEventListener("click", summarizeStyle);
-  els.saveStyleBtn.addEventListener("click", saveStyle);
-  els.deleteStyleBtn.addEventListener("click", deleteStyle);
-  els.styleNameInput.addEventListener("input", () => {
-    ui.editingStyle.name = els.styleNameInput.value;
-    ui.editingStyle.handle = normalizeHandle(els.styleNameInput.value);
-    els.skillHandleInput.value = ui.editingStyle.handle;
-  });
-  els.skillCategorySelect.addEventListener("change", () => {
-    updateSkillCategoryCustomState();
-    ui.editingStyle.category = getSelectedSkillCategory();
-    if (els.skillCategorySelect.value === "自定义") {
-      window.setTimeout(() => els.skillCustomCategoryInput.focus(), 0);
-    }
-  });
-  els.skillCustomCategoryInput.addEventListener("input", () => {
-    ui.editingStyle.category = getSelectedSkillCategory();
-  });
-  els.skillDescriptionInput.addEventListener("input", () => {
-    ui.editingStyle.description = els.skillDescriptionInput.value;
-  });
-  els.addSourceDocsToSkillBtn.addEventListener("click", addSelectedDocsAsSkillExamples);
-  els.skillEnabledInput.addEventListener("change", () => {
-    ui.editingStyle.enabled = els.skillEnabledInput.checked;
-    eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
-    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
-  });
-  els.skillAnalysisInput.addEventListener("input", () => {
-    ui.editingStyle.analysis = els.skillAnalysisInput.value;
-  });
-  els.skillAggregationInput.addEventListener("input", () => {
-    ui.editingStyle.aggregation = els.skillAggregationInput.value;
-  });
   els.styleSummaryInput.addEventListener("input", () => {
     if (!ui.editingStyle) return;
     ui.editingStyle.summary = els.styleSummaryInput.value;
@@ -2479,128 +2448,15 @@ function exportWorkspaceBackup() {
 }
 
 function openSkillBuilderModal(skillId = null) {
-  flushSkillMarkdownEdits();
-  const skill = skillId ? state.styles.find((item) => item.id === skillId) : null;
-  ui.skillBuilderReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  ui.editingStyle = clone(skill || createEmptyStyle());
-  if (!skill) {
-    ui.editingStyle.handle = normalizeHandle(ui.editingStyle.name || "");
-  }
-  hideSkillDetailMenu();
-  eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-  renderSkillBuilderDocumentPicker();
-  updateSkillCategoryCustomState(ui.editingStyle.category);
-  els.skillBuilderModalTitle.textContent = skill ? `重训：${skill.name || "未命名执笔人"}` : "新建执笔人";
-  els.skillBuilderModeLabel.textContent = skill
-    ? `已有 ${(skill.examples || []).length} 篇历史样本将一并参与训练，可移除后重训。`
-    : "拖入同类正式文档，生成可复用的写作规则。";
-  els.saveStyleBtn.hidden = !skill;
-  els.deleteStyleBtn.hidden = !skill;
-  els.skillBuilderModal.hidden = false;
-  window.setTimeout(() => {
-    els.styleNameInput.focus();
-    if (window.lucide) window.lucide.createIcons();
-  }, 0);
+  return skillBuilderModalController.open(skillId);
 }
 
 function closeSkillBuilderModal({ restoreFocus = true } = {}) {
-  if (!els.skillBuilderModal || els.skillBuilderModal.hidden) return;
-  els.skillBuilderModal.hidden = true;
-  if (restoreFocus && ui.skillBuilderReturnFocus) {
-    ui.skillBuilderReturnFocus.focus();
-  }
-  ui.skillBuilderReturnFocus = null;
-}
-
-function handleSkillBuilderModalKeydown(event) {
-  if (event.key === "Escape") {
-    event.preventDefault();
-    closeSkillBuilderModal();
-    return;
-  }
-  if (event.key !== "Tab") return;
-  const focusable = getFocusableElements(els.skillBuilderModal);
-  if (focusable.length === 0) return;
-  const first = focusable[0];
-  const last = focusable[focusable.length - 1];
-  if (event.shiftKey && document.activeElement === first) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && document.activeElement === last) {
-    event.preventDefault();
-    first.focus();
-  }
-}
-
-function getBuiltInSkillCategories() {
-  return ["公文写作", "文风格式", "材料整理", "段落改写", "自定义"];
+  return skillBuilderModalController.close({ restoreFocus });
 }
 
 function getSelectedSkillCategory() {
-  if (els.skillCategorySelect.value === "自定义") {
-    return els.skillCustomCategoryInput.value.trim() || "自定义";
-  }
-  return els.skillCategorySelect.value || "自定义";
-}
-
-function updateSkillCategoryCustomState(category = getSelectedSkillCategory()) {
-  if (!els.skillCustomCategoryInput || !els.skillCategorySelect) return;
-  const builtIns = getBuiltInSkillCategories();
-  const shouldUseCustom = !builtIns.includes(category) || els.skillCategorySelect.value === "自定义";
-  if (!builtIns.includes(category)) {
-    els.skillCategorySelect.value = "自定义";
-    els.skillCustomCategoryInput.value = category || "";
-  }
-  if (els.skillCustomCategoryField) els.skillCustomCategoryField.hidden = !shouldUseCustom;
-}
-
-function renderSkillBuilderDocumentPicker() {
-  if (!els.skillSourceDocSelect) return;
-  const docs = (state.docs || []).filter((doc) => !doc.deletedAt && String(doc.content || "").trim());
-  if (docs.length === 0) {
-    els.skillSourceDocSelect.innerHTML = '<option disabled>文档库暂无可用正文</option>';
-    els.skillSourceDocSelect.disabled = true;
-    els.addSourceDocsToSkillBtn.disabled = true;
-    return;
-  }
-  els.skillSourceDocSelect.disabled = false;
-  els.addSourceDocsToSkillBtn.disabled = false;
-  els.skillSourceDocSelect.innerHTML = docs
-    .map((doc) => `<option value="${escapeHtml(doc.id)}">${escapeHtml(doc.title || "未命名文档")}</option>`)
-    .join("");
-}
-
-function addSelectedDocsAsSkillExamples() {
-  const selectedIds = Array.from(els.skillSourceDocSelect.selectedOptions || []).map((option) => option.value);
-  if (selectedIds.length === 0) {
-    toast("请先选择要加入训练的文档", "warn");
-    return;
-  }
-  ui.editingStyle.examples = Array.isArray(ui.editingStyle.examples) ? ui.editingStyle.examples : [];
-  const existingSourceIds = new Set(ui.editingStyle.examples.map((example) => example.sourceDocId).filter(Boolean));
-  let addedCount = 0;
-  selectedIds.forEach((docId) => {
-    if (existingSourceIds.has(docId)) return;
-    const doc = state.docs.find((item) => item.id === docId && !item.deletedAt);
-    if (!doc || !String(doc.content || "").trim()) return;
-    ui.editingStyle.examples.push({
-      id: createId(),
-      sourceDocId: doc.id,
-      name: `${doc.title || "未命名文档"}.txt`,
-      text: doc.content,
-      addedAt: now(),
-      importedFrom: "workspace-doc",
-    });
-    existingSourceIds.add(docId);
-    addedCount += 1;
-  });
-  if (addedCount === 0) {
-    toast("所选文档已在训练样本中", "warn");
-    return;
-  }
-  renderStyleExamples();
-  skillRenderer.renderSkillDetailExamples();
-  toast(`已加入 ${addedCount} 份文档库样本`);
+  return skillBuilderModalController.getSelectedCategory();
 }
 
 function updateSkillBuildState(skillId, patch) {
