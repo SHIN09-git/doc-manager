@@ -10,6 +10,8 @@
 - [x] 训练样本送入 AI 构建执笔人前、导出执笔人包前都会执行本地预检并要求用户确认。
 - [x] 执笔人版本详情新增结构化差异：对比强规则、候选规则、禁止事项、常用表达和测试结果变化，辅助判断是否回退或继续重训。
 - [x] 新增执笔人版本差异单元测试，覆盖规则组增删、候选规则来源、禁止事项、表达库和测试保存门禁变化。
+- [x] 从 `app.js` 拆出 `apiSettingsController`，集中管理接口配置渲染、保存、测试、清空和状态提示，主入口只保留装配调用。
+- [x] 新增接口配置控制器单元测试，覆盖 Base URL/Endpoint 归一化、清空确认、连通性测试和状态提示。
 - [x] 修复 JSON 存储路径下日期筛选 `to=YYYY-MM-DD` 会漏掉当天记录的问题：本地 fallback 现在与 PostgreSQL repository 一样把结束日期处理为次日零点前。
 - [x] 新增审计日志与用量历史的日期筛选回归测试，覆盖 `from=2026-05-24&to=2026-05-24` 只返回当天记录。
 - [x] 修复畸形 Cookie 导致认证解析阶段 500 的问题：`parseCookies` 对坏的百分号编码做容错，无法解码时保留原始值，匿名入口继续返回本地模式，受保护接口返回 401。
@@ -389,7 +391,7 @@
 - [ ] 拆出 `skillWorkbenchController`
 - [ ] 拆出 `skillBuilderModalController`
 - [ ] 拆出 `documentPanelController`
-- [ ] 拆出 `apiSettingsController`
+- [x] 拆出 `apiSettingsController`
 - [ ] 拆出 `editorContextMenuController`
 
 目标：让 `app.js` 只负责装配，不再承载大量业务细节。

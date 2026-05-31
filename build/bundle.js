@@ -32939,6 +32939,105 @@ ${String(ex)}`);
     };
   }
 
+  // src/modules/settings/apiSettingsController.js
+  var DEFAULT_SETTINGS = {
+    provider: "openai-compatible",
+    baseUrl: "",
+    endpointPath: "/chat/completions",
+    model: "",
+    apiKey: ""
+  };
+  function createApiSettingsController(deps = {}) {
+    const {
+      state: state2,
+      els: els2,
+      persist: persist2 = () => {
+      },
+      toast: toast2 = () => {
+      },
+      callAiWithRetry: callAiWithRetry2 = async () => "",
+      withLoading: withLoading2 = async (_button, _text, task) => task(),
+      withProgress: withProgress2 = async (_message, task) => task({ update: () => {
+      } }),
+      getApiSettingsLocation: getApiSettingsLocation2 = () => "\u672C\u673A\u63A5\u53E3\u914D\u7F6E",
+      confirm = (message) => globalThis.window?.confirm?.(message) ?? true,
+      defaultSystemPrompt = DEFAULT_SYSTEM_PROMPT
+    } = deps;
+    function bindEvents2() {
+      els2.saveApiBtn?.addEventListener("click", saveApiSettings);
+      els2.testApiBtn?.addEventListener("click", testApiSettings);
+      els2.clearApiBtn?.addEventListener("click", clearApiSettings);
+    }
+    function renderApiSettings2() {
+      const settings = state2.settings || {};
+      els2.providerSelect.value = settings.provider || DEFAULT_SETTINGS.provider;
+      els2.baseUrlInput.value = settings.baseUrl || "";
+      els2.endpointPathInput.value = settings.endpointPath || DEFAULT_SETTINGS.endpointPath;
+      els2.modelInput.value = settings.model || "";
+      els2.apiKeyInput.value = settings.apiKey || "";
+      els2.systemPromptInput.value = settings.systemPrompt || defaultSystemPrompt;
+    }
+    function saveApiSettings() {
+      state2.settings = readSettingsFromInputs();
+      persist2();
+      updateAiStatus2();
+      toast2(`\u63A5\u53E3\u914D\u7F6E\u5DF2\u4FDD\u5B58\u5230\uFF1A${getApiSettingsLocation2()}`);
+      return state2.settings;
+    }
+    async function testApiSettings() {
+      saveApiSettings();
+      await withLoading2(els2.testApiBtn, "\u6D4B\u8BD5\u4E2D", async () => withProgress2("\u6B63\u5728\u6D4B\u8BD5 AI \u63A5\u53E3", async (progress) => {
+        progress.update("\u6B63\u5728\u53D1\u9001\u8FDE\u901A\u6027\u8BF7\u6C42", 35);
+        const reply = await callAiWithRetry2([
+          { role: "system", content: "\u4F60\u662F\u63A5\u53E3\u8FDE\u901A\u6027\u6D4B\u8BD5\u52A9\u624B\u3002" },
+          { role: "user", content: "\u8BF7\u53EA\u56DE\u590D\uFF1A\u8FDE\u63A5\u6B63\u5E38" }
+        ]);
+        progress.update("\u63A5\u53E3\u5DF2\u8FD4\u56DE\u54CD\u5E94", 90);
+        toast2(`\u63A5\u53E3\u8FD4\u56DE\uFF1A${String(reply).slice(0, 40)}`);
+        return reply;
+      }));
+    }
+    function clearApiSettings() {
+      const ok = confirm("\u6E05\u9664\u672C\u673A\u4FDD\u5B58\u7684 AI \u63A5\u53E3\u914D\u7F6E\uFF1F");
+      if (!ok) return false;
+      state2.settings = {
+        ...DEFAULT_SETTINGS,
+        systemPrompt: defaultSystemPrompt
+      };
+      persist2();
+      renderApiSettings2();
+      updateAiStatus2();
+      toast2("\u5DF2\u6E05\u9664\u63A5\u53E3\u914D\u7F6E", "warn");
+      return true;
+    }
+    function updateAiStatus2() {
+      const ready = Boolean(state2.settings?.baseUrl && state2.settings?.model);
+      const cloudProxy = ready && state2.settings?.credentials === "include" && state2.settings?.endpointPath === "/ai/chat";
+      els2.aiStatus.textContent = cloudProxy ? "\u4E91\u7AEF\u4EE3\u7406" : ready ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E";
+      els2.aiStatus.className = `status-pill ${ready ? "ready" : ""}`;
+      els2.apiSavedLabel.textContent = cloudProxy ? "\u4E91\u7AEF\u4EE3\u7406\u5DF2\u542F\u7528" : ready ? "\u672C\u673A\u5DF2\u4FDD\u5B58" : "\u5F85\u914D\u7F6E";
+    }
+    function readSettingsFromInputs() {
+      return {
+        provider: els2.providerSelect.value || DEFAULT_SETTINGS.provider,
+        baseUrl: els2.baseUrlInput.value.trim().replace(/\/+$/, ""),
+        endpointPath: normalizeEndpointPath(els2.endpointPathInput.value),
+        model: els2.modelInput.value.trim(),
+        apiKey: els2.apiKeyInput.value.trim(),
+        systemPrompt: els2.systemPromptInput.value.trim() || defaultSystemPrompt
+      };
+    }
+    return {
+      bindEvents: bindEvents2,
+      renderApiSettings: renderApiSettings2,
+      saveApiSettings,
+      testApiSettings,
+      clearApiSettings,
+      updateAiStatus: updateAiStatus2,
+      readSettingsFromInputs
+    };
+  }
+
   // src/modules/skills/skillAnalyzer.js
   function normalizeSingleDocumentAnalysis(result2, example, index) {
     const documentId = example.id || stableTextHash(example.name + example.text);
@@ -35437,6 +35536,21 @@ ${JSON.stringify(payload, null, 2)}`
     friendlyAiErrorMessage: friendlyAiErrorMessage2,
     isAbortError: isAbortError2
   } = aiClient;
+  var apiSettingsController = createApiSettingsController({
+    state,
+    els,
+    persist,
+    toast,
+    callAiWithRetry,
+    withLoading,
+    withProgress,
+    getApiSettingsLocation,
+    defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT
+  });
+  var {
+    renderApiSettings,
+    updateAiStatus
+  } = apiSettingsController;
   var progressController = createProgressController({
     getCurrent: () => ui.progressElement,
     setCurrent: (element) => {
@@ -36178,9 +36292,7 @@ ${JSON.stringify(payload, null, 2)}`
     document.querySelectorAll(".detail-tab").forEach((button) => {
       button.addEventListener("click", () => switchSkillDetailTab(button.dataset.detailTab));
     });
-    els.saveApiBtn.addEventListener("click", saveApiSettings);
-    els.testApiBtn.addEventListener("click", testApiSettings);
-    els.clearApiBtn.addEventListener("click", clearApiSettings);
+    apiSettingsController.bindEvents();
     els.cloudBaseUrlInput.addEventListener("change", saveCloudBaseUrlFromInput);
     els.cloudRefreshBtn.addEventListener("click", refreshCloudStatus);
     els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
@@ -36367,15 +36479,6 @@ ${JSON.stringify(payload, null, 2)}`
       hideSaveStatus();
     }
     updateTypeControlState();
-  }
-  function renderApiSettings() {
-    const settings = state.settings || {};
-    els.providerSelect.value = settings.provider || "openai-compatible";
-    els.baseUrlInput.value = settings.baseUrl || "";
-    els.endpointPathInput.value = settings.endpointPath || "/chat/completions";
-    els.modelInput.value = settings.model || "";
-    els.apiKeyInput.value = settings.apiKey || "";
-    els.systemPromptInput.value = settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
   }
   function renderCloudPanel() {
     if (!els.cloudBaseUrlInput) return;
@@ -38565,54 +38668,6 @@ ${mention} ` : `${mention} `;
       hideSkillDetailMenu();
     }
     return deleted;
-  }
-  function saveApiSettings() {
-    state.settings = {
-      provider: els.providerSelect.value,
-      baseUrl: els.baseUrlInput.value.trim().replace(/\/+$/, ""),
-      endpointPath: normalizeEndpointPath(els.endpointPathInput.value),
-      model: els.modelInput.value.trim(),
-      apiKey: els.apiKeyInput.value.trim(),
-      systemPrompt: els.systemPromptInput.value.trim() || DEFAULT_SYSTEM_PROMPT
-    };
-    persist();
-    updateAiStatus();
-    toast(`\u63A5\u53E3\u914D\u7F6E\u5DF2\u4FDD\u5B58\u5230\uFF1A${getApiSettingsLocation()}`);
-  }
-  async function testApiSettings() {
-    saveApiSettings();
-    await withLoading(els.testApiBtn, "\u6D4B\u8BD5\u4E2D", async () => withProgress("\u6B63\u5728\u6D4B\u8BD5 AI \u63A5\u53E3", async (progress) => {
-      progress.update("\u6B63\u5728\u53D1\u9001\u8FDE\u901A\u6027\u8BF7\u6C42", 35);
-      const reply = await callAiWithRetry([
-        { role: "system", content: "\u4F60\u662F\u63A5\u53E3\u8FDE\u901A\u6027\u6D4B\u8BD5\u52A9\u624B\u3002" },
-        { role: "user", content: "\u8BF7\u53EA\u56DE\u590D\uFF1A\u8FDE\u63A5\u6B63\u5E38" }
-      ]);
-      progress.update("\u63A5\u53E3\u5DF2\u8FD4\u56DE\u54CD\u5E94", 90);
-      toast(`\u63A5\u53E3\u8FD4\u56DE\uFF1A${reply.slice(0, 40)}`);
-    }));
-  }
-  function clearApiSettings() {
-    const ok = window.confirm("\u6E05\u9664\u672C\u673A\u4FDD\u5B58\u7684 AI \u63A5\u53E3\u914D\u7F6E\uFF1F");
-    if (!ok) return;
-    state.settings = {
-      provider: "openai-compatible",
-      baseUrl: "",
-      endpointPath: "/chat/completions",
-      model: "",
-      apiKey: "",
-      systemPrompt: DEFAULT_SYSTEM_PROMPT
-    };
-    persist();
-    renderApiSettings();
-    updateAiStatus();
-    toast("\u5DF2\u6E05\u9664\u63A5\u53E3\u914D\u7F6E", "warn");
-  }
-  function updateAiStatus() {
-    const ready = Boolean(state.settings?.baseUrl && state.settings?.model);
-    const cloudProxy = ready && state.settings?.credentials === "include" && state.settings?.endpointPath === "/ai/chat";
-    els.aiStatus.textContent = cloudProxy ? "\u4E91\u7AEF\u4EE3\u7406" : ready ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E";
-    els.aiStatus.className = `status-pill ${ready ? "ready" : ""}`;
-    els.apiSavedLabel.textContent = cloudProxy ? "\u4E91\u7AEF\u4EE3\u7406\u5DF2\u542F\u7528" : ready ? "\u672C\u673A\u5DF2\u4FDD\u5B58" : "\u5F85\u914D\u7F6E";
   }
   async function withLoading(button, text, task) {
     const oldHtml = button.innerHTML;

@@ -44,6 +44,7 @@ import {
 } from "./src/modules/ppt/guizangPpt.js";
 import { createPptController } from "./src/modules/ppt/pptController.js";
 import { createPptxBlob } from "./src/modules/ppt/pptxBuilder.js";
+import { createApiSettingsController } from "./src/modules/settings/apiSettingsController.js";
 import { createSkillBuilder } from "./src/modules/skills/skillBuilder.js";
 import { createSkillManager } from "./src/modules/skills/skillManager.js";
 import { createSkillRenderer } from "./src/modules/skills/skillRenderer.js";
@@ -57,7 +58,6 @@ import {
   escapeHtml,
   now,
   normalizeHandle,
-  normalizeEndpointPath,
   sanitizeFileName,
 } from "./src/utils/helpers.js";
 import { buildUnsupportedFileMessage, canImportFile, readImportFileText } from "./src/utils/fileReaders.js";
@@ -111,6 +111,21 @@ const {
   friendlyAiErrorMessage,
   isAbortError,
 } = aiClient;
+const apiSettingsController = createApiSettingsController({
+  state,
+  els,
+  persist,
+  toast,
+  callAiWithRetry,
+  withLoading,
+  withProgress,
+  getApiSettingsLocation,
+  defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT,
+});
+const {
+  renderApiSettings,
+  updateAiStatus,
+} = apiSettingsController;
 const progressController = createProgressController({
   getCurrent: () => ui.progressElement,
   setCurrent: (element) => {
@@ -884,9 +899,7 @@ function bindEvents() {
     button.addEventListener("click", () => switchSkillDetailTab(button.dataset.detailTab));
   });
 
-  els.saveApiBtn.addEventListener("click", saveApiSettings);
-  els.testApiBtn.addEventListener("click", testApiSettings);
-  els.clearApiBtn.addEventListener("click", clearApiSettings);
+  apiSettingsController.bindEvents();
   els.cloudBaseUrlInput.addEventListener("change", saveCloudBaseUrlFromInput);
   els.cloudRefreshBtn.addEventListener("click", refreshCloudStatus);
   els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
@@ -1095,16 +1108,6 @@ function renderEditor() {
     hideSaveStatus();
   }
   updateTypeControlState();
-}
-
-function renderApiSettings() {
-  const settings = state.settings || {};
-  els.providerSelect.value = settings.provider || "openai-compatible";
-  els.baseUrlInput.value = settings.baseUrl || "";
-  els.endpointPathInput.value = settings.endpointPath || "/chat/completions";
-  els.modelInput.value = settings.model || "";
-  els.apiKeyInput.value = settings.apiKey || "";
-  els.systemPromptInput.value = settings.systemPrompt || DEFAULT_SYSTEM_PROMPT;
 }
 
 function renderCloudPanel() {
@@ -3530,58 +3533,6 @@ function deleteStyle() {
     hideSkillDetailMenu();
   }
   return deleted;
-}
-
-function saveApiSettings() {
-  state.settings = {
-    provider: els.providerSelect.value,
-    baseUrl: els.baseUrlInput.value.trim().replace(/\/+$/, ""),
-    endpointPath: normalizeEndpointPath(els.endpointPathInput.value),
-    model: els.modelInput.value.trim(),
-    apiKey: els.apiKeyInput.value.trim(),
-    systemPrompt: els.systemPromptInput.value.trim() || DEFAULT_SYSTEM_PROMPT,
-  };
-  persist();
-  updateAiStatus();
-  toast(`接口配置已保存到：${getApiSettingsLocation()}`);
-}
-
-async function testApiSettings() {
-  saveApiSettings();
-  await withLoading(els.testApiBtn, "测试中", async () => withProgress("正在测试 AI 接口", async (progress) => {
-    progress.update("正在发送连通性请求", 35);
-    const reply = await callAiWithRetry([
-      { role: "system", content: "你是接口连通性测试助手。" },
-      { role: "user", content: "请只回复：连接正常" },
-    ]);
-    progress.update("接口已返回响应", 90);
-    toast(`接口返回：${reply.slice(0, 40)}`);
-  }));
-}
-
-function clearApiSettings() {
-  const ok = window.confirm("清除本机保存的 AI 接口配置？");
-  if (!ok) return;
-  state.settings = {
-    provider: "openai-compatible",
-    baseUrl: "",
-    endpointPath: "/chat/completions",
-    model: "",
-    apiKey: "",
-    systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  };
-  persist();
-  renderApiSettings();
-  updateAiStatus();
-  toast("已清除接口配置", "warn");
-}
-
-function updateAiStatus() {
-  const ready = Boolean(state.settings?.baseUrl && state.settings?.model);
-  const cloudProxy = ready && state.settings?.credentials === "include" && state.settings?.endpointPath === "/ai/chat";
-  els.aiStatus.textContent = cloudProxy ? "云端代理" : ready ? "已配置" : "未配置";
-  els.aiStatus.className = `status-pill ${ready ? "ready" : ""}`;
-  els.apiSavedLabel.textContent = cloudProxy ? "云端代理已启用" : ready ? "本机已保存" : "待配置";
 }
 
 async function withLoading(button, text, task) {
