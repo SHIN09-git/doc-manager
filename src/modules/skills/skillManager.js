@@ -6,6 +6,13 @@ import { MISSING_FACT_PLACEHOLDER, SKILL_RUNTIME_PRIORITY_RULES } from "../../co
 
 const DEFAULT_MISSING_FACT_POLICY = `事实缺失时使用${MISSING_FACT_PLACEHOLDER}，不编造具体人名、时间、地点、单位、数据、结论、政策依据和落款。`;
 export const SKILL_PACKAGE_SCHEMA = "mowen-nibi-workbench.skill-package.v1";
+const SENSITIVE_KEY_RE = /(api[-_]?key|secret|token|password|authorization|credential|private[_-]?key|手机号|身份证|邮箱|电话|密钥|令牌|密码)/i;
+const SENSITIVE_VALUE_PATTERNS = [
+  { label: "手机号", pattern: /(?<!\d)1[3-9]\d{9}(?!\d)/g },
+  { label: "邮箱", pattern: /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi },
+  { label: "身份证号", pattern: /(?<!\d)\d{17}[\dXx](?!\d)/g },
+  { label: "疑似密钥", pattern: /\b(?:sk-[A-Za-z0-9_-]{16,}|re_[A-Za-z0-9_-]{16,})\b/g },
+];
 
 export function buildSkillRuntimePayload(skillJson, skill = {}, fallbackConfidence = "low") {
   const handle = normalizeHandle(skillJson.handle || skill.handle || skillJson.name || skill.name);
@@ -199,6 +206,94 @@ function summarizeVersionSourceExample(source = {}) {
     importedSummary: Boolean(source.importedSummary),
     originalLength: getSourceDocumentLength(source),
   };
+}
+
+function countRuleGroup(ruleJson, key) {
+  return coerceArray(ruleJson?.style_rules?.[key]).length;
+}
+
+function createPackageImportPreview(draft, payload, duplicate = null) {
+  const ruleJson = parseRuleJsonForPackage(draft.skillJson, draft);
+  const sourceSummaries = (draft.examples || []).length
+    ? draft.examples || []
+    : (draft.versions || []).flatMap((version) => version.sourceExamples || []);
+  const sourceCount = sourceSummaries.length;
+  const versionCount = (draft.versions || []).length;
+  const sourceLength = sourceSummaries.reduce((sum, source) => sum + Number(source.originalLength || source.length || 0), 0);
+  const findings = detectSensitivePackageFindings(payload);
+  const summary = {
+    name: draft.name,
+    handle: draft.handle,
+    category: draft.category,
+    description: draft.description,
+    sourceCount,
+    sourceLength,
+    versionCount,
+    mustRuleCount: countRuleGroup(ruleJson, "must"),
+    recommendedRuleCount: countRuleGroup(ruleJson, "recommended"),
+    optionalRuleCount: countRuleGroup(ruleJson, "optional"),
+    forbiddenCount: coerceArray(ruleJson?.forbidden).length,
+    privacyFilterCount: coerceArray(ruleJson?.privacy_filters).length,
+    caseExclusionCount: coerceArray(ruleJson?.case_specific_exclusions).length,
+    duplicateHandle: duplicate ? duplicate.handle : "",
+    duplicateName: duplicate ? duplicate.name : "",
+    sensitiveFindingCount: findings.length,
+  };
+  return {
+    draft,
+    duplicate,
+    sensitiveFindings: findings,
+    summary,
+    previewText: formatPackageImportPreview(summary, findings),
+  };
+}
+
+function formatPackageImportPreview(summary, findings = []) {
+  const lines = [
+    `名称：${summary.name || "未命名执笔人"}`,
+    `调用名：@${summary.handle || "未设置"}`,
+    `分类：${summary.category || "自定义"}`,
+    `训练样本摘要：${summary.sourceCount} 份，约 ${summary.sourceLength} 字符`,
+    `版本记录：${summary.versionCount} 个`,
+    `规则摘要：强规则 ${summary.mustRuleCount} 条，推荐 ${summary.recommendedRuleCount} 条，可选 ${summary.optionalRuleCount} 条`,
+    `限制摘要：禁用 ${summary.forbiddenCount} 条，隐私过滤 ${summary.privacyFilterCount} 条，个案排除 ${summary.caseExclusionCount} 条`,
+  ];
+  if (summary.duplicateHandle) {
+    lines.push(`调用名冲突：@${summary.duplicateHandle} 已被「${summary.duplicateName || "现有执笔人"}」使用`);
+  }
+  if (findings.length) {
+    lines.push("疑似敏感内容：");
+    findings.slice(0, 8).forEach((finding) => {
+      lines.push(`- ${finding.label}：${finding.path}`);
+    });
+    if (findings.length > 8) lines.push(`- 另有 ${findings.length - 8} 项未展示`);
+  }
+  return lines.join("\n");
+}
+
+function detectSensitivePackageFindings(value, path = "package", findings = []) {
+  if (findings.length >= 24) return findings;
+  if (Array.isArray(value)) {
+    value.slice(0, 80).forEach((item, index) => detectSensitivePackageFindings(item, `${path}[${index}]`, findings));
+    return findings;
+  }
+  if (value && typeof value === "object") {
+    Object.entries(value).slice(0, 160).forEach(([key, item]) => {
+      const childPath = `${path}.${key}`;
+      if (SENSITIVE_KEY_RE.test(key)) {
+        findings.push({ label: "敏感字段名", path: childPath });
+      }
+      detectSensitivePackageFindings(item, childPath, findings);
+    });
+    return findings;
+  }
+  if (typeof value === "string") {
+    SENSITIVE_VALUE_PATTERNS.forEach(({ label, pattern }) => {
+      pattern.lastIndex = 0;
+      if (pattern.test(value)) findings.push({ label, path });
+    });
+  }
+  return findings;
 }
 
 function normalizeSkillInputContract(skillJson) {
@@ -515,21 +610,35 @@ export function createSkillManager(deps) {
     return els.skillCustomCategoryInput?.value.trim() || "自定义";
   }
 
-  function importSkillPackage(payload) {
+  function inspectSkillPackageImport(payload) {
     const draft = parseImportedSkillPackage(payload);
-    draft.id = createId();
-    draft.createdAt = now();
+    const duplicate = state.styles.find((style) => style.handle === draft.handle || style.name === draft.name) || null;
+    return createPackageImportPreview(draft, payload, duplicate);
+  }
+
+  function importSkillPackage(payload, options = {}) {
+    const draft = options.draft ? clone(options.draft) : parseImportedSkillPackage(payload);
+    const conflictMode = options.conflictMode || "rename";
+    const duplicate = state.styles.find((style) => style.handle === draft.handle || style.name === draft.name) || null;
+    const shouldReplace = conflictMode === "replace" && duplicate;
+    draft.id = shouldReplace ? duplicate.id : createId();
+    draft.createdAt = shouldReplace ? duplicate.createdAt || now() : now();
     draft.updatedAt = now();
-    draft.handle = createUniqueSkillHandle(draft.handle || draft.name);
+    draft.handle = shouldReplace ? duplicate.handle : createUniqueSkillHandle(draft.handle || draft.name);
     draft.skillJson = normalizeSkillJsonText(draft.skillJson, draft);
     const normalized = normalizeSkill(clone(draft));
-    state.styles.push(normalized);
+    if (shouldReplace) {
+      const index = state.styles.findIndex((style) => style.id === duplicate.id);
+      state.styles[index] = normalized;
+    } else {
+      state.styles.push(normalized);
+    }
     ui.editingStyle = clone(normalized);
     persist();
     eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
     eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
     eventBus.emit(EVENTS.RENDER_STYLE_LIST);
-    toast(`已导入 @${normalized.handle} 到：${getSkillLocation(normalized)}`);
+    toast(`${shouldReplace ? "已覆盖导入" : "已导入"} @${normalized.handle} 到：${getSkillLocation(normalized)}`);
     return normalized;
   }
 
@@ -603,6 +712,7 @@ export function createSkillManager(deps) {
     normalizeSkillJsonText,
     parseSkillJsonObject,
     createSkillPackage,
+    inspectSkillPackageImport,
     syncEditingStyleFromInputs,
     saveStyle,
     commitSkillToState,

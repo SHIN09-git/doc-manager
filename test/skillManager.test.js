@@ -174,6 +174,71 @@ test("normalizeSkill strips raw text from legacy version source examples", () =>
   assert.equal(normalized.versions[0].sourceExamples[0].length, "legacy private source".length);
 });
 
+test("inspectSkillPackageImport previews summaries, conflicts, and sensitive findings", () => {
+  const manager = createSkillManager({
+    state: { styles: [{ id: "existing", name: "Existing writer", handle: "shared" }] },
+    ui: {},
+    els: {},
+    persist: () => {},
+    eventBus: { emit: () => {} },
+    toast: () => {},
+    getSkillLocation: (skill) => `@${skill.handle}`,
+  });
+
+  const preview = manager.inspectSkillPackageImport({
+    schema: SKILL_PACKAGE_SCHEMA,
+    skill: {
+      name: "Shared writer",
+      handle: "shared",
+      ruleJson: {
+        name: "Shared writer",
+        handle: "shared",
+        style_rules: { must: ["Use headings"], recommended: ["Be concise"], optional: ["Polish tone"] },
+        privacy_filters: ["phone"],
+      },
+      versions: [{ version: 1, sourceExamples: [{ name: "sample.docx", length: 1200 }] }],
+      apiKey: "sk-abcdefghijklmnopqrstuvwxyz",
+    },
+  });
+
+  assert.equal(preview.summary.name, "Shared writer");
+  assert.equal(preview.summary.sourceCount, 1);
+  assert.equal(preview.summary.mustRuleCount, 1);
+  assert.equal(preview.summary.duplicateHandle, "shared");
+  assert.equal(preview.sensitiveFindings.some((item) => item.path.includes("apiKey")), true);
+  assert.match(preview.previewText, /Shared writer/);
+});
+
+test("importSkillPackage can replace an existing handle after confirmation", () => {
+  const state = {
+    styles: [{ id: "existing", name: "Old writer", handle: "shared", createdAt: "2026-01-01T00:00:00.000Z" }],
+  };
+  const manager = createSkillManager({
+    state,
+    ui: {},
+    els: {},
+    persist: () => {},
+    eventBus: { emit: () => {} },
+    toast: () => {},
+    getSkillLocation: (skill) => `@${skill.handle}`,
+  });
+  const payload = {
+    schema: SKILL_PACKAGE_SCHEMA,
+    skill: {
+      name: "New writer",
+      handle: "shared",
+      ruleJson: { name: "New writer", handle: "shared" },
+    },
+  };
+  const preview = manager.inspectSkillPackageImport(payload);
+  const imported = manager.importSkillPackage(payload, { draft: preview.draft, conflictMode: "replace" });
+
+  assert.equal(state.styles.length, 1);
+  assert.equal(imported.id, "existing");
+  assert.equal(imported.name, "New writer");
+  assert.equal(imported.handle, "shared");
+});
+
 test("importSkillPackage deduplicates max-length handles without hanging", () => {
   const state = {
     styles: [{ id: "existing", name: "已有", handle: "abcdefghijklmnopqrstuvwx", enabled: true }],

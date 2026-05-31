@@ -556,6 +556,10 @@ test("skill packages can be exported and imported", async ({ page }) => {
       sourceDocuments: [{ name: "会议样本.docx", length: 900 }],
     },
   });
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("即将导入执笔人包");
+    await dialog.accept();
+  });
   await page.locator("#importSkillPackageInput").setInputFiles({
     name: "meeting.skill.json",
     mimeType: "application/json",

@@ -2980,13 +2980,20 @@ async function importSkillPackages(event) {
 async function importSkillPackageFiles(files) {
   if (!files || files.length === 0) return;
   let importedCount = 0;
+  let cancelledCount = 0;
   const failed = [];
   await withProgress(`正在导入 ${files.length} 个执笔人包`, async (progress) => {
     for (const [index, file] of files.entries()) {
       progress.update(`正在读取 ${file.name}`, Math.round((index / files.length) * 72) + 12);
       try {
         const payload = JSON.parse(await file.text());
-        skillManager.importSkillPackage(payload);
+        const preview = skillManager.inspectSkillPackageImport(payload);
+        const conflictMode = confirmSkillPackageImport(file.name, preview);
+        if (conflictMode === "cancel") {
+          cancelledCount += 1;
+          continue;
+        }
+        skillManager.importSkillPackage(payload, { draft: preview.draft, conflictMode });
         importedCount += 1;
       } catch (error) {
         failed.push(file.name);
@@ -2998,9 +3005,30 @@ async function importSkillPackageFiles(files) {
   if (importedCount > 0) {
     switchTab("style");
     toast(`已导入 ${importedCount} 个执笔人${failed.length ? `，${failed.length} 个文件格式不正确` : ""}`);
+  } else if (cancelledCount > 0 && failed.length === 0) {
+    toast("已取消导入执笔人包", "warn");
   } else {
     toast("未导入执笔人，请检查 .skill.json 文件格式", "warn");
   }
+}
+
+function confirmSkillPackageImport(fileName, preview) {
+  const header = [
+    `即将导入执笔人包：${fileName}`,
+    "",
+    preview.previewText,
+    "",
+    preview.sensitiveFindings.length
+      ? "检测到疑似敏感字段，请确认来源可信并检查规则内容后再导入。"
+      : "请确认来源可信后再导入。",
+  ].join("\n");
+  if (preview.duplicate) {
+    const choice = window.prompt(`${header}\n\n输入 1 覆盖现有执笔人；输入 2 另存为新执笔人；输入 3 取消导入。`, "2");
+    if (choice === "1") return "replace";
+    if (choice === "2" || choice === "") return "rename";
+    return "cancel";
+  }
+  return window.confirm(`${header}\n\n确认导入？`) ? "rename" : "cancel";
 }
 
 async function linkRealFolder() {
