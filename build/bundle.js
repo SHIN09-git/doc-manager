@@ -24053,6 +24053,125 @@
     return bootstrap?.storage === "localStorage";
   }
 
+  // src/core/workspacePersistenceController.js
+  function createWorkspacePersistenceController({
+    state: state2 = {},
+    ui: ui2 = {},
+    els: els2 = {},
+    toast: toast2 = () => {
+    },
+    clone: clone3 = clone,
+    normalizeHandle: normalizeHandle2 = normalizeHandle,
+    readWorkspaceState: readWorkspaceState2 = readWorkspaceState,
+    writeWorkspaceState: writeWorkspaceState2 = writeWorkspaceState,
+    readStorageBootstrap: readStorageBootstrap2 = readStorageBootstrap,
+    writeStorageBootstrap: writeStorageBootstrap2 = writeStorageBootstrap,
+    clearLegacyLocalStorageState: clearLegacyLocalStorageState2 = clearLegacyLocalStorageState,
+    readLegacyLocalStorageState: readLegacyLocalStorageState2 = readLegacyLocalStorageState,
+    writeLegacyLocalStorageState: writeLegacyLocalStorageState2 = writeLegacyLocalStorageState,
+    shouldPreferLocalStorageFallback: shouldPreferLocalStorageFallback2 = shouldPreferLocalStorageFallback,
+    logger = console
+  } = {}) {
+    function persist2() {
+      state2.selectedFolderId = ui2.selectedFolderId;
+      state2.selectedDocId = ui2.selectedDocId;
+      const snapshot = clone3(state2);
+      ui2.persistPromise = (ui2.persistPromise || Promise.resolve()).catch(() => null).then(async () => {
+        await writeWorkspaceState2(snapshot);
+        writeStorageBootstrap2(snapshot);
+        clearLegacyLocalStorageState2();
+      }).catch((error) => {
+        logger.error?.("\u4FDD\u5B58\u5DE5\u4F5C\u53F0\u6570\u636E\u5931\u8D25", error);
+        tryLocalStorageFallback(snapshot);
+      });
+      return ui2.persistPromise;
+    }
+    async function hydrateState2() {
+      const loaded = await loadState();
+      Object.assign(state2, loaded);
+      ui2.selectedFolderId = state2.selectedFolderId || "all";
+      ui2.selectedDocId = state2.selectedDocId || null;
+      if (els2.storageLabel) {
+        els2.storageLabel.textContent = "\u672C\u673A\u6587\u6863\u5E93\uFF08IndexedDB\uFF09";
+      }
+      return state2;
+    }
+    async function loadState() {
+      const bootstrap = readStorageBootstrap2();
+      if (shouldPreferLocalStorageFallback2(bootstrap)) {
+        const fallback = readLegacyLocalStorageState2();
+        if (fallback) return fallback;
+      }
+      try {
+        const indexedDbState = await readWorkspaceState2();
+        if (indexedDbState) return indexedDbState;
+      } catch (error) {
+        logger.warn?.("\u8BFB\u53D6 IndexedDB \u5DE5\u4F5C\u53F0\u6570\u636E\u5931\u8D25\uFF0C\u5C06\u5C1D\u8BD5\u65E7 localStorage \u6570\u636E", error);
+      }
+      const legacy = readLegacyLocalStorageState2();
+      if (legacy) {
+        try {
+          await writeWorkspaceState2(legacy);
+          writeStorageBootstrap2(legacy);
+          clearLegacyLocalStorageState2();
+        } catch (error) {
+          logger.warn?.("\u8FC1\u79FB\u65E7 localStorage \u6570\u636E\u5230 IndexedDB \u5931\u8D25\uFF0C\u6682\u65F6\u7EE7\u7EED\u4F7F\u7528\u65E7\u6570\u636E", error);
+        }
+        return legacy;
+      }
+      return {};
+    }
+    function tryLocalStorageFallback(snapshot) {
+      try {
+        writeLegacyLocalStorageState2(snapshot);
+        writeStorageBootstrap2(snapshot, "localStorage");
+        return true;
+      } catch (error) {
+        toast2("\u672C\u673A\u5B58\u50A8\u7A7A\u95F4\u4E0D\u8DB3\uFF0C\u90E8\u5206\u6700\u65B0\u66F4\u6539\u53EF\u80FD\u65E0\u6CD5\u4FDD\u5B58\u3002\u8BF7\u5BFC\u51FA\u5907\u4EFD\u6216\u51CF\u5C11\u5927\u578B\u6837\u672C\u6587\u4EF6\u3002", "error");
+        return false;
+      }
+    }
+    function getStorageRootLocation2() {
+      return "\u672C\u673A\u6D4F\u89C8\u5668\u5B58\u50A8 / \u6479\u6587\u62DF\u7B14\u5DE5\u4F5C\u53F0";
+    }
+    function getFolderLocation2(folder) {
+      if (folder?.kind === "real") {
+        return `\u672C\u673A\u771F\u5B9E\u6587\u4EF6\u5939 / ${folder.name || folder.realName || "\u672A\u547D\u540D\u6587\u4EF6\u5939"}\uFF08\u6D4F\u89C8\u5668\u6388\u6743\u76EE\u5F55\uFF09`;
+      }
+      return `${getStorageRootLocation2()} / \u6587\u6863\u5E93 / ${folder?.name || "\u672A\u5F52\u6863"}`;
+    }
+    function getDocumentLocation2(doc) {
+      const folder = state2.folders?.find((item) => item.id === doc?.folderId);
+      return `${getFolderLocation2(folder)} / ${doc?.title || "\u672A\u547D\u540D\u6587\u6863"}`;
+    }
+    function getSkillLocation2(skill) {
+      const handle = normalizeHandle2(skill?.handle || skill?.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA");
+      return `${getStorageRootLocation2()} / \u6267\u7B14\u4EBA\u5E93 / @${handle}`;
+    }
+    function getSkillTrainingLocation2(skill) {
+      return `${getSkillLocation2(skill)} / \u8BAD\u7EC3\u6587\u672C`;
+    }
+    function getApiSettingsLocation2() {
+      return `${getStorageRootLocation2()} / AI\u63A5\u53E3\u914D\u7F6E`;
+    }
+    function getDownloadLocation2(fileName) {
+      return `\u6D4F\u89C8\u5668\u4E0B\u8F7D\u76EE\u5F55 / ${fileName}`;
+    }
+    return {
+      persist: persist2,
+      hydrateState: hydrateState2,
+      loadState,
+      tryLocalStorageFallback,
+      getStorageRootLocation: getStorageRootLocation2,
+      getFolderLocation: getFolderLocation2,
+      getDocumentLocation: getDocumentLocation2,
+      getSkillLocation: getSkillLocation2,
+      getSkillTrainingLocation: getSkillTrainingLocation2,
+      getApiSettingsLocation: getApiSettingsLocation2,
+      getDownloadLocation: getDownloadLocation2
+    };
+  }
+
   // src/core/eventBus.js
   var EventBus = class {
     constructor() {
@@ -39162,6 +39281,14 @@ ${mention} ` : `${mention} `;
     friendlyAiErrorMessage: friendlyAiErrorMessage2,
     isAbortError: isAbortError2
   } = aiClient;
+  var workspacePersistenceController = createWorkspacePersistenceController({
+    state,
+    ui,
+    els,
+    toast,
+    clone,
+    normalizeHandle
+  });
   var apiSettingsController = createApiSettingsController({
     state,
     els,
@@ -40426,85 +40553,31 @@ ${mention} ` : `${mention} `;
     return folderManager.createDefaultFolder();
   }
   function persist() {
-    state.selectedFolderId = ui.selectedFolderId;
-    state.selectedDocId = ui.selectedDocId;
-    const snapshot = clone(state);
-    ui.persistPromise = ui.persistPromise.catch(() => null).then(async () => {
-      await writeWorkspaceState(snapshot);
-      writeStorageBootstrap(snapshot);
-      clearLegacyLocalStorageState();
-    }).catch((error) => {
-      console.error("\u4FDD\u5B58\u5DE5\u4F5C\u53F0\u6570\u636E\u5931\u8D25", error);
-      tryLocalStorageFallback(snapshot);
-    });
+    return workspacePersistenceController.persist();
   }
   async function hydrateState() {
-    const loaded = await loadState();
-    Object.assign(state, loaded);
-    ui.selectedFolderId = state.selectedFolderId || "all";
-    ui.selectedDocId = state.selectedDocId || null;
-    if (els.storageLabel) {
-      els.storageLabel.textContent = "\u672C\u673A\u6587\u6863\u5E93\uFF08IndexedDB\uFF09";
-    }
-  }
-  async function loadState() {
-    const bootstrap = readStorageBootstrap();
-    if (shouldPreferLocalStorageFallback(bootstrap)) {
-      const fallback = readLegacyLocalStorageState();
-      if (fallback) return fallback;
-    }
-    try {
-      const indexedDbState = await readWorkspaceState();
-      if (indexedDbState) return indexedDbState;
-    } catch (error) {
-      console.warn("\u8BFB\u53D6 IndexedDB \u5DE5\u4F5C\u53F0\u6570\u636E\u5931\u8D25\uFF0C\u5C06\u5C1D\u8BD5\u65E7 localStorage \u6570\u636E", error);
-    }
-    const legacy = readLegacyLocalStorageState();
-    if (legacy) {
-      try {
-        await writeWorkspaceState(legacy);
-        writeStorageBootstrap(legacy);
-        clearLegacyLocalStorageState();
-      } catch (error) {
-        console.warn("\u8FC1\u79FB\u65E7 localStorage \u6570\u636E\u5230 IndexedDB \u5931\u8D25\uFF0C\u6682\u65F6\u7EE7\u7EED\u4F7F\u7528\u65E7\u6570\u636E", error);
-      }
-      return legacy;
-    }
-    return {};
-  }
-  function tryLocalStorageFallback(snapshot) {
-    try {
-      writeLegacyLocalStorageState(snapshot);
-      writeStorageBootstrap(snapshot, "localStorage");
-    } catch (error) {
-      toast("\u672C\u673A\u5B58\u50A8\u7A7A\u95F4\u4E0D\u8DB3\uFF0C\u90E8\u5206\u6700\u65B0\u66F4\u6539\u53EF\u80FD\u65E0\u6CD5\u4FDD\u5B58\u3002\u8BF7\u5BFC\u51FA\u5907\u4EFD\u6216\u51CF\u5C11\u5927\u578B\u6837\u672C\u6587\u4EF6\u3002", "error");
-    }
+    return workspacePersistenceController.hydrateState();
   }
   function getStorageRootLocation() {
-    return "\u672C\u673A\u6D4F\u89C8\u5668\u5B58\u50A8 / \u6479\u6587\u62DF\u7B14\u5DE5\u4F5C\u53F0";
+    return workspacePersistenceController.getStorageRootLocation();
   }
   function getFolderLocation(folder) {
-    if (folder?.kind === "real") {
-      return `\u672C\u673A\u771F\u5B9E\u6587\u4EF6\u5939 / ${folder.name || folder.realName || "\u672A\u547D\u540D\u6587\u4EF6\u5939"}\uFF08\u6D4F\u89C8\u5668\u6388\u6743\u76EE\u5F55\uFF09`;
-    }
-    return `${getStorageRootLocation()} / \u6587\u6863\u5E93 / ${folder?.name || "\u672A\u5F52\u6863"}`;
+    return workspacePersistenceController.getFolderLocation(folder);
   }
   function getDocumentLocation(doc) {
-    const folder = state.folders.find((item) => item.id === doc?.folderId);
-    return `${getFolderLocation(folder)} / ${doc?.title || "\u672A\u547D\u540D\u6587\u6863"}`;
+    return workspacePersistenceController.getDocumentLocation(doc);
   }
   function getSkillLocation(skill) {
-    const handle = normalizeHandle(skill?.handle || skill?.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA");
-    return `${getStorageRootLocation()} / \u6267\u7B14\u4EBA\u5E93 / @${handle}`;
+    return workspacePersistenceController.getSkillLocation(skill);
   }
   function getSkillTrainingLocation(skill) {
-    return `${getSkillLocation(skill)} / \u8BAD\u7EC3\u6587\u672C`;
+    return workspacePersistenceController.getSkillTrainingLocation(skill);
   }
   function getApiSettingsLocation() {
-    return `${getStorageRootLocation()} / AI\u63A5\u53E3\u914D\u7F6E`;
+    return workspacePersistenceController.getApiSettingsLocation();
   }
   function getDownloadLocation(fileName) {
-    return `\u6D4F\u89C8\u5668\u4E0B\u8F7D\u76EE\u5F55 / ${fileName}`;
+    return workspacePersistenceController.getDownloadLocation(fileName);
   }
   function downloadBlob(fileName, content, type) {
     const blob = new Blob([content], { type });

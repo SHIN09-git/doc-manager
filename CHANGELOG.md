@@ -22,6 +22,7 @@
 - 拆出 `importDropController`，让文件拖拽高亮、全局文件拖入路由、文档卡片拖入生成提示词和阻止浏览器误打开文件从 `app.js` 迁移到导入模块。
 - 拆出 `skillTrainingController`，让执笔人训练样本读取、示范文件/执笔人包混合拖入、隐私预检和 AI 构建链路启动从 `app.js` 迁移到执笔人模块。
 - 拆出 `pptSkillController`，让自定义 PPT 风格保存为执笔人的表单读取、规则 JSON 组装、提交保存和错误提示从 `app.js` 迁移到 PPT 模块。
+- 拆出 `workspacePersistenceController`，让 IndexedDB 保存、localStorage 迁移兜底、存储位置文案和下载位置文案从 `app.js` 迁移到核心模块。
 - 拆出 `cloudApiClient`，让云端 API 默认地址推导、地址归一化、组织请求头、JSON 解析和错误负载从 `app.js` 迁移到独立模块。
 - 修复部署站点上旧的本地云端地址带多个尾随斜杠时不会自动替换为当前站点 `/api` 的问题。
 - 补充云端 API 客户端单元测试，覆盖本地/部署地址推导、请求头、服务端错误和网络失败提示。
