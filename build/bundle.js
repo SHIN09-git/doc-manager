@@ -25615,6 +25615,180 @@ ${doc.content}`.toLowerCase().includes(query);
     };
   }
 
+  // src/modules/editor/findReplaceController.js
+  function createFindReplaceController(deps = {}) {
+    const {
+      els: els2 = {},
+      toast: toast2 = () => {
+      },
+      recordEditorUndoPoint: recordEditorUndoPoint2 = () => {
+      },
+      saveEditor: saveEditor2 = () => {
+      }
+    } = deps;
+    function bindEvents2() {
+      els2.replaceToggleBtn?.addEventListener("click", toggleReplaceBar);
+      els2.findNextBtn?.addEventListener("click", findNext);
+      els2.replaceNextBtn?.addEventListener("click", replaceNext);
+      els2.replaceAllBtn?.addEventListener("click", replaceAll);
+      els2.findInput?.addEventListener("input", updateFindStatus);
+      els2.contentEditor?.addEventListener("input", updateFindStatus);
+      els2.findInput?.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        findNext();
+      });
+    }
+    function toggleReplaceBar() {
+      const shouldOpen = els2.replaceBar.hidden;
+      els2.replaceBar.hidden = !shouldOpen;
+      els2.replaceBar.classList.toggle("collapsed", !shouldOpen);
+      els2.replaceToggleBtn.setAttribute("aria-expanded", String(shouldOpen));
+      if (shouldOpen) {
+        els2.findInput.focus();
+        updateFindStatus();
+      }
+      return shouldOpen;
+    }
+    function getMatches(findText = els2.findInput?.value || "") {
+      const text = String(findText || "");
+      if (!text) return [];
+      const content = els2.contentEditor?.value || "";
+      const matches = [];
+      let index = content.indexOf(text);
+      while (index !== -1) {
+        matches.push(index);
+        index = content.indexOf(text, index + text.length);
+      }
+      return matches;
+    }
+    function getNextMatchIndex(findText = els2.findInput?.value || "") {
+      const matches = getMatches(findText);
+      if (matches.length === 0) return { index: -1, matchNumber: 0, total: 0 };
+      const startAt = els2.contentEditor?.selectionEnd || 0;
+      const nextIndex = matches.findIndex((matchIndex) => matchIndex >= startAt);
+      const matchNumber = nextIndex === -1 ? 1 : nextIndex + 1;
+      return {
+        index: nextIndex === -1 ? matches[0] : matches[nextIndex],
+        matchNumber,
+        total: matches.length
+      };
+    }
+    function selectMatch(index, findText) {
+      const editor = els2.contentEditor;
+      editor.focus();
+      editor.setSelectionRange(index, index + findText.length);
+    }
+    function getSelectedFindMatch(findText = els2.findInput?.value || "") {
+      const editor = els2.contentEditor;
+      const start = editor.selectionStart || 0;
+      const end = editor.selectionEnd || start;
+      if (start === end) return null;
+      if (editor.value.slice(start, end) !== findText) return null;
+      const matchNumber = getMatches(findText).findIndex((index) => index === start) + 1;
+      return { start, end, matchNumber };
+    }
+    function updateFindStatus() {
+      if (!els2.findStatus) return;
+      const findText = els2.findInput?.value || "";
+      if (!findText) {
+        els2.findStatus.textContent = "\u8F93\u5165\u67E5\u627E\u5185\u5BB9";
+        return;
+      }
+      const matches = getMatches(findText);
+      if (matches.length === 0) {
+        els2.findStatus.textContent = "0 \u5904\u5339\u914D";
+        return;
+      }
+      const selected = getSelectedFindMatch(findText);
+      if (selected?.matchNumber > 0) {
+        els2.findStatus.textContent = `\u7B2C ${selected.matchNumber} / \u5171 ${matches.length} \u5904`;
+        return;
+      }
+      els2.findStatus.textContent = `\u5171 ${matches.length} \u5904`;
+    }
+    function findNext() {
+      const findText = els2.findInput.value;
+      if (!findText) {
+        toast2("\u8BF7\u8F93\u5165\u67E5\u627E\u5185\u5BB9", "warn");
+        els2.findInput.focus();
+        updateFindStatus();
+        return -1;
+      }
+      const match = getNextMatchIndex(findText);
+      if (match.index === -1) {
+        toast2("\u6CA1\u6709\u627E\u5230\u5339\u914D\u5185\u5BB9", "warn");
+        updateFindStatus();
+        return -1;
+      }
+      selectMatch(match.index, findText);
+      updateFindStatus();
+      toast2(`\u5DF2\u627E\u5230\u7B2C ${match.matchNumber} / \u5171 ${match.total} \u5904\uFF1A\u7B2C ${match.index + 1} \u4E2A\u5B57\u7B26\u5904`);
+      return match.index;
+    }
+    function replaceNext() {
+      const findText = els2.findInput.value;
+      const replacement = els2.replaceInput.value;
+      if (!findText) {
+        toast2("\u8BF7\u8F93\u5165\u67E5\u627E\u5185\u5BB9", "warn");
+        els2.findInput.focus();
+        updateFindStatus();
+        return false;
+      }
+      const editor = els2.contentEditor;
+      const content = editor.value;
+      const currentMatch = getSelectedFindMatch(findText);
+      const nextMatch = currentMatch ? { index: currentMatch.start } : getNextMatchIndex(findText);
+      const index = nextMatch.index;
+      if (index === -1) {
+        toast2("\u6CA1\u6709\u627E\u5230\u5339\u914D\u5185\u5BB9", "warn");
+        updateFindStatus();
+        return false;
+      }
+      const end = currentMatch?.end ?? index + findText.length;
+      recordEditorUndoPoint2();
+      editor.value = content.slice(0, index) + replacement + content.slice(end);
+      editor.focus();
+      editor.setSelectionRange(index, index + replacement.length);
+      saveEditor2(true);
+      updateFindStatus();
+      return true;
+    }
+    function replaceAll() {
+      const findText = els2.findInput.value;
+      const replacement = els2.replaceInput.value;
+      if (!findText) {
+        toast2("\u8BF7\u8F93\u5165\u67E5\u627E\u5185\u5BB9", "warn");
+        els2.findInput.focus();
+        updateFindStatus();
+        return 0;
+      }
+      const editor = els2.contentEditor;
+      const count = getMatches(findText).length;
+      if (count === 0) {
+        toast2("\u6CA1\u6709\u627E\u5230\u5339\u914D\u5185\u5BB9", "warn");
+        updateFindStatus();
+        return 0;
+      }
+      recordEditorUndoPoint2();
+      editor.value = editor.value.split(findText).join(replacement);
+      saveEditor2(true);
+      updateFindStatus();
+      toast2(`\u5DF2\u66FF\u6362 ${count} \u5904`);
+      return count;
+    }
+    return {
+      bindEvents: bindEvents2,
+      toggleReplaceBar,
+      getMatches,
+      getNextMatchIndex,
+      updateFindStatus,
+      findNext,
+      replaceNext,
+      replaceAll
+    };
+  }
+
   // src/modules/editor/editorContextMenuController.js
   function createEditorContextMenuController(deps = {}) {
     const {
@@ -36527,6 +36701,12 @@ ${mention} ` : `${mention} `;
     saveEditor,
     getSelectionOrLine
   });
+  var findReplaceController = createFindReplaceController({
+    els,
+    toast,
+    recordEditorUndoPoint,
+    saveEditor
+  });
   var pptController = createPptController({
     els,
     ui,
@@ -36645,6 +36825,7 @@ ${mention} ` : `${mention} `;
       "replaceBar",
       "findInput",
       "replaceInput",
+      "findStatus",
       "findNextBtn",
       "replaceNextBtn",
       "replaceAllBtn",
@@ -36970,15 +37151,7 @@ ${mention} ` : `${mention} `;
     els.styleSelect.addEventListener("change", queueEditorSave);
     els.saveDocBtn.addEventListener("click", () => saveEditor(true));
     els.undoEditBtn.addEventListener("click", undoEditorChange);
-    els.replaceToggleBtn.addEventListener("click", toggleReplaceBar);
-    els.findNextBtn.addEventListener("click", findNext);
-    els.replaceNextBtn.addEventListener("click", replaceNext);
-    els.replaceAllBtn.addEventListener("click", replaceAll);
-    els.findInput.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
-      event.preventDefault();
-      findNext();
-    });
+    findReplaceController.bindEvents();
     editorContextMenuController.bindEvents();
     document.addEventListener("click", (event) => {
       if (!event.target.closest("#editorMenu")) editorContextMenuController.hide();
@@ -38246,15 +38419,6 @@ ${mention} ` : `${mention} `;
     els.undoEditBtn.disabled = ui.editorUndoStack.length === 0;
     els.undoEditBtn.title = ui.editorUndoStack.length === 0 ? "\u6682\u65E0\u53EF\u64A4\u9500\u7684\u6B63\u6587\u7F16\u8F91" : "\u64A4\u9500\u6B63\u6587\u7F16\u8F91";
   }
-  function toggleReplaceBar() {
-    const shouldOpen = els.replaceBar.hidden;
-    els.replaceBar.hidden = !shouldOpen;
-    els.replaceBar.classList.toggle("collapsed", !shouldOpen);
-    els.replaceToggleBtn.setAttribute("aria-expanded", String(shouldOpen));
-    if (shouldOpen) {
-      els.findInput.focus();
-    }
-  }
   async function syncDocumentToRealFolder(doc) {
     return folderManager.syncDocumentToRealFolder(doc);
   }
@@ -38332,84 +38496,6 @@ ${mention} ` : `${mention} `;
       saveEditor(false);
     }
     hideSkillMentionPanel();
-  }
-  function getFindMatchIndex(findText) {
-    if (!findText) return -1;
-    const editor = els.contentEditor;
-    const content = editor.value;
-    const startAt = editor.selectionEnd || 0;
-    let index = content.indexOf(findText, startAt);
-    if (index === -1 && startAt > 0) index = content.indexOf(findText);
-    return index;
-  }
-  function selectFindMatch(index, findText) {
-    const editor = els.contentEditor;
-    editor.focus();
-    editor.setSelectionRange(index, index + findText.length);
-  }
-  function getSelectedFindMatch(findText) {
-    const editor = els.contentEditor;
-    const start = editor.selectionStart || 0;
-    const end = editor.selectionEnd || start;
-    if (start === end) return null;
-    if (editor.value.slice(start, end) !== findText) return null;
-    return { start, end };
-  }
-  function findNext() {
-    const findText = els.findInput.value;
-    if (!findText) {
-      toast("\u8BF7\u8F93\u5165\u67E5\u627E\u5185\u5BB9", "warn");
-      els.findInput.focus();
-      return -1;
-    }
-    const index = getFindMatchIndex(findText);
-    if (index === -1) {
-      toast("\u6CA1\u6709\u627E\u5230\u5339\u914D\u5185\u5BB9", "warn");
-      return -1;
-    }
-    selectFindMatch(index, findText);
-    toast(`\u5DF2\u627E\u5230\uFF1A\u7B2C ${index + 1} \u4E2A\u5B57\u7B26\u5904`);
-    return index;
-  }
-  function replaceNext() {
-    const findText = els.findInput.value;
-    const replacement = els.replaceInput.value;
-    if (!findText) {
-      toast("\u8BF7\u8F93\u5165\u67E5\u627E\u5185\u5BB9", "warn");
-      return;
-    }
-    const editor = els.contentEditor;
-    const content = editor.value;
-    const currentMatch = getSelectedFindMatch(findText);
-    const index = currentMatch?.start ?? getFindMatchIndex(findText);
-    if (index === -1) {
-      toast("\u6CA1\u6709\u627E\u5230\u5339\u914D\u5185\u5BB9", "warn");
-      return;
-    }
-    const end = currentMatch?.end ?? index + findText.length;
-    recordEditorUndoPoint();
-    editor.value = content.slice(0, index) + replacement + content.slice(end);
-    editor.focus();
-    editor.setSelectionRange(index, index + replacement.length);
-    saveEditor(true);
-  }
-  function replaceAll() {
-    const findText = els.findInput.value;
-    const replacement = els.replaceInput.value;
-    if (!findText) {
-      toast("\u8BF7\u8F93\u5165\u67E5\u627E\u5185\u5BB9", "warn");
-      return;
-    }
-    const editor = els.contentEditor;
-    const count = editor.value.split(findText).length - 1;
-    if (count === 0) {
-      toast("\u6CA1\u6709\u627E\u5230\u5339\u914D\u5185\u5BB9", "warn");
-      return;
-    }
-    recordEditorUndoPoint();
-    editor.value = editor.value.split(findText).join(replacement);
-    saveEditor(true);
-    toast(`\u5DF2\u66FF\u6362 ${count} \u5904`);
   }
   async function importDocumentFiles(files) {
     return documentPanelController.importDocumentFiles(files);

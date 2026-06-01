@@ -30,6 +30,7 @@ import { createDocumentManager } from "./src/modules/documents/documentManager.j
 import { createDocumentPanelController } from "./src/modules/documents/documentPanelController.js";
 import { createDocumentRenderer } from "./src/modules/documents/documentRenderer.js";
 import { createTrashController } from "./src/modules/documents/trashController.js";
+import { createFindReplaceController } from "./src/modules/editor/findReplaceController.js";
 import { createEditorContextMenuController } from "./src/modules/editor/editorContextMenuController.js";
 import { createGenerationController } from "./src/modules/generation/generationController.js";
 import { createBrowserFileSystemAdapter } from "./src/modules/folders/fileSystemAdapter.js";
@@ -339,6 +340,12 @@ const editorContextMenuController = createEditorContextMenuController({
   saveEditor,
   getSelectionOrLine,
 });
+const findReplaceController = createFindReplaceController({
+  els,
+  toast,
+  recordEditorUndoPoint,
+  saveEditor,
+});
 const pptController = createPptController({
   els,
   ui,
@@ -460,6 +467,7 @@ function bindElements() {
     "replaceBar",
     "findInput",
     "replaceInput",
+    "findStatus",
     "findNextBtn",
     "replaceNextBtn",
     "replaceAllBtn",
@@ -810,15 +818,7 @@ function bindEvents() {
   els.styleSelect.addEventListener("change", queueEditorSave);
   els.saveDocBtn.addEventListener("click", () => saveEditor(true));
   els.undoEditBtn.addEventListener("click", undoEditorChange);
-  els.replaceToggleBtn.addEventListener("click", toggleReplaceBar);
-  els.findNextBtn.addEventListener("click", findNext);
-  els.replaceNextBtn.addEventListener("click", replaceNext);
-  els.replaceAllBtn.addEventListener("click", replaceAll);
-  els.findInput.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    findNext();
-  });
+  findReplaceController.bindEvents();
   editorContextMenuController.bindEvents();
   document.addEventListener("click", (event) => {
     if (!event.target.closest("#editorMenu")) editorContextMenuController.hide();
@@ -2254,16 +2254,6 @@ function updateUndoButtonState() {
   els.undoEditBtn.title = ui.editorUndoStack.length === 0 ? "暂无可撤销的正文编辑" : "撤销正文编辑";
 }
 
-function toggleReplaceBar() {
-  const shouldOpen = els.replaceBar.hidden;
-  els.replaceBar.hidden = !shouldOpen;
-  els.replaceBar.classList.toggle("collapsed", !shouldOpen);
-  els.replaceToggleBtn.setAttribute("aria-expanded", String(shouldOpen));
-  if (shouldOpen) {
-    els.findInput.focus();
-  }
-}
-
 async function syncDocumentToRealFolder(doc) {
   return folderManager.syncDocumentToRealFolder(doc);
 }
@@ -2353,90 +2343,6 @@ function insertSkillMention(skillId) {
     saveEditor(false);
   }
   hideSkillMentionPanel();
-}
-
-function getFindMatchIndex(findText) {
-  if (!findText) return -1;
-  const editor = els.contentEditor;
-  const content = editor.value;
-  const startAt = editor.selectionEnd || 0;
-  let index = content.indexOf(findText, startAt);
-  if (index === -1 && startAt > 0) index = content.indexOf(findText);
-  return index;
-}
-
-function selectFindMatch(index, findText) {
-  const editor = els.contentEditor;
-  editor.focus();
-  editor.setSelectionRange(index, index + findText.length);
-}
-
-function getSelectedFindMatch(findText) {
-  const editor = els.contentEditor;
-  const start = editor.selectionStart || 0;
-  const end = editor.selectionEnd || start;
-  if (start === end) return null;
-  if (editor.value.slice(start, end) !== findText) return null;
-  return { start, end };
-}
-
-function findNext() {
-  const findText = els.findInput.value;
-  if (!findText) {
-    toast("请输入查找内容", "warn");
-    els.findInput.focus();
-    return -1;
-  }
-  const index = getFindMatchIndex(findText);
-  if (index === -1) {
-    toast("没有找到匹配内容", "warn");
-    return -1;
-  }
-  selectFindMatch(index, findText);
-  toast(`已找到：第 ${index + 1} 个字符处`);
-  return index;
-}
-
-function replaceNext() {
-  const findText = els.findInput.value;
-  const replacement = els.replaceInput.value;
-  if (!findText) {
-    toast("请输入查找内容", "warn");
-    return;
-  }
-  const editor = els.contentEditor;
-  const content = editor.value;
-  const currentMatch = getSelectedFindMatch(findText);
-  const index = currentMatch?.start ?? getFindMatchIndex(findText);
-  if (index === -1) {
-    toast("没有找到匹配内容", "warn");
-    return;
-  }
-  const end = currentMatch?.end ?? index + findText.length;
-  recordEditorUndoPoint();
-  editor.value = content.slice(0, index) + replacement + content.slice(end);
-  editor.focus();
-  editor.setSelectionRange(index, index + replacement.length);
-  saveEditor(true);
-}
-
-function replaceAll() {
-  const findText = els.findInput.value;
-  const replacement = els.replaceInput.value;
-  if (!findText) {
-    toast("请输入查找内容", "warn");
-    return;
-  }
-  const editor = els.contentEditor;
-  const count = editor.value.split(findText).length - 1;
-  if (count === 0) {
-    toast("没有找到匹配内容", "warn");
-    return;
-  }
-  recordEditorUndoPoint();
-  editor.value = editor.value.split(findText).join(replacement);
-  saveEditor(true);
-  toast(`已替换 ${count} 处`);
 }
 
 async function importDocuments(event) {

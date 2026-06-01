@@ -1875,12 +1875,19 @@ button:disabled {
 
 .replace-bar {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) auto auto auto;
+  grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) minmax(88px, auto) auto auto auto;
   align-items: end;
 }
 
 .replace-bar.collapsed {
   display: none;
+}
+
+.find-status {
+  align-self: center;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 #contentEditor {
