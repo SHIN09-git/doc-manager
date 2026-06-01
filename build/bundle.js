@@ -24669,6 +24669,261 @@ ${formatListItems(items)}`;
     ];
   }
 
+  // src/modules/cloud/cloudSessionController.js
+  function createCloudSessionController(deps = {}) {
+    const {
+      state: state2 = {},
+      els: els2 = {},
+      normalizeCloudBaseUrl: normalizeCloudBaseUrl3 = (value) => String(value || "").trim(),
+      cloudRequest: cloudRequest2 = async () => ({}),
+      refreshCloudUsage: refreshCloudUsage2 = async () => {
+      },
+      refreshCloudBilling: refreshCloudBilling2 = async () => {
+      },
+      withLoading: withLoading2 = async (_button, _label, task) => task(),
+      persist: persist2 = () => {
+      },
+      renderCloudPanel: renderCloudPanel2 = () => {
+      },
+      toast: toast2 = () => {
+      },
+      getCloudSettingsLocation: getCloudSettingsLocation2 = () => "",
+      windowRef = globalThis.window
+    } = deps;
+    let eventsBound = false;
+    function bindEvents2() {
+      if (eventsBound) return;
+      eventsBound = true;
+      els2.cloudBaseUrlInput?.addEventListener("change", saveCloudBaseUrlFromInput);
+      els2.cloudRefreshBtn?.addEventListener("click", refreshCloudStatus);
+      els2.cloudLoginBtn?.addEventListener("click", cloudLogin);
+      els2.cloudRegisterBtn?.addEventListener("click", cloudRegister);
+      els2.cloudLogoutBtn?.addEventListener("click", cloudLogout);
+      els2.cloudRequestVerifyBtn?.addEventListener("click", cloudRequestEmailVerification);
+      els2.cloudVerifyEmailBtn?.addEventListener("click", cloudVerifyEmail);
+      els2.cloudRequestResetBtn?.addEventListener("click", cloudRequestPasswordReset);
+      els2.cloudConfirmResetBtn?.addEventListener("click", cloudConfirmPasswordReset);
+      els2.cloudLogoutAllBtn?.addEventListener("click", cloudLogoutAllDevices);
+    }
+    function ensureCloudState() {
+      state2.cloud = state2.cloud || {};
+      return state2.cloud;
+    }
+    function saveCloudBaseUrlFromInput() {
+      ensureCloudState().apiBaseUrl = normalizeCloudBaseUrl3(els2.cloudBaseUrlInput?.value);
+      persist2();
+      renderCloudPanel2();
+      toast2(`\u4E91\u7AEF\u5730\u5740\u5DF2\u4FDD\u5B58\u5230\uFF1A${getCloudSettingsLocation2()}`);
+    }
+    function applyCloudSession(data = {}) {
+      const organization = data.organization || data.activeOrganization || data.organizations?.[0] || null;
+      state2.cloud = {
+        ...ensureCloudState(),
+        authenticated: Boolean(data.authenticated ?? data.user),
+        user: data.user || null,
+        organizations: Array.isArray(data.organizations) ? data.organizations : organization ? [organization] : [],
+        activeOrganization: organization,
+        membership: data.membership || null
+      };
+      return state2.cloud;
+    }
+    async function refreshCloudStatus() {
+      return withLoading2(els2.cloudRefreshBtn, "\u5237\u65B0\u4E2D", async () => {
+        try {
+          ensureCloudState().apiBaseUrl = normalizeCloudBaseUrl3(els2.cloudBaseUrlInput?.value);
+          const data = await cloudRequest2("/me", { method: "GET" });
+          applyCloudSession(data);
+          if (state2.cloud.authenticated) {
+            await refreshCloudUsage2({ silent: true });
+            await refreshCloudBilling2({ silent: true });
+          }
+          persist2();
+          renderCloudPanel2();
+          toast2(state2.cloud.authenticated ? "\u4E91\u7AEF\u72B6\u6001\u5DF2\u5237\u65B0" : "\u5F53\u524D\u4E3A\u672C\u5730\u6A21\u5F0F");
+          return state2.cloud;
+        } catch (error) {
+          ensureCloudState().authenticated = false;
+          state2.cloud.user = null;
+          state2.cloud.usage = null;
+          state2.cloud.billing = null;
+          persist2();
+          renderCloudPanel2();
+          toast2(`\u4E91\u7AEF\u8FDE\u63A5\u5931\u8D25\uFF1A${error.message}`, "error");
+          return null;
+        }
+      });
+    }
+    async function cloudLogin() {
+      return withLoading2(els2.cloudLoginBtn, "\u767B\u5F55\u4E2D", async () => {
+        ensureCloudState().apiBaseUrl = normalizeCloudBaseUrl3(els2.cloudBaseUrlInput?.value);
+        const data = await cloudRequest2("/auth/login", {
+          method: "POST",
+          body: JSON.stringify({
+            email: els2.cloudEmailInput?.value.trim() || "",
+            password: els2.cloudPasswordInput?.value || ""
+          })
+        });
+        applyCloudSession(data);
+        if (data.email_verification_token && els2.cloudEmailTokenInput) {
+          els2.cloudEmailTokenInput.value = data.email_verification_token;
+        }
+        await refreshCloudUsage2({ silent: true });
+        await refreshCloudBilling2({ silent: true });
+        persist2();
+        renderCloudPanel2();
+        toast2(`\u5DF2\u767B\u5F55\u4E91\u7AEF\uFF1A${getCloudSettingsLocation2()}`);
+        return data;
+      });
+    }
+    async function cloudRegister() {
+      return withLoading2(els2.cloudRegisterBtn, "\u6CE8\u518C\u4E2D", async () => {
+        ensureCloudState().apiBaseUrl = normalizeCloudBaseUrl3(els2.cloudBaseUrlInput?.value);
+        const name = els2.cloudNameInput?.value.trim() || els2.cloudEmailInput?.value.trim() || "";
+        const data = await cloudRequest2("/auth/register", {
+          method: "POST",
+          body: JSON.stringify({
+            email: els2.cloudEmailInput?.value.trim() || "",
+            password: els2.cloudPasswordInput?.value || "",
+            name,
+            organizationName: `${name || "\u6211\u7684"}\u5DE5\u4F5C\u533A`
+          })
+        });
+        applyCloudSession(data);
+        await refreshCloudUsage2({ silent: true });
+        await refreshCloudBilling2({ silent: true });
+        persist2();
+        renderCloudPanel2();
+        toast2(`\u4E91\u7AEF\u8D26\u53F7\u5DF2\u521B\u5EFA\uFF1A${getCloudSettingsLocation2()}`);
+        return data;
+      });
+    }
+    async function cloudLogout() {
+      return withLoading2(els2.cloudLogoutBtn, "\u9000\u51FA\u4E2D", async () => {
+        await cloudRequest2("/auth/logout", { method: "POST", body: JSON.stringify({}) }).catch(() => null);
+        resetCloudSession();
+        persist2();
+        renderCloudPanel2();
+        toast2("\u5DF2\u9000\u51FA\u4E91\u7AEF\u8D26\u53F7", "warn");
+      });
+    }
+    async function cloudLogoutAllDevices() {
+      if (!windowRef?.confirm?.("\u786E\u5B9A\u8981\u9000\u51FA\u6240\u6709\u4E91\u7AEF\u8BBE\u5907\u5417\uFF1F\u5F53\u524D\u9875\u9762\u4E5F\u4F1A\u9000\u51FA\u3002")) return false;
+      return withLoading2(els2.cloudLogoutAllBtn, "\u9000\u51FA\u4E2D", async () => {
+        await cloudRequest2("/auth/logout-all", { method: "POST", body: JSON.stringify({}) });
+        resetCloudSession();
+        persist2();
+        renderCloudPanel2();
+        toast2("\u5DF2\u9000\u51FA\u6240\u6709\u4E91\u7AEF\u8BBE\u5907", "warn");
+        return true;
+      });
+    }
+    async function cloudRequestEmailVerification() {
+      const email = els2.cloudEmailInput?.value.trim() || state2.cloud?.user?.email || "";
+      return withLoading2(els2.cloudRequestVerifyBtn, "\u7533\u8BF7\u4E2D", async () => {
+        const data = await cloudRequest2("/auth/request-email-verification", {
+          method: "POST",
+          body: JSON.stringify({ email })
+        });
+        if (data.email_verification_token) {
+          if (els2.cloudEmailTokenInput) els2.cloudEmailTokenInput.value = data.email_verification_token;
+          toast2("\u90AE\u7BB1\u9A8C\u8BC1\u7801\u5DF2\u751F\u6210\uFF0C\u7070\u5EA6\u73AF\u5883\u53EF\u76F4\u63A5\u590D\u5236\u4F7F\u7528");
+        } else {
+          toast2(data.verified ? "\u90AE\u7BB1\u5DF2\u9A8C\u8BC1" : "\u9A8C\u8BC1\u8BF7\u6C42\u5DF2\u63D0\u4EA4");
+        }
+        return data;
+      });
+    }
+    async function cloudVerifyEmail() {
+      const email = els2.cloudEmailInput?.value.trim() || state2.cloud?.user?.email || "";
+      const token = els2.cloudEmailTokenInput?.value.trim() || "";
+      if (!token) {
+        toast2("\u8BF7\u5148\u586B\u5199\u90AE\u7BB1\u9A8C\u8BC1\u7801", "warn");
+        return null;
+      }
+      return withLoading2(els2.cloudVerifyEmailBtn, "\u9A8C\u8BC1\u4E2D", async () => {
+        const data = await cloudRequest2("/auth/verify-email", {
+          method: "POST",
+          body: JSON.stringify({ email, token })
+        });
+        ensureCloudState().user = data.user || state2.cloud.user;
+        if (els2.cloudEmailTokenInput) els2.cloudEmailTokenInput.value = "";
+        persist2();
+        renderCloudPanel2();
+        toast2("\u90AE\u7BB1\u5DF2\u9A8C\u8BC1");
+        return data;
+      });
+    }
+    async function cloudRequestPasswordReset() {
+      const email = els2.cloudEmailInput?.value.trim() || "";
+      if (!email) {
+        toast2("\u8BF7\u5148\u586B\u5199\u90AE\u7BB1", "warn");
+        return null;
+      }
+      return withLoading2(els2.cloudRequestResetBtn, "\u7533\u8BF7\u4E2D", async () => {
+        const data = await cloudRequest2("/auth/request-password-reset", {
+          method: "POST",
+          body: JSON.stringify({ email })
+        });
+        if (data.reset_token) {
+          if (els2.cloudResetTokenInput) els2.cloudResetTokenInput.value = data.reset_token;
+          toast2("\u91CD\u7F6E\u7801\u5DF2\u751F\u6210\uFF0C\u7070\u5EA6\u73AF\u5883\u53EF\u76F4\u63A5\u590D\u5236\u4F7F\u7528");
+        } else {
+          toast2("\u5982\u679C\u8D26\u53F7\u5B58\u5728\uFF0C\u91CD\u7F6E\u8BF7\u6C42\u5DF2\u63D0\u4EA4");
+        }
+        return data;
+      });
+    }
+    async function cloudConfirmPasswordReset() {
+      const email = els2.cloudEmailInput?.value.trim() || "";
+      const token = els2.cloudResetTokenInput?.value.trim() || "";
+      const password = els2.cloudNewPasswordInput?.value || "";
+      if (!email || !token || !password) {
+        toast2("\u8BF7\u586B\u5199\u90AE\u7BB1\u3001\u91CD\u7F6E\u7801\u548C\u65B0\u5BC6\u7801", "warn");
+        return null;
+      }
+      return withLoading2(els2.cloudConfirmResetBtn, "\u91CD\u7F6E\u4E2D", async () => {
+        await cloudRequest2("/auth/reset-password", {
+          method: "POST",
+          body: JSON.stringify({ email, token, password })
+        });
+        if (els2.cloudResetTokenInput) els2.cloudResetTokenInput.value = "";
+        if (els2.cloudNewPasswordInput) els2.cloudNewPasswordInput.value = "";
+        toast2("\u5BC6\u7801\u5DF2\u91CD\u7F6E\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
+        return true;
+      });
+    }
+    function resetCloudSession() {
+      state2.cloud = {
+        ...ensureCloudState(),
+        authenticated: false,
+        user: null,
+        activeOrganization: null,
+        membership: null,
+        members: [],
+        invitations: [],
+        usage: null,
+        limits: null,
+        billing: null
+      };
+      return state2.cloud;
+    }
+    return {
+      bindEvents: bindEvents2,
+      saveCloudBaseUrlFromInput,
+      applyCloudSession,
+      refreshCloudStatus,
+      cloudLogin,
+      cloudRegister,
+      cloudLogout,
+      cloudLogoutAllDevices,
+      cloudRequestEmailVerification,
+      cloudVerifyEmail,
+      cloudRequestPasswordReset,
+      cloudConfirmPasswordReset,
+      resetCloudSession
+    };
+  }
+
   // src/modules/documents/documentEditor.js
   function createDocumentEditor(deps) {
     const {
@@ -36971,6 +37226,19 @@ ${mention} ` : `${mention} `;
     els,
     defaultCloudApiBaseUrl: DEFAULT_CLOUD_API_BASE_URL
   });
+  var cloudSessionController = createCloudSessionController({
+    state,
+    els,
+    normalizeCloudBaseUrl: normalizeCloudBaseUrl2,
+    cloudRequest,
+    refreshCloudUsage,
+    refreshCloudBilling,
+    withLoading,
+    persist,
+    renderCloudPanel,
+    toast,
+    getCloudSettingsLocation
+  });
   var layoutController = createLayoutController({ els, ui });
   var folderManager = createFolderManager({
     state,
@@ -37702,18 +37970,9 @@ ${mention} ` : `${mention} `;
       button.addEventListener("click", () => switchSkillDetailTab(button.dataset.detailTab));
     });
     apiSettingsController.bindEvents();
-    els.cloudBaseUrlInput.addEventListener("change", saveCloudBaseUrlFromInput);
-    els.cloudRefreshBtn.addEventListener("click", refreshCloudStatus);
+    cloudSessionController.bindEvents();
     els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
     els.pptBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
-    els.cloudLoginBtn.addEventListener("click", cloudLogin);
-    els.cloudRegisterBtn.addEventListener("click", cloudRegister);
-    els.cloudLogoutBtn.addEventListener("click", cloudLogout);
-    els.cloudRequestVerifyBtn.addEventListener("click", cloudRequestEmailVerification);
-    els.cloudVerifyEmailBtn.addEventListener("click", cloudVerifyEmail);
-    els.cloudRequestResetBtn.addEventListener("click", cloudRequestPasswordReset);
-    els.cloudConfirmResetBtn.addEventListener("click", cloudConfirmPasswordReset);
-    els.cloudLogoutAllBtn.addEventListener("click", cloudLogoutAllDevices);
     els.cloudSaveDocBtn.addEventListener("click", cloudSaveCurrentDocument);
     els.cloudPullDocsBtn.addEventListener("click", cloudPullDocuments);
     els.cloudSaveWriterBtn.addEventListener("click", cloudSaveCurrentWriter);
@@ -37921,12 +38180,6 @@ ${mention} ` : `${mention} `;
   function normalizeCloudBaseUrl2(value) {
     return cloudApiClient.normalizeBaseUrl(value);
   }
-  function saveCloudBaseUrlFromInput() {
-    state.cloud.apiBaseUrl = normalizeCloudBaseUrl2(els.cloudBaseUrlInput.value);
-    persist();
-    renderCloudPanel();
-    toast(`\u4E91\u7AEF\u5730\u5740\u5DF2\u4FDD\u5B58\u5230\uFF1A${getCloudSettingsLocation()}`);
-  }
   async function cloudRequest(path, options = {}) {
     return cloudApiClient.request(path, options);
   }
@@ -37936,194 +38189,6 @@ ${mention} ` : `${mention} `;
     } catch {
       return fallback;
     }
-  }
-  function applyCloudSession(data) {
-    const organization = data.organization || data.activeOrganization || data.organizations?.[0] || null;
-    state.cloud = {
-      ...state.cloud || {},
-      authenticated: Boolean(data.authenticated ?? data.user),
-      user: data.user || null,
-      organizations: Array.isArray(data.organizations) ? data.organizations : organization ? [organization] : [],
-      activeOrganization: organization,
-      membership: data.membership || null
-    };
-  }
-  async function refreshCloudStatus() {
-    await withLoading(els.cloudRefreshBtn, "\u5237\u65B0\u4E2D", async () => {
-      try {
-        state.cloud.apiBaseUrl = normalizeCloudBaseUrl2(els.cloudBaseUrlInput.value);
-        const data = await cloudRequest("/me", { method: "GET" });
-        applyCloudSession(data);
-        if (state.cloud.authenticated) {
-          await refreshCloudUsage({ silent: true });
-          await refreshCloudBilling({ silent: true });
-        }
-        persist();
-        renderCloudPanel();
-        toast(state.cloud.authenticated ? "\u4E91\u7AEF\u72B6\u6001\u5DF2\u5237\u65B0" : "\u5F53\u524D\u4E3A\u672C\u5730\u6A21\u5F0F");
-      } catch (error) {
-        state.cloud.authenticated = false;
-        state.cloud.user = null;
-        state.cloud.usage = null;
-        state.cloud.billing = null;
-        persist();
-        renderCloudPanel();
-        toast(`\u4E91\u7AEF\u8FDE\u63A5\u5931\u8D25\uFF1A${error.message}`, "error");
-      }
-    });
-  }
-  async function cloudLogin() {
-    await withLoading(els.cloudLoginBtn, "\u767B\u5F55\u4E2D", async () => {
-      state.cloud.apiBaseUrl = normalizeCloudBaseUrl2(els.cloudBaseUrlInput.value);
-      const data = await cloudRequest("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({
-          email: els.cloudEmailInput.value.trim(),
-          password: els.cloudPasswordInput.value
-        })
-      });
-      applyCloudSession(data);
-      if (data.email_verification_token && els.cloudEmailTokenInput) {
-        els.cloudEmailTokenInput.value = data.email_verification_token;
-      }
-      await refreshCloudUsage({ silent: true });
-      await refreshCloudBilling({ silent: true });
-      persist();
-      renderCloudPanel();
-      toast(`\u5DF2\u767B\u5F55\u4E91\u7AEF\uFF1A${getCloudSettingsLocation()}`);
-    });
-  }
-  async function cloudRegister() {
-    await withLoading(els.cloudRegisterBtn, "\u6CE8\u518C\u4E2D", async () => {
-      state.cloud.apiBaseUrl = normalizeCloudBaseUrl2(els.cloudBaseUrlInput.value);
-      const data = await cloudRequest("/auth/register", {
-        method: "POST",
-        body: JSON.stringify({
-          email: els.cloudEmailInput.value.trim(),
-          password: els.cloudPasswordInput.value,
-          name: els.cloudNameInput.value.trim() || els.cloudEmailInput.value.trim(),
-          organizationName: `${els.cloudNameInput.value.trim() || "\u6211\u7684"}\u5DE5\u4F5C\u533A`
-        })
-      });
-      applyCloudSession(data);
-      await refreshCloudUsage({ silent: true });
-      await refreshCloudBilling({ silent: true });
-      persist();
-      renderCloudPanel();
-      toast(`\u4E91\u7AEF\u8D26\u53F7\u5DF2\u521B\u5EFA\uFF1A${getCloudSettingsLocation()}`);
-    });
-  }
-  async function cloudLogout() {
-    await withLoading(els.cloudLogoutBtn, "\u9000\u51FA\u4E2D", async () => {
-      await cloudRequest("/auth/logout", { method: "POST", body: JSON.stringify({}) }).catch(() => null);
-      state.cloud = {
-        ...state.cloud || {},
-        authenticated: false,
-        user: null,
-        activeOrganization: null,
-        membership: null,
-        members: [],
-        invitations: [],
-        usage: null,
-        limits: null,
-        billing: null
-      };
-      persist();
-      renderCloudPanel();
-      toast("\u5DF2\u9000\u51FA\u4E91\u7AEF\u8D26\u53F7", "warn");
-    });
-  }
-  async function cloudLogoutAllDevices() {
-    if (!window.confirm("\u786E\u5B9A\u8981\u9000\u51FA\u6240\u6709\u4E91\u7AEF\u8BBE\u5907\u5417\uFF1F\u5F53\u524D\u9875\u9762\u4E5F\u4F1A\u9000\u51FA\u3002")) return;
-    await withLoading(els.cloudLogoutAllBtn, "\u9000\u51FA\u4E2D", async () => {
-      await cloudRequest("/auth/logout-all", { method: "POST", body: JSON.stringify({}) });
-      state.cloud = {
-        ...state.cloud || {},
-        authenticated: false,
-        user: null,
-        activeOrganization: null,
-        membership: null,
-        members: [],
-        invitations: [],
-        usage: null,
-        limits: null,
-        billing: null
-      };
-      persist();
-      renderCloudPanel();
-      toast("\u5DF2\u9000\u51FA\u6240\u6709\u4E91\u7AEF\u8BBE\u5907", "warn");
-    });
-  }
-  async function cloudRequestEmailVerification() {
-    const email = els.cloudEmailInput.value.trim() || state.cloud?.user?.email || "";
-    await withLoading(els.cloudRequestVerifyBtn, "\u7533\u8BF7\u4E2D", async () => {
-      const data = await cloudRequest("/auth/request-email-verification", {
-        method: "POST",
-        body: JSON.stringify({ email })
-      });
-      if (data.email_verification_token) {
-        els.cloudEmailTokenInput.value = data.email_verification_token;
-        toast("\u90AE\u7BB1\u9A8C\u8BC1\u7801\u5DF2\u751F\u6210\uFF0C\u7070\u5EA6\u73AF\u5883\u53EF\u76F4\u63A5\u590D\u5236\u4F7F\u7528");
-      } else {
-        toast(data.verified ? "\u90AE\u7BB1\u5DF2\u9A8C\u8BC1" : "\u9A8C\u8BC1\u8BF7\u6C42\u5DF2\u63D0\u4EA4");
-      }
-    });
-  }
-  async function cloudVerifyEmail() {
-    const email = els.cloudEmailInput.value.trim() || state.cloud?.user?.email || "";
-    const token = els.cloudEmailTokenInput.value.trim();
-    if (!token) {
-      toast("\u8BF7\u5148\u586B\u5199\u90AE\u7BB1\u9A8C\u8BC1\u7801", "warn");
-      return;
-    }
-    await withLoading(els.cloudVerifyEmailBtn, "\u9A8C\u8BC1\u4E2D", async () => {
-      const data = await cloudRequest("/auth/verify-email", {
-        method: "POST",
-        body: JSON.stringify({ email, token })
-      });
-      state.cloud.user = data.user || state.cloud.user;
-      els.cloudEmailTokenInput.value = "";
-      persist();
-      renderCloudPanel();
-      toast("\u90AE\u7BB1\u5DF2\u9A8C\u8BC1");
-    });
-  }
-  async function cloudRequestPasswordReset() {
-    const email = els.cloudEmailInput.value.trim();
-    if (!email) {
-      toast("\u8BF7\u5148\u586B\u5199\u90AE\u7BB1", "warn");
-      return;
-    }
-    await withLoading(els.cloudRequestResetBtn, "\u7533\u8BF7\u4E2D", async () => {
-      const data = await cloudRequest("/auth/request-password-reset", {
-        method: "POST",
-        body: JSON.stringify({ email })
-      });
-      if (data.reset_token) {
-        els.cloudResetTokenInput.value = data.reset_token;
-        toast("\u91CD\u7F6E\u7801\u5DF2\u751F\u6210\uFF0C\u7070\u5EA6\u73AF\u5883\u53EF\u76F4\u63A5\u590D\u5236\u4F7F\u7528");
-      } else {
-        toast("\u5982\u679C\u8D26\u53F7\u5B58\u5728\uFF0C\u91CD\u7F6E\u8BF7\u6C42\u5DF2\u63D0\u4EA4");
-      }
-    });
-  }
-  async function cloudConfirmPasswordReset() {
-    const email = els.cloudEmailInput.value.trim();
-    const token = els.cloudResetTokenInput.value.trim();
-    const password = els.cloudNewPasswordInput.value;
-    if (!email || !token || !password) {
-      toast("\u8BF7\u586B\u5199\u90AE\u7BB1\u3001\u91CD\u7F6E\u7801\u548C\u65B0\u5BC6\u7801", "warn");
-      return;
-    }
-    await withLoading(els.cloudConfirmResetBtn, "\u91CD\u7F6E\u4E2D", async () => {
-      await cloudRequest("/auth/reset-password", {
-        method: "POST",
-        body: JSON.stringify({ email, token, password })
-      });
-      els.cloudResetTokenInput.value = "";
-      els.cloudNewPasswordInput.value = "";
-      toast("\u5BC6\u7801\u5DF2\u91CD\u7F6E\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
-    });
   }
   async function refreshCloudUsage(options = {}) {
     if (!state.cloud?.authenticated) return;
