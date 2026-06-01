@@ -37928,6 +37928,75 @@ ${mention} ` : `${mention} `;
     }, 3600);
   }
 
+  // src/ui/globalShortcutController.js
+  function createGlobalShortcutController(deps = {}) {
+    const {
+      els: els2 = {},
+      documentRef = () => globalThis.document,
+      editorContextMenuController: editorContextMenuController2 = { hide: () => {
+      } },
+      skillMentionController: skillMentionController2 = { hide: () => {
+      } },
+      layoutController: layoutController2 = { closeResponsiveInspector: () => {
+      } },
+      closeSkillBuilderModal: closeSkillBuilderModal2 = () => {
+      },
+      saveEditor: saveEditor2 = () => {
+      },
+      undoEditorChange: undoEditorChange2 = () => {
+      }
+    } = deps;
+    function bindEvents2() {
+      documentRef()?.addEventListener?.("keydown", handleKeydown);
+      els2.saveDocBtn?.setAttribute?.("aria-keyshortcuts", shortcutLabel("S"));
+      els2.undoEditBtn?.setAttribute?.("aria-keyshortcuts", shortcutLabel("Z"));
+    }
+    function handleKeydown(event) {
+      if (!event || event.isComposing) return false;
+      if (event.key === "Escape") {
+        handleEscape();
+        return true;
+      }
+      if (!isPrimaryShortcut(event)) return false;
+      const key = String(event.key || "").toLowerCase();
+      if (key === "s" && isDocumentEditorTarget(event.target)) {
+        event.preventDefault?.();
+        saveEditor2(true);
+        return true;
+      }
+      if (key === "z" && !event.shiftKey && event.target === els2.contentEditor) {
+        event.preventDefault?.();
+        undoEditorChange2();
+        return true;
+      }
+      return false;
+    }
+    function handleEscape() {
+      editorContextMenuController2.hide?.({ restoreFocus: true });
+      skillMentionController2.hide?.();
+      if (els2.skillBuilderModal && !els2.skillBuilderModal.hidden) {
+        closeSkillBuilderModal2();
+      }
+      layoutController2.closeResponsiveInspector?.();
+    }
+    function isDocumentEditorTarget(target) {
+      return [els2.titleInput, els2.contentEditor, els2.typeSelect, els2.folderSelect, els2.styleSelect].includes(target);
+    }
+    return {
+      bindEvents: bindEvents2,
+      handleKeydown,
+      handleEscape,
+      isDocumentEditorTarget
+    };
+  }
+  function isPrimaryShortcut(event) {
+    return Boolean((event.ctrlKey || event.metaKey) && !event.altKey);
+  }
+  function shortcutLabel(key) {
+    const isMac = /mac/i.test(globalThis.navigator?.platform || "");
+    return `${isMac ? "Meta" : "Control"}+${key}`;
+  }
+
   // src/ui/layoutController.js
   var WORKSPACE_LAYOUT_KEY = "mowen-nibi-workbench:workspace-layout";
   var DEFAULT_WORKSPACE_LAYOUT = { sidebar: 284, inspector: 360 };
@@ -38628,6 +38697,15 @@ ${mention} ` : `${mention} `;
     recordEditorUndoPoint,
     saveEditor
   });
+  var globalShortcutController = createGlobalShortcutController({
+    els,
+    editorContextMenuController,
+    skillMentionController,
+    layoutController,
+    closeSkillBuilderModal,
+    saveEditor,
+    undoEditorChange
+  });
   var findReplaceController = createFindReplaceController({
     els,
     toast,
@@ -38948,14 +39026,7 @@ ${mention} ` : `${mention} `;
     document.addEventListener("click", (event) => {
       if (!event.target.closest("#editorMenu")) editorContextMenuController.hide();
     });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        editorContextMenuController.hide({ restoreFocus: true });
-        skillMentionController.hide();
-        if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
-        layoutController.closeResponsiveInspector();
-      }
-    });
+    globalShortcutController.bindEvents();
     skillMentionController.bindEvents();
     generationController.bindEvents();
     setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);

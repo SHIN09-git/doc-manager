@@ -55,6 +55,7 @@ import { createSkillRenderer } from "./src/modules/skills/skillRenderer.js";
 import { createSkillWorkbenchController } from "./src/modules/skills/skillWorkbenchController.js";
 import { createProgressController } from "./src/ui/components/progress.js";
 import { showToast } from "./src/ui/components/toast.js";
+import { createGlobalShortcutController } from "./src/ui/globalShortcutController.js";
 import { createLayoutController } from "./src/ui/layoutController.js";
 import { initThemeToggle } from "./src/ui/theme.js";
 import { createViewController } from "./src/ui/viewController.js";
@@ -425,6 +426,15 @@ const skillMentionController = createSkillMentionController({
   recordEditorUndoPoint,
   saveEditor,
 });
+const globalShortcutController = createGlobalShortcutController({
+  els,
+  editorContextMenuController,
+  skillMentionController,
+  layoutController,
+  closeSkillBuilderModal,
+  saveEditor,
+  undoEditorChange,
+});
 const findReplaceController = createFindReplaceController({
   els,
   toast,
@@ -754,14 +764,7 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     if (!event.target.closest("#editorMenu")) editorContextMenuController.hide();
   });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      editorContextMenuController.hide({ restoreFocus: true });
-      skillMentionController.hide();
-      if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
-      layoutController.closeResponsiveInspector();
-    }
-  });
+  globalShortcutController.bindEvents();
   skillMentionController.bindEvents();
 
   generationController.bindEvents();

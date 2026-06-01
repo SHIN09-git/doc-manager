@@ -17,6 +17,8 @@
 - [x] 新增执笔人提及面板单元测试，覆盖提及识别、启用过滤、键盘选择、正文插入保存和外部点击关闭。
 - [x] 从 `app.js` 拆出 `workspaceInitializer`，集中管理默认文件夹、默认文档、默认执笔人、云端状态归一化和旧品牌迁移。
 - [x] 新增工作台初始化单元测试，覆盖默认数据补齐、旧学校文案迁移、云端数组兜底、旧系统提示词迁移和缺失 state 拦截。
+- [x] 从 `app.js` 拆出 `globalShortcutController`，集中管理全局 `Escape`、文档编辑 `Ctrl/Cmd+S` 保存和正文 `Ctrl/Cmd+Z` 撤销。
+- [x] 新增全局快捷控制器单元测试，覆盖事件绑定、浮层关闭、编辑区保存、正文撤销和组合输入/浏览器快捷键兜底。
 - [x] 从 `app.js` 拆出 `cloudApiClient`，集中管理云端 API 默认地址推导、地址归一化、组织请求头、`credentials: include`、JSON 响应解析和错误负载。
 - [x] 修复部署站点上旧的本地云端地址带多个尾随斜杠时不会自动替换为当前站点 `/api` 的问题。
 - [x] 新增云端 API 客户端单元测试，覆盖本地/部署地址推导、旧本地地址替换、请求头、服务端错误和网络失败提示。
@@ -90,7 +92,7 @@
 - [x] `ARCHITECTURE.md` 增补云端账单边界，明确人工充值、额度账户、流水、审计和前后台展示的模块归属。
 - [x] 新增前后端单元测试覆盖账单格式化和额度流水公开过滤。
 
-后续结构优化建议：`app.js` 的云端 API、会话、同步、用户操作、面板渲染、功能地图入口动作、视图切换和初始化/迁移编排已拆为独立模块，下一步可继续把全局快捷动作拆成小控制器；后端侧再把 `server/src/app.js` 中的 billing route 编排拆为 `server/src/billing/manualPaymentService.js`。
+后续结构优化建议：`app.js` 的云端 API、会话、同步、用户操作、面板渲染、功能地图入口动作、视图切换、初始化/迁移编排和全局快捷动作已拆为独立模块，下一步可继续把剩余导入导出与执笔人详情兼容入口拆成小控制器；后端侧再把 `server/src/app.js` 中的 billing route 编排拆为 `server/src/billing/manualPaymentService.js`。
 
 ## 2026-05-29 阶段 C 人工确认版充值完善记录
 
@@ -356,7 +358,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：200 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：205 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
 
 ## 已完成
 
@@ -440,6 +442,7 @@
 - [x] 拆出 `viewController`
 - [x] 拆出 `skillMentionController`
 - [x] 拆出 `workspaceInitializer`
+- [x] 拆出 `globalShortcutController`
 
 目标：让 `app.js` 只负责装配，不再承载大量业务细节。
 
