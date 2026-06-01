@@ -38052,6 +38052,225 @@ ${JSON.stringify(payload, null, 2)}`
     };
   }
 
+  // src/modules/skills/skillTrainingController.js
+  function createSkillTrainingController(deps = {}) {
+    const {
+      ui: ui2 = { activeTasks: {} },
+      els: els2 = {},
+      eventBus: eventBus2 = { emit: () => {
+      } },
+      skillBuilder: skillBuilder2,
+      toast: toast2 = () => {
+      },
+      withProgress: withProgress2 = async (_message, task) => task({ update: () => {
+      } }),
+      importSkillPackageFiles: importSkillPackageFiles2 = async () => {
+      },
+      isSkillPackageFile: isSkillPackageFile2 = () => false,
+      confirmLargeImport: confirmLargeImport2 = () => true,
+      confirmPrivacyRiskNotice: confirmPrivacyRiskNotice2 = () => true,
+      confirmUnstableDraft = () => true,
+      syncEditingStyleFromInputs: syncEditingStyleFromInputs2 = () => ui2.editingStyle || {},
+      commitSkillToState: commitSkillToState2 = (style) => style,
+      parseSkillJsonObject: parseSkillJsonObject2 = (value) => JSON.parse(value || "{}"),
+      renderStyleExamples: renderStyleExamples2 = () => {
+      },
+      renderSkillDetailExamples = () => {
+      },
+      closeSkillBuilderModal: closeSkillBuilderModal2 = () => {
+      },
+      switchTab: switchTab2 = () => {
+      },
+      createSkillCardProgress: createSkillCardProgress2 = () => ({ update: () => {
+      } }),
+      getSkillBuildResult: getSkillBuildResult2 = () => ({}),
+      updateSkillBuildState: updateSkillBuildState2 = () => {
+      },
+      getSkillLocation: getSkillLocation2 = (style) => style?.name || "\u6267\u7B14\u4EBA\u5E93",
+      getSkillTrainingLocation: getSkillTrainingLocation2 = (style) => `${style?.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA"} / \u8BAD\u7EC3\u6837\u672C`,
+      friendlyAiErrorMessage: friendlyAiErrorMessage3 = (error) => error?.message || "",
+      isTaskAbortError: isTaskAbortError2 = () => false,
+      throwIfTaskAborted: throwIfTaskAborted2 = () => {
+      },
+      createAbortController = () => new AbortController(),
+      logger = console
+    } = deps;
+    async function importStyleExamples2(event) {
+      const files = Array.from(event?.target?.files || []);
+      const result2 = await importStyleExampleFiles(files);
+      if (event?.target) event.target.value = "";
+      return result2;
+    }
+    async function importStyleDropFiles2(files) {
+      const fileList = Array.from(files || []);
+      const skillPackages = fileList.filter(isSkillPackageFile2);
+      const exampleFiles = fileList.filter((file) => !isSkillPackageFile2(file));
+      const result2 = { packageCount: skillPackages.length, exampleCount: exampleFiles.length };
+      if (skillPackages.length > 0) {
+        result2.packageResult = await importSkillPackageFiles2(skillPackages);
+      }
+      if (exampleFiles.length > 0) {
+        result2.exampleResult = await importStyleExampleFiles(exampleFiles);
+      }
+      return result2;
+    }
+    async function importStyleExampleFiles(files) {
+      if (!files || files.length === 0) return { importedCount: 0, skippedFiles: [], sizeSkipped: [] };
+      if (!ui2.editingStyle) {
+        toast2("\u8BF7\u5148\u6253\u5F00\u6267\u7B14\u4EBA\u751F\u6210\u7A97\u53E3", "warn");
+        return { importedCount: 0, skippedFiles: [], sizeSkipped: [] };
+      }
+      ui2.editingStyle.examples = Array.isArray(ui2.editingStyle.examples) ? ui2.editingStyle.examples : [];
+      const { accepted: importFiles, skipped: sizeSkipped } = await filterImportableFilesBySize(files, {
+        confirm: confirmLargeImport2,
+        notify: toast2
+      });
+      if (importFiles.length === 0) return { importedCount: 0, skippedFiles: [], sizeSkipped };
+      let importedCount = 0;
+      const skippedFiles = [];
+      await withProgress2(`\u6B63\u5728\u5BFC\u5165 ${importFiles.length} \u4E2A\u793A\u8303\u6587\u4EF6`, async (progress) => {
+        for (const [index, file] of importFiles.entries()) {
+          progress.update(`\u6B63\u5728\u8BFB\u53D6 ${file.name}`, Math.round(index / importFiles.length * 78) + 10);
+          if (!canImportFile(file.name)) {
+            skippedFiles.push(file.name);
+            continue;
+          }
+          let text = "";
+          try {
+            text = await readImportFileText(file);
+          } catch (error) {
+            skippedFiles.push(file.name);
+            logger.warn?.("\u5BFC\u5165\u793A\u8303\u6587\u4EF6\u5931\u8D25", file.name, error);
+            continue;
+          }
+          ui2.editingStyle.examples.push({
+            id: createId(),
+            name: file.name,
+            text,
+            addedAt: now()
+          });
+          importedCount += 1;
+        }
+        progress.update("\u6B63\u5728\u5237\u65B0\u793A\u8303\u5217\u8868", 92);
+      });
+      if (importedCount === 0 && skippedFiles.length > 0) {
+        toast2(`\u672A\u6DFB\u52A0\u793A\u8303\uFF1A${buildUnsupportedFileMessage(skippedFiles[0])}`, "warn");
+        return { importedCount, skippedFiles, sizeSkipped };
+      }
+      renderStyleExamples2();
+      renderSkillDetailExamples();
+      const skippedCount = skippedFiles.length + sizeSkipped.length;
+      toast2(`\u5DF2\u6DFB\u52A0 ${importedCount} \u4EFD\u793A\u8303\u5230\uFF1A${getSkillTrainingLocation2(ui2.editingStyle)}${skippedCount ? `\uFF0C\u5DF2\u8DF3\u8FC7 ${skippedCount} \u4E2A\u6682\u4E0D\u652F\u6301\u3001\u8FC7\u5927\u6216\u8BFB\u53D6\u5931\u8D25\u7684\u6587\u4EF6` : ""}`);
+      return { importedCount, skippedFiles, sizeSkipped };
+    }
+    async function summarizeStyle2() {
+      const style = syncEditingStyleFromInputs2();
+      if (!String(style?.name || "").trim()) {
+        toast2("\u8BF7\u8F93\u5165\u6267\u7B14\u4EBA\u540D\u79F0", "warn");
+        els2.styleNameInput?.focus?.();
+        return null;
+      }
+      if (!style.examples || style.examples.length === 0) {
+        toast2("\u8BF7\u5148\u6DFB\u52A0\u793A\u8303\u6587\u4EF6", "warn");
+        return null;
+      }
+      if (style.examples.length < 2) {
+        const ok = confirmUnstableDraft("\u53EA\u6709 1 \u7BC7\u793A\u8303\u53EA\u80FD\u751F\u6210\u4E0D\u7A33\u5B9A\u8349\u6848\uFF0C\u5EFA\u8BAE\u81F3\u5C11 3-5 \u7BC7\u3002\u662F\u5426\u7EE7\u7EED\u751F\u6210\u8349\u6848\uFF1F");
+        if (!ok) return null;
+      }
+      const findings = scanPrivacyRisksInObject(
+        (style.examples || []).map((example) => ({ name: example.name, text: example.text })),
+        { path: "\u8BAD\u7EC3\u6837\u672C" }
+      );
+      if (!confirmPrivacyRiskNotice2("\u8BAD\u7EC3\u6837\u672C\u5C06\u53D1\u9001\u7ED9\u5DF2\u914D\u7F6E\u7684 AI \u63A5\u53E3\u7528\u4E8E\u751F\u6210\u6267\u7B14\u4EBA\u3002", findings)) {
+        toast2("\u5DF2\u53D6\u6D88\u751F\u6210\u6267\u7B14\u4EBA", "warn");
+        return null;
+      }
+      style.status = "building";
+      style.buildProgress = { message: "\u51C6\u5907\u6784\u5EFA\u6267\u7B14\u4EBA", progress: 8 };
+      style.lastBuildError = "";
+      style.lastBuildAt = now();
+      let saved;
+      try {
+        saved = commitSkillToState2(style);
+      } catch (error) {
+        toast2(error.message || "\u4FDD\u5B58\u6267\u7B14\u4EBA\u5931\u8D25", "error");
+        return null;
+      }
+      closeSkillBuilderModal2({ restoreFocus: false });
+      ui2.selectedSkillCardId = saved.id;
+      switchTab2("style");
+      const taskKey = `skill-build:${saved.id}`;
+      ui2.activeTasks = ui2.activeTasks || {};
+      if (ui2.activeTasks[taskKey]) {
+        toast2("\u8BE5\u6267\u7B14\u4EBA\u6B63\u5728\u751F\u6210\u4E2D", "warn");
+        return null;
+      }
+      const controller = createAbortController();
+      ui2.activeTasks[taskKey] = {
+        key: taskKey,
+        controller,
+        button: null,
+        oldHtml: "",
+        cancelToast: "\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6784\u5EFA"
+      };
+      const progress = createSkillCardProgress2(saved.id);
+      try {
+        const outputs = await skillBuilder2.buildSkillWithAiChain(saved, progress, { signal: controller.signal });
+        throwIfTaskAborted2(controller.signal);
+        const version = skillBuilder2.createSkillVersion(saved, outputs);
+        progress.update("\u6B63\u5728\u4FDD\u5B58\u6267\u7B14\u4EBA\u7248\u672C", 92);
+        const generatedRule = parseSkillJsonObject2(outputs.skillJson, saved);
+        const nextStyle = {
+          ...saved,
+          description: generatedRule.description || generatedRule.concise_instruction || saved.description || "",
+          analyses: outputs.analyses,
+          analysis: outputs.analysis,
+          aggregationData: outputs.aggregationData,
+          aggregation: outputs.aggregation,
+          qualityReport: outputs.qualityReport,
+          summary: outputs.markdown,
+          skillJson: outputs.skillJson,
+          status: "ready",
+          buildProgress: null,
+          lastBuildError: "",
+          lastBuildAt: now(),
+          lastTest: {
+            id: createId(),
+            createdAt: now(),
+            prompt: "AI \u81EA\u52A8\u751F\u6210\u7684\u6267\u7B14\u4EBA\u6D4B\u8BD5",
+            result: outputs.testDoc,
+            report: outputs.testReport
+          },
+          versions: [...saved.versions || [], version].slice(-30)
+        };
+        nextStyle.lastBuildResult = getSkillBuildResult2(nextStyle, version, outputs);
+        const committed = commitSkillToState2(nextStyle);
+        eventBus2.emit(EVENTS.RENDER_STYLE_EDITOR);
+        toast2(`\u5DF2\u751F\u6210 v${version.version} \u5E76\u4FDD\u5B58\u5230\uFF1A${getSkillLocation2(committed)}`);
+        return committed;
+      } catch (error) {
+        const isCanceled = isTaskAbortError2(error) || controller.signal?.aborted;
+        updateSkillBuildState2(saved.id, {
+          status: "failed",
+          buildProgress: null,
+          lastBuildError: isCanceled ? "\u7528\u6237\u53D6\u6D88\u4E86\u672C\u6B21\u751F\u6210" : friendlyAiErrorMessage3(error) || error.message || "\u751F\u6210\u5931\u8D25",
+          lastBuildAt: now()
+        });
+        toast2(isCanceled ? "\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6784\u5EFA" : friendlyAiErrorMessage3(error) || "\u6267\u7B14\u4EBA\u751F\u6210\u5931\u8D25", isCanceled ? "warn" : "error");
+        return null;
+      } finally {
+        if (ui2.activeTasks?.[taskKey]?.controller === controller) delete ui2.activeTasks[taskKey];
+      }
+    }
+    return {
+      importStyleExamples: importStyleExamples2,
+      importStyleDropFiles: importStyleDropFiles2,
+      importStyleExampleFiles,
+      summarizeStyle: summarizeStyle2
+    };
+  }
+
   // src/modules/skills/skillWorkbenchController.js
   function createSkillWorkbenchController(deps = {}) {
     const {
@@ -39023,6 +39242,34 @@ ${mention} ` : `${mention} `;
     updateSkillMarkdownSaveState,
     saveSkillMarkdownEdits
   });
+  var skillTrainingController = createSkillTrainingController({
+    ui,
+    els,
+    eventBus,
+    skillBuilder,
+    toast,
+    withProgress,
+    importSkillPackageFiles,
+    isSkillPackageFile,
+    confirmLargeImport,
+    confirmPrivacyRiskNotice,
+    confirmUnstableDraft: (message) => window.confirm(message),
+    syncEditingStyleFromInputs,
+    commitSkillToState,
+    parseSkillJsonObject,
+    renderStyleExamples,
+    renderSkillDetailExamples: () => skillRenderer.renderSkillDetailExamples(),
+    closeSkillBuilderModal,
+    switchTab,
+    createSkillCardProgress,
+    getSkillBuildResult,
+    updateSkillBuildState,
+    getSkillLocation,
+    getSkillTrainingLocation,
+    friendlyAiErrorMessage: friendlyAiErrorMessage2,
+    isTaskAbortError,
+    throwIfTaskAborted
+  });
   var skillBuilderModalController = createSkillBuilderModalController({
     state,
     ui,
@@ -39894,160 +40141,13 @@ ${mention} ` : `${mention} `;
     }
   }
   async function importStyleExamples(event) {
-    const files = Array.from(event.target.files || []);
-    await importStyleExampleFiles(files);
-    event.target.value = "";
+    return skillTrainingController.importStyleExamples(event);
   }
   async function importStyleDropFiles(files) {
-    const fileList = Array.from(files || []);
-    const skillPackages = fileList.filter(isSkillPackageFile);
-    const exampleFiles = fileList.filter((file) => !isSkillPackageFile(file));
-    if (skillPackages.length > 0) {
-      await importSkillPackageFiles(skillPackages);
-    }
-    if (exampleFiles.length > 0) {
-      await importStyleExampleFiles(exampleFiles);
-    }
-  }
-  async function importStyleExampleFiles(files) {
-    if (!files || files.length === 0) return;
-    const { accepted: importFiles, skipped: sizeSkipped } = await filterImportableFilesBySize(files, {
-      confirm: confirmLargeImport,
-      notify: toast
-    });
-    if (importFiles.length === 0) return;
-    let importedCount = 0;
-    const skippedFiles = [];
-    await withProgress(`\u6B63\u5728\u5BFC\u5165 ${importFiles.length} \u4E2A\u793A\u8303\u6587\u4EF6`, async (progress) => {
-      for (const [index, file] of importFiles.entries()) {
-        progress.update(`\u6B63\u5728\u8BFB\u53D6 ${file.name}`, Math.round(index / importFiles.length * 78) + 10);
-        if (!canImportFile(file.name)) {
-          skippedFiles.push(file.name);
-          continue;
-        }
-        let text = "";
-        try {
-          text = await readImportFileText(file);
-        } catch (error) {
-          skippedFiles.push(file.name);
-          console.warn("\u5BFC\u5165\u793A\u8303\u6587\u4EF6\u5931\u8D25", file.name, error);
-          continue;
-        }
-        ui.editingStyle.examples.push({
-          id: createId(),
-          name: file.name,
-          text,
-          addedAt: now()
-        });
-        importedCount += 1;
-      }
-      progress.update("\u6B63\u5728\u5237\u65B0\u793A\u8303\u5217\u8868", 92);
-    });
-    if (importedCount === 0 && skippedFiles.length > 0) {
-      toast(`\u672A\u6DFB\u52A0\u793A\u8303\uFF1A${buildUnsupportedFileMessage(skippedFiles[0])}`, "warn");
-      return;
-    }
-    renderStyleExamples();
-    skillRenderer.renderSkillDetailExamples();
-    const skippedCount = skippedFiles.length + sizeSkipped.length;
-    toast(`\u5DF2\u6DFB\u52A0 ${importedCount} \u4EFD\u793A\u8303\u5230\uFF1A${getSkillTrainingLocation(ui.editingStyle)}${skippedCount ? `\uFF0C\u5DF2\u8DF3\u8FC7 ${skippedCount} \u4E2A\u6682\u4E0D\u652F\u6301\u3001\u8FC7\u5927\u6216\u8BFB\u53D6\u5931\u8D25\u7684\u6587\u4EF6` : ""}`);
+    return skillTrainingController.importStyleDropFiles(files);
   }
   async function summarizeStyle() {
-    const style = syncEditingStyleFromInputs();
-    if (!style.name.trim()) {
-      toast("\u8BF7\u8F93\u5165\u6267\u7B14\u4EBA\u540D\u79F0", "warn");
-      els.styleNameInput.focus();
-      return;
-    }
-    if (!style.examples || style.examples.length === 0) {
-      toast("\u8BF7\u5148\u6DFB\u52A0\u793A\u8303\u6587\u4EF6", "warn");
-      return;
-    }
-    if (style.examples.length < 2) {
-      const ok = window.confirm("\u53EA\u6709 1 \u7BC7\u793A\u8303\u53EA\u80FD\u751F\u6210\u4E0D\u7A33\u5B9A\u8349\u6848\uFF0C\u5EFA\u8BAE\u81F3\u5C11 3-5 \u7BC7\u3002\u662F\u5426\u7EE7\u7EED\u751F\u6210\u8349\u6848\uFF1F");
-      if (!ok) return;
-    }
-    const findings = scanPrivacyRisksInObject(
-      (style.examples || []).map((example) => ({ name: example.name, text: example.text })),
-      { path: "\u8BAD\u7EC3\u6837\u672C" }
-    );
-    if (!confirmPrivacyRiskNotice("\u8BAD\u7EC3\u6837\u672C\u5C06\u53D1\u9001\u7ED9\u5DF2\u914D\u7F6E\u7684 AI \u63A5\u53E3\u7528\u4E8E\u751F\u6210\u6267\u7B14\u4EBA\u3002", findings)) {
-      toast("\u5DF2\u53D6\u6D88\u751F\u6210\u6267\u7B14\u4EBA", "warn");
-      return;
-    }
-    style.status = "building";
-    style.buildProgress = { message: "\u51C6\u5907\u6784\u5EFA\u6267\u7B14\u4EBA", progress: 8 };
-    style.lastBuildError = "";
-    style.lastBuildAt = now();
-    let saved;
-    try {
-      saved = commitSkillToState(style);
-    } catch (error) {
-      toast(error.message || "\u4FDD\u5B58\u6267\u7B14\u4EBA\u5931\u8D25", "error");
-      return;
-    }
-    closeSkillBuilderModal({ restoreFocus: false });
-    ui.selectedSkillCardId = saved.id;
-    switchTab("style");
-    const taskKey = `skill-build:${saved.id}`;
-    if (ui.activeTasks[taskKey]) {
-      toast("\u8BE5\u6267\u7B14\u4EBA\u6B63\u5728\u751F\u6210\u4E2D", "warn");
-      return;
-    }
-    const controller = new AbortController();
-    ui.activeTasks[taskKey] = {
-      key: taskKey,
-      controller,
-      button: null,
-      oldHtml: "",
-      cancelToast: "\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6784\u5EFA"
-    };
-    const progress = createSkillCardProgress(saved.id);
-    try {
-      const outputs = await skillBuilder.buildSkillWithAiChain(saved, progress, { signal: controller.signal });
-      throwIfTaskAborted(controller.signal);
-      const version = skillBuilder.createSkillVersion(saved, outputs);
-      progress.update("\u6B63\u5728\u4FDD\u5B58\u6267\u7B14\u4EBA\u7248\u672C", 92);
-      const generatedRule = parseSkillJsonObject(outputs.skillJson, saved);
-      const nextStyle = {
-        ...saved,
-        description: generatedRule.description || generatedRule.concise_instruction || saved.description || "",
-        analyses: outputs.analyses,
-        analysis: outputs.analysis,
-        aggregationData: outputs.aggregationData,
-        aggregation: outputs.aggregation,
-        qualityReport: outputs.qualityReport,
-        summary: outputs.markdown,
-        skillJson: outputs.skillJson,
-        status: "ready",
-        buildProgress: null,
-        lastBuildError: "",
-        lastBuildAt: now(),
-        lastTest: {
-          id: createId(),
-          createdAt: now(),
-          prompt: "AI \u81EA\u52A8\u751F\u6210\u7684\u6267\u7B14\u4EBA\u6D4B\u8BD5",
-          result: outputs.testDoc,
-          report: outputs.testReport
-        },
-        versions: [...saved.versions || [], version].slice(-30)
-      };
-      nextStyle.lastBuildResult = getSkillBuildResult(nextStyle, version, outputs);
-      const committed = commitSkillToState(nextStyle);
-      eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-      toast(`\u5DF2\u751F\u6210 v${version.version} \u5E76\u4FDD\u5B58\u5230\uFF1A${getSkillLocation(committed)}`);
-    } catch (error) {
-      const isCanceled = isTaskAbortError(error) || controller.signal.aborted;
-      updateSkillBuildState(saved.id, {
-        status: "failed",
-        buildProgress: null,
-        lastBuildError: isCanceled ? "\u7528\u6237\u53D6\u6D88\u4E86\u672C\u6B21\u751F\u6210" : friendlyAiErrorMessage2(error) || error.message || "\u751F\u6210\u5931\u8D25",
-        lastBuildAt: now()
-      });
-      toast(isCanceled ? "\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6784\u5EFA" : friendlyAiErrorMessage2(error) || "\u6267\u7B14\u4EBA\u751F\u6210\u5931\u8D25", isCanceled ? "warn" : "error");
-    } finally {
-      if (ui.activeTasks[taskKey]?.controller === controller) delete ui.activeTasks[taskKey];
-    }
+    return skillTrainingController.summarizeStyle();
   }
   function syncEditingStyleFromInputs() {
     return skillManager.syncEditingStyleFromInputs();

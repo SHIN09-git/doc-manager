@@ -55,6 +55,7 @@ import { createSkillManager } from "./src/modules/skills/skillManager.js";
 import { createSkillMentionController } from "./src/modules/skills/skillMentionController.js";
 import { createSkillPackageController } from "./src/modules/skills/skillPackageController.js";
 import { createSkillRenderer } from "./src/modules/skills/skillRenderer.js";
+import { createSkillTrainingController } from "./src/modules/skills/skillTrainingController.js";
 import { createSkillWorkbenchController } from "./src/modules/skills/skillWorkbenchController.js";
 import { createProgressController } from "./src/ui/components/progress.js";
 import { showToast } from "./src/ui/components/toast.js";
@@ -72,7 +73,6 @@ import {
 } from "./src/utils/helpers.js";
 import { buildUnsupportedFileMessage, canImportFile, readImportFileText } from "./src/utils/fileReaders.js";
 import { filterImportableFilesBySize } from "./src/utils/importGuards.js";
-import { scanPrivacyRisksInObject } from "./src/utils/privacyScan.js";
 
 const state = {};
 const ui = {
@@ -325,6 +325,34 @@ const skillDetailController = createSkillDetailController({
   flushSkillMarkdownEdits,
   updateSkillMarkdownSaveState,
   saveSkillMarkdownEdits,
+});
+const skillTrainingController = createSkillTrainingController({
+  ui,
+  els,
+  eventBus,
+  skillBuilder,
+  toast,
+  withProgress,
+  importSkillPackageFiles,
+  isSkillPackageFile,
+  confirmLargeImport,
+  confirmPrivacyRiskNotice,
+  confirmUnstableDraft: (message) => window.confirm(message),
+  syncEditingStyleFromInputs,
+  commitSkillToState,
+  parseSkillJsonObject,
+  renderStyleExamples,
+  renderSkillDetailExamples: () => skillRenderer.renderSkillDetailExamples(),
+  closeSkillBuilderModal,
+  switchTab,
+  createSkillCardProgress,
+  getSkillBuildResult,
+  updateSkillBuildState,
+  getSkillLocation,
+  getSkillTrainingLocation,
+  friendlyAiErrorMessage,
+  isTaskAbortError,
+  throwIfTaskAborted,
 });
 const skillBuilderModalController = createSkillBuilderModalController({
   state,
@@ -1367,169 +1395,19 @@ function savePptStyleAsSkill() {
 }
 
 async function importStyleExamples(event) {
-  const files = Array.from(event.target.files || []);
-  await importStyleExampleFiles(files);
-  event.target.value = "";
+  return skillTrainingController.importStyleExamples(event);
 }
 
 async function importStyleDropFiles(files) {
-  const fileList = Array.from(files || []);
-  const skillPackages = fileList.filter(isSkillPackageFile);
-  const exampleFiles = fileList.filter((file) => !isSkillPackageFile(file));
-  if (skillPackages.length > 0) {
-    await importSkillPackageFiles(skillPackages);
-  }
-  if (exampleFiles.length > 0) {
-    await importStyleExampleFiles(exampleFiles);
-  }
+  return skillTrainingController.importStyleDropFiles(files);
 }
 
 async function importStyleExampleFiles(files) {
-  if (!files || files.length === 0) return;
-  const { accepted: importFiles, skipped: sizeSkipped } = await filterImportableFilesBySize(files, {
-    confirm: confirmLargeImport,
-    notify: toast,
-  });
-  if (importFiles.length === 0) return;
-
-  let importedCount = 0;
-  const skippedFiles = [];
-  await withProgress(`正在导入 ${importFiles.length} 个示范文件`, async (progress) => {
-    for (const [index, file] of importFiles.entries()) {
-      progress.update(`正在读取 ${file.name}`, Math.round((index / importFiles.length) * 78) + 10);
-      if (!canImportFile(file.name)) {
-        skippedFiles.push(file.name);
-        continue;
-      }
-      let text = "";
-      try {
-        text = await readImportFileText(file);
-      } catch (error) {
-        skippedFiles.push(file.name);
-        console.warn("导入示范文件失败", file.name, error);
-        continue;
-      }
-      ui.editingStyle.examples.push({
-        id: createId(),
-        name: file.name,
-        text,
-        addedAt: now(),
-      });
-      importedCount += 1;
-    }
-    progress.update("正在刷新示范列表", 92);
-  });
-  if (importedCount === 0 && skippedFiles.length > 0) {
-    toast(`未添加示范：${buildUnsupportedFileMessage(skippedFiles[0])}`, "warn");
-    return;
-  }
-  renderStyleExamples();
-  skillRenderer.renderSkillDetailExamples();
-  const skippedCount = skippedFiles.length + sizeSkipped.length;
-  toast(`已添加 ${importedCount} 份示范到：${getSkillTrainingLocation(ui.editingStyle)}${skippedCount ? `，已跳过 ${skippedCount} 个暂不支持、过大或读取失败的文件` : ""}`);
+  return skillTrainingController.importStyleExampleFiles(files);
 }
 
 async function summarizeStyle() {
-  const style = syncEditingStyleFromInputs();
-  if (!style.name.trim()) {
-    toast("请输入执笔人名称", "warn");
-    els.styleNameInput.focus();
-    return;
-  }
-  if (!style.examples || style.examples.length === 0) {
-    toast("请先添加示范文件", "warn");
-    return;
-  }
-  if (style.examples.length < 2) {
-    const ok = window.confirm("只有 1 篇示范只能生成不稳定草案，建议至少 3-5 篇。是否继续生成草案？");
-    if (!ok) return;
-  }
-  const findings = scanPrivacyRisksInObject(
-    (style.examples || []).map((example) => ({ name: example.name, text: example.text })),
-    { path: "训练样本" },
-  );
-  if (!confirmPrivacyRiskNotice("训练样本将发送给已配置的 AI 接口用于生成执笔人。", findings)) {
-    toast("已取消生成执笔人", "warn");
-    return;
-  }
-
-  style.status = "building";
-  style.buildProgress = { message: "准备构建执笔人", progress: 8 };
-  style.lastBuildError = "";
-  style.lastBuildAt = now();
-
-  let saved;
-  try {
-    saved = commitSkillToState(style);
-  } catch (error) {
-    toast(error.message || "保存执笔人失败", "error");
-    return;
-  }
-
-  closeSkillBuilderModal({ restoreFocus: false });
-  ui.selectedSkillCardId = saved.id;
-  switchTab("style");
-  const taskKey = `skill-build:${saved.id}`;
-  if (ui.activeTasks[taskKey]) {
-    toast("该执笔人正在生成中", "warn");
-    return;
-  }
-
-  const controller = new AbortController();
-  ui.activeTasks[taskKey] = {
-    key: taskKey,
-    controller,
-    button: null,
-    oldHtml: "",
-    cancelToast: "已取消本次执笔人构建",
-  };
-  const progress = createSkillCardProgress(saved.id);
-
-  try {
-    const outputs = await skillBuilder.buildSkillWithAiChain(saved, progress, { signal: controller.signal });
-    throwIfTaskAborted(controller.signal);
-    const version = skillBuilder.createSkillVersion(saved, outputs);
-    progress.update("正在保存执笔人版本", 92);
-    const generatedRule = parseSkillJsonObject(outputs.skillJson, saved);
-    const nextStyle = {
-      ...saved,
-      description: generatedRule.description || generatedRule.concise_instruction || saved.description || "",
-      analyses: outputs.analyses,
-      analysis: outputs.analysis,
-      aggregationData: outputs.aggregationData,
-      aggregation: outputs.aggregation,
-      qualityReport: outputs.qualityReport,
-      summary: outputs.markdown,
-      skillJson: outputs.skillJson,
-      status: "ready",
-      buildProgress: null,
-      lastBuildError: "",
-      lastBuildAt: now(),
-      lastTest: {
-        id: createId(),
-        createdAt: now(),
-        prompt: "AI 自动生成的执笔人测试",
-        result: outputs.testDoc,
-        report: outputs.testReport,
-      },
-      versions: [...(saved.versions || []), version].slice(-30),
-    };
-    nextStyle.lastBuildResult = getSkillBuildResult(nextStyle, version, outputs);
-    const committed = commitSkillToState(nextStyle);
-    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-    toast(`已生成 v${version.version} 并保存到：${getSkillLocation(committed)}`);
-  } catch (error) {
-    const isCanceled = isTaskAbortError(error) || controller.signal.aborted;
-    updateSkillBuildState(saved.id, {
-      status: "failed",
-      buildProgress: null,
-      lastBuildError: isCanceled ? "用户取消了本次生成" : friendlyAiErrorMessage(error) || error.message || "生成失败",
-      lastBuildAt: now(),
-    });
-    toast(isCanceled ? "已取消本次执笔人构建" : friendlyAiErrorMessage(error) || "执笔人生成失败", isCanceled ? "warn" : "error");
-  } finally {
-    if (ui.activeTasks[taskKey]?.controller === controller) delete ui.activeTasks[taskKey];
-  }
+  return skillTrainingController.summarizeStyle();
 }
 
 function syncEditingStyleFromInputs() {
