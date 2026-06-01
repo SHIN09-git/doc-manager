@@ -24243,6 +24243,194 @@ ${formatListItems(items)}`;
     return typeof window !== "undefined" ? window : globalThis;
   }
 
+  // src/modules/cloud/cloudActionsController.js
+  function createCloudActionsController(deps = {}) {
+    const {
+      state: state2 = {},
+      els: els2 = {},
+      cloudRequest: cloudRequest2 = async () => ({}),
+      withLoading: withLoading2 = async (_button, _label, task) => task(),
+      persist: persist2 = () => {
+      },
+      renderCloudPanel: renderCloudPanel2 = () => {
+      },
+      renderCloudManualPaymentMethods = () => {
+      },
+      downloadBlob: downloadBlob2 = () => {
+      },
+      toast: toast2 = () => {
+      },
+      switchTab: switchTab2 = () => {
+      },
+      switchMainView: switchMainView2 = () => {
+      },
+      windowRef = globalThis.window,
+      dateProvider = () => /* @__PURE__ */ new Date()
+    } = deps;
+    let eventsBound = false;
+    function bindEvents2() {
+      if (eventsBound) return;
+      eventsBound = true;
+      els2.cloudManualOrderBtn?.addEventListener("click", cloudSubmitManualOrder);
+      els2.cloudManualPackageSelect?.addEventListener("change", renderCloudManualPaymentMethods);
+      els2.cloudManualPaymentMethodSelect?.addEventListener("change", renderCloudManualPaymentMethods);
+      els2.cloudExportDataBtn?.addEventListener("click", cloudExportMyData);
+      els2.cloudDeleteAccountBtn?.addEventListener("click", cloudDeleteAccount);
+      els2.cloudSendFeedbackBtn?.addEventListener("click", cloudSendFeedback);
+      windowRef?.addEventListener?.("hashchange", handleHashRoute);
+      handleHashRoute();
+    }
+    async function refreshCloudUsage(options = {}) {
+      if (!state2.cloud?.authenticated) return null;
+      const data = await cloudRequest2("/usage/current", { method: "GET" });
+      state2.cloud.usage = data.usage || null;
+      state2.cloud.limits = data.limits || null;
+      if (!options.silent) toast2("\u4E91\u7AEF\u7528\u91CF\u5DF2\u5237\u65B0");
+      return data;
+    }
+    async function refreshCloudBilling(options = {}) {
+      if (!state2.cloud?.authenticated) return null;
+      try {
+        const data = await cloudRequest2("/billing/summary", { method: "GET" });
+        state2.cloud.billing = data || null;
+        if (!options.silent) toast2("\u8D26\u5355\u4E0E\u5957\u9910\u5DF2\u5237\u65B0");
+        return state2.cloud.billing;
+      } catch (error) {
+        if (error.status === 403) {
+          try {
+            const data = await cloudRequest2("/billing/manual-orders", { method: "GET" });
+            state2.cloud.billing = {
+              organization: state2.cloud.activeOrganization || null,
+              checkout: { enabled: false, available_plans: [] },
+              manual_payment: data.manual_payment || {},
+              manual_orders: data.orders || [],
+              credits: data.credits || null,
+              credit_ledger: data.credit_ledger || []
+            };
+            return state2.cloud.billing;
+          } catch {
+            state2.cloud.billing = null;
+          }
+        }
+        state2.cloud.billing = null;
+        if (error.status !== 403 && !options.silent) {
+          toast2(`\u8D26\u5355\u4FE1\u606F\u8BFB\u53D6\u5931\u8D25\uFF1A${error.message}`, "warn");
+        }
+        return null;
+      }
+    }
+    async function cloudSubmitManualOrder() {
+      const packageId = els2.cloudManualPackageSelect?.value || "";
+      const paymentChannel = els2.cloudManualPaymentMethodSelect?.value || "wechat";
+      const payerNote = (els2.cloudManualOrderNoteInput?.value || "").trim();
+      const proofText = (els2.cloudManualProofInput?.value || "").trim();
+      if (!packageId) {
+        toast2("\u8BF7\u9009\u62E9\u5145\u503C\u5957\u9910", "warn");
+        return null;
+      }
+      if (!payerNote && !proofText) {
+        toast2("\u8BF7\u586B\u5199\u4ED8\u6B3E\u5907\u6CE8\u6216\u51ED\u8BC1\u8BF4\u660E\uFF0C\u65B9\u4FBF\u7BA1\u7406\u5458\u6838\u5BF9", "warn");
+        els2.cloudManualOrderNoteInput?.focus?.();
+        return null;
+      }
+      return withLoading2(els2.cloudManualOrderBtn, "\u63D0\u4EA4\u4E2D", async () => {
+        const data = await cloudRequest2("/billing/manual-orders", {
+          method: "POST",
+          body: JSON.stringify({
+            package_id: packageId,
+            payment_channel: paymentChannel,
+            payer_note: payerNote,
+            proof_text: proofText
+          })
+        });
+        if (els2.cloudManualOrderNoteInput) els2.cloudManualOrderNoteInput.value = "";
+        if (els2.cloudManualProofInput) els2.cloudManualProofInput.value = "";
+        await refreshCloudBilling({ silent: true });
+        renderCloudPanel2();
+        const orderId = data.order?.id ? `\uFF08\u8BA2\u5355\u53F7\uFF1A${data.order.id}\uFF09` : "";
+        toast2(`\u5145\u503C\u8BA2\u5355\u5DF2\u63D0\u4EA4\uFF1A${data.order?.title || packageId}${orderId}`);
+        return data;
+      });
+    }
+    async function cloudExportMyData() {
+      return withLoading2(els2.cloudExportDataBtn, "\u5BFC\u51FA\u4E2D", async () => {
+        const data = await cloudRequest2("/me/export", { method: "GET" });
+        const date = dateProvider().toISOString().slice(0, 10);
+        downloadBlob2(`mowen-cloud-export-${date}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
+        toast2("\u6211\u7684\u4E91\u7AEF\u6570\u636E\u5DF2\u5BFC\u51FA");
+        return data;
+      });
+    }
+    async function cloudDeleteAccount() {
+      if (!windowRef?.confirm?.("\u786E\u5B9A\u5220\u9664\u4E91\u7AEF\u8D26\u53F7\u5417\uFF1F\u8FD9\u4F1A\u9000\u51FA\u4E91\u7AEF\u5E76\u505C\u7528\u5F53\u524D\u8D26\u53F7\u3002")) return false;
+      return withLoading2(els2.cloudDeleteAccountBtn, "\u5220\u9664\u4E2D", async () => {
+        await cloudRequest2("/me", { method: "DELETE" });
+        state2.cloud = {
+          ...state2.cloud || {},
+          authenticated: false,
+          user: null,
+          activeOrganization: null,
+          membership: null,
+          members: [],
+          invitations: [],
+          usage: null,
+          limits: null,
+          billing: null
+        };
+        persist2();
+        renderCloudPanel2();
+        toast2("\u4E91\u7AEF\u8D26\u53F7\u5DF2\u5220\u9664\uFF0C\u672C\u5730\u6570\u636E\u4ECD\u4FDD\u7559", "warn");
+        return true;
+      });
+    }
+    function openStandaloneAdminPage() {
+      if (!["owner", "admin"].includes(state2.cloud?.membership?.role || "")) {
+        toast2("\u53EA\u6709\u7BA1\u7406\u5458\u53EF\u4EE5\u67E5\u770B\u7BA1\u7406\u540E\u53F0", "warn");
+        switchTab2("cloud");
+        return false;
+      }
+      if (windowRef?.location) windowRef.location.href = "./admin.html";
+      return true;
+    }
+    function handleHashRoute() {
+      if (windowRef?.location?.hash === "#admin") {
+        return openStandaloneAdminPage();
+      }
+      if (windowRef?.location?.hash === "#cloud") {
+        switchMainView2("cloud");
+        return true;
+      }
+      return false;
+    }
+    async function cloudSendFeedback() {
+      const message = els2.cloudFeedbackInput?.value.trim() || "";
+      if (!message) {
+        toast2("\u8BF7\u5148\u586B\u5199\u53CD\u9988\u5185\u5BB9", "warn");
+        return null;
+      }
+      return withLoading2(els2.cloudSendFeedbackBtn, "\u63D0\u4EA4\u4E2D", async () => {
+        const data = await cloudRequest2("/feedback", {
+          method: "POST",
+          body: JSON.stringify({ message, source: "cloud_panel" })
+        });
+        if (els2.cloudFeedbackInput) els2.cloudFeedbackInput.value = "";
+        toast2("\u53CD\u9988\u5DF2\u63D0\u4EA4");
+        return data;
+      });
+    }
+    return {
+      bindEvents: bindEvents2,
+      refreshCloudUsage,
+      refreshCloudBilling,
+      cloudSubmitManualOrder,
+      cloudExportMyData,
+      cloudDeleteAccount,
+      openStandaloneAdminPage,
+      handleHashRoute,
+      cloudSendFeedback
+    };
+  }
+
   // src/modules/cloud/cloudApiClient.js
   var LOCAL_CLOUD_API_BASE_URL = "http://127.0.0.1:8787/api";
   function isLocalDevelopmentHost(hostname) {
@@ -24622,9 +24810,9 @@ ${formatListItems(items)}`;
       if (els2.cloudManualOrderBtn) els2.cloudManualOrderBtn.disabled = !authenticated;
       if (els2.cloudManualOrderNoteInput) els2.cloudManualOrderNoteInput.disabled = !authenticated;
       if (els2.cloudManualProofInput) els2.cloudManualProofInput.disabled = !authenticated;
-      renderCloudManualPaymentMethods2();
+      renderCloudManualPaymentMethods();
     }
-    function renderCloudManualPaymentMethods2() {
+    function renderCloudManualPaymentMethods() {
       if (!els2.cloudManualPaymentMethods) return;
       const billing = state2.cloud?.billing || null;
       const manual = billing?.manual_payment || {};
@@ -24653,7 +24841,7 @@ ${formatListItems(items)}`;
       renderFeatureMap,
       renderCloudBilling,
       renderCloudManualRecharge,
-      renderCloudManualPaymentMethods: renderCloudManualPaymentMethods2
+      renderCloudManualPaymentMethods
     };
   }
   function getManualPackages(manual = {}) {
@@ -24676,9 +24864,9 @@ ${formatListItems(items)}`;
       els: els2 = {},
       normalizeCloudBaseUrl: normalizeCloudBaseUrl3 = (value) => String(value || "").trim(),
       cloudRequest: cloudRequest2 = async () => ({}),
-      refreshCloudUsage: refreshCloudUsage2 = async () => {
+      refreshCloudUsage = async () => {
       },
-      refreshCloudBilling: refreshCloudBilling2 = async () => {
+      refreshCloudBilling = async () => {
       },
       withLoading: withLoading2 = async (_button, _label, task) => task(),
       persist: persist2 = () => {
@@ -24734,8 +24922,8 @@ ${formatListItems(items)}`;
           const data = await cloudRequest2("/me", { method: "GET" });
           applyCloudSession(data);
           if (state2.cloud.authenticated) {
-            await refreshCloudUsage2({ silent: true });
-            await refreshCloudBilling2({ silent: true });
+            await refreshCloudUsage({ silent: true });
+            await refreshCloudBilling({ silent: true });
           }
           persist2();
           renderCloudPanel2();
@@ -24767,8 +24955,8 @@ ${formatListItems(items)}`;
         if (data.email_verification_token && els2.cloudEmailTokenInput) {
           els2.cloudEmailTokenInput.value = data.email_verification_token;
         }
-        await refreshCloudUsage2({ silent: true });
-        await refreshCloudBilling2({ silent: true });
+        await refreshCloudUsage({ silent: true });
+        await refreshCloudBilling({ silent: true });
         persist2();
         renderCloudPanel2();
         toast2(`\u5DF2\u767B\u5F55\u4E91\u7AEF\uFF1A${getCloudSettingsLocation2()}`);
@@ -24789,8 +24977,8 @@ ${formatListItems(items)}`;
           })
         });
         applyCloudSession(data);
-        await refreshCloudUsage2({ silent: true });
-        await refreshCloudBilling2({ silent: true });
+        await refreshCloudUsage({ silent: true });
+        await refreshCloudBilling({ silent: true });
         persist2();
         renderCloudPanel2();
         toast2(`\u4E91\u7AEF\u8D26\u53F7\u5DF2\u521B\u5EFA\uFF1A${getCloudSettingsLocation2()}`);
@@ -37567,13 +37755,26 @@ ${mention} ` : `${mention} `;
     els,
     defaultCloudApiBaseUrl: DEFAULT_CLOUD_API_BASE_URL
   });
+  var cloudActionsController = createCloudActionsController({
+    state,
+    els,
+    cloudRequest,
+    withLoading,
+    persist,
+    renderCloudPanel,
+    renderCloudManualPaymentMethods: () => cloudPanelRenderer.renderCloudManualPaymentMethods(),
+    downloadBlob,
+    toast,
+    switchTab,
+    switchMainView
+  });
   var cloudSessionController = createCloudSessionController({
     state,
     els,
     normalizeCloudBaseUrl: normalizeCloudBaseUrl2,
     cloudRequest,
-    refreshCloudUsage,
-    refreshCloudBilling,
+    refreshCloudUsage: cloudActionsController.refreshCloudUsage,
+    refreshCloudBilling: cloudActionsController.refreshCloudBilling,
     withLoading,
     persist,
     renderCloudPanel,
@@ -38329,19 +38530,12 @@ ${mention} ` : `${mention} `;
       button.addEventListener("click", () => switchSkillDetailTab(button.dataset.detailTab));
     });
     apiSettingsController.bindEvents();
+    cloudActionsController.bindEvents();
     cloudSessionController.bindEvents();
     cloudSyncController.bindEvents();
     els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
     els.pptBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
-    els.cloudManualOrderBtn?.addEventListener("click", cloudSubmitManualOrder);
-    els.cloudManualPackageSelect?.addEventListener("change", renderCloudManualPaymentMethods);
-    els.cloudManualPaymentMethodSelect?.addEventListener("change", renderCloudManualPaymentMethods);
     els.featureMapGrid?.addEventListener("click", handleFeatureMapAction);
-    els.cloudExportDataBtn.addEventListener("click", cloudExportMyData);
-    els.cloudDeleteAccountBtn.addEventListener("click", cloudDeleteAccount);
-    els.cloudSendFeedbackBtn.addEventListener("click", cloudSendFeedback);
-    window.addEventListener("hashchange", handleHashRoute);
-    handleHashRoute();
   }
   function setupFileDrop(target, handler) {
     if (!target) return;
@@ -38527,142 +38721,14 @@ ${mention} ` : `${mention} `;
       return;
     }
     if (action === "admin") {
-      openStandaloneAdminPage();
+      cloudActionsController.openStandaloneAdminPage();
     }
-  }
-  function renderCloudManualPaymentMethods() {
-    cloudPanelRenderer.renderCloudManualPaymentMethods();
   }
   function normalizeCloudBaseUrl2(value) {
     return cloudApiClient.normalizeBaseUrl(value);
   }
   async function cloudRequest(path, options = {}) {
     return cloudApiClient.request(path, options);
-  }
-  async function refreshCloudUsage(options = {}) {
-    if (!state.cloud?.authenticated) return;
-    const data = await cloudRequest("/usage/current", { method: "GET" });
-    state.cloud.usage = data.usage || null;
-    state.cloud.limits = data.limits || null;
-    if (!options.silent) toast("\u4E91\u7AEF\u7528\u91CF\u5DF2\u5237\u65B0");
-  }
-  async function refreshCloudBilling(options = {}) {
-    if (!state.cloud?.authenticated) return;
-    try {
-      const data = await cloudRequest("/billing/summary", { method: "GET" });
-      state.cloud.billing = data || null;
-      if (!options.silent) toast("\u8D26\u5355\u4E0E\u5957\u9910\u5DF2\u5237\u65B0");
-    } catch (error) {
-      if (error.status === 403) {
-        try {
-          const data = await cloudRequest("/billing/manual-orders", { method: "GET" });
-          state.cloud.billing = {
-            organization: state.cloud.activeOrganization || null,
-            checkout: { enabled: false, available_plans: [] },
-            manual_payment: data.manual_payment || {},
-            manual_orders: data.orders || [],
-            credits: data.credits || null,
-            credit_ledger: data.credit_ledger || []
-          };
-          return;
-        } catch {
-          state.cloud.billing = null;
-        }
-      }
-      state.cloud.billing = null;
-      if (error.status !== 403 && !options.silent) {
-        toast(`\u8D26\u5355\u4FE1\u606F\u8BFB\u53D6\u5931\u8D25\uFF1A${error.message}`, "warn");
-      }
-    }
-  }
-  async function cloudSubmitManualOrder() {
-    const packageId = els.cloudManualPackageSelect?.value || "";
-    const paymentChannel = els.cloudManualPaymentMethodSelect?.value || "wechat";
-    const payerNote = (els.cloudManualOrderNoteInput?.value || "").trim();
-    const proofText = (els.cloudManualProofInput?.value || "").trim();
-    if (!packageId) {
-      toast("\u8BF7\u9009\u62E9\u5145\u503C\u5957\u9910", "warn");
-      return;
-    }
-    if (!payerNote && !proofText) {
-      toast("\u8BF7\u586B\u5199\u4ED8\u6B3E\u5907\u6CE8\u6216\u51ED\u8BC1\u8BF4\u660E\uFF0C\u65B9\u4FBF\u7BA1\u7406\u5458\u6838\u5BF9", "warn");
-      els.cloudManualOrderNoteInput?.focus();
-      return;
-    }
-    await withLoading(els.cloudManualOrderBtn, "\u63D0\u4EA4\u4E2D", async () => {
-      const data = await cloudRequest("/billing/manual-orders", {
-        method: "POST",
-        body: JSON.stringify({
-          package_id: packageId,
-          payment_channel: paymentChannel,
-          payer_note: payerNote,
-          proof_text: proofText
-        })
-      });
-      if (els.cloudManualOrderNoteInput) els.cloudManualOrderNoteInput.value = "";
-      if (els.cloudManualProofInput) els.cloudManualProofInput.value = "";
-      await refreshCloudBilling({ silent: true });
-      renderCloudPanel();
-      const orderId = data.order?.id ? `\uFF08\u8BA2\u5355\u53F7\uFF1A${data.order.id}\uFF09` : "";
-      toast(`\u5145\u503C\u8BA2\u5355\u5DF2\u63D0\u4EA4\uFF1A${data.order?.title || packageId}${orderId}`);
-    });
-  }
-  async function cloudExportMyData() {
-    await withLoading(els.cloudExportDataBtn, "\u5BFC\u51FA\u4E2D", async () => {
-      const data = await cloudRequest("/me/export", { method: "GET" });
-      downloadBlob(`mowen-cloud-export-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
-      toast("\u6211\u7684\u4E91\u7AEF\u6570\u636E\u5DF2\u5BFC\u51FA");
-    });
-  }
-  async function cloudDeleteAccount() {
-    if (!window.confirm("\u786E\u5B9A\u5220\u9664\u4E91\u7AEF\u8D26\u53F7\u5417\uFF1F\u8FD9\u4F1A\u9000\u51FA\u4E91\u7AEF\u5E76\u505C\u7528\u5F53\u524D\u8D26\u53F7\u3002")) return;
-    await withLoading(els.cloudDeleteAccountBtn, "\u5220\u9664\u4E2D", async () => {
-      await cloudRequest("/me", { method: "DELETE" });
-      state.cloud = {
-        ...state.cloud || {},
-        authenticated: false,
-        user: null,
-        activeOrganization: null,
-        membership: null,
-        members: [],
-        invitations: [],
-        usage: null,
-        limits: null
-      };
-      persist();
-      renderCloudPanel();
-      toast("\u4E91\u7AEF\u8D26\u53F7\u5DF2\u5220\u9664\uFF0C\u672C\u5730\u6570\u636E\u4ECD\u4FDD\u7559", "warn");
-    });
-  }
-  function openStandaloneAdminPage() {
-    if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
-      toast("\u53EA\u6709\u7BA1\u7406\u5458\u53EF\u4EE5\u67E5\u770B\u7BA1\u7406\u540E\u53F0", "warn");
-      switchTab("cloud");
-      return;
-    }
-    window.location.href = "./admin.html";
-  }
-  function handleHashRoute() {
-    if (window.location.hash === "#admin") {
-      openStandaloneAdminPage();
-    } else if (window.location.hash === "#cloud") {
-      switchMainView("cloud");
-    }
-  }
-  async function cloudSendFeedback() {
-    const message = els.cloudFeedbackInput.value.trim();
-    if (!message) {
-      toast("\u8BF7\u5148\u586B\u5199\u53CD\u9988\u5185\u5BB9", "warn");
-      return;
-    }
-    await withLoading(els.cloudSendFeedbackBtn, "\u63D0\u4EA4\u4E2D", async () => {
-      await cloudRequest("/feedback", {
-        method: "POST",
-        body: JSON.stringify({ message, source: "cloud_panel" })
-      });
-      els.cloudFeedbackInput.value = "";
-      toast("\u53CD\u9988\u5DF2\u63D0\u4EA4");
-    });
   }
   function getCloudSettingsLocation() {
     return `${normalizeCloudBaseUrl2(state.cloud?.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL)} / \u5F53\u524D\u5DE5\u4F5C\u533A`;

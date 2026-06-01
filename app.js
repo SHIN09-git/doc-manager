@@ -18,6 +18,7 @@ import {
 } from "./src/core/storageBootstrap.js";
 import { EVENTS, eventBus } from "./src/core/eventBus.js";
 import { createAiClient } from "./src/modules/ai/aiClient.js";
+import { createCloudActionsController } from "./src/modules/cloud/cloudActionsController.js";
 import { createCloudApiClient, getDefaultCloudApiBaseUrl } from "./src/modules/cloud/cloudApiClient.js";
 import { createCloudPanelRenderer } from "./src/modules/cloud/cloudPanelRenderer.js";
 import { createCloudSessionController } from "./src/modules/cloud/cloudSessionController.js";
@@ -145,13 +146,26 @@ const cloudPanelRenderer = createCloudPanelRenderer({
   els,
   defaultCloudApiBaseUrl: DEFAULT_CLOUD_API_BASE_URL,
 });
+const cloudActionsController = createCloudActionsController({
+  state,
+  els,
+  cloudRequest,
+  withLoading,
+  persist,
+  renderCloudPanel,
+  renderCloudManualPaymentMethods: () => cloudPanelRenderer.renderCloudManualPaymentMethods(),
+  downloadBlob,
+  toast,
+  switchTab,
+  switchMainView,
+});
 const cloudSessionController = createCloudSessionController({
   state,
   els,
   normalizeCloudBaseUrl,
   cloudRequest,
-  refreshCloudUsage,
-  refreshCloudBilling,
+  refreshCloudUsage: cloudActionsController.refreshCloudUsage,
+  refreshCloudBilling: cloudActionsController.refreshCloudBilling,
   withLoading,
   persist,
   renderCloudPanel,
@@ -937,19 +951,12 @@ function bindEvents() {
   });
 
   apiSettingsController.bindEvents();
+  cloudActionsController.bindEvents();
   cloudSessionController.bindEvents();
   cloudSyncController.bindEvents();
   els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
   els.pptBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
-  els.cloudManualOrderBtn?.addEventListener("click", cloudSubmitManualOrder);
-  els.cloudManualPackageSelect?.addEventListener("change", renderCloudManualPaymentMethods);
-  els.cloudManualPaymentMethodSelect?.addEventListener("change", renderCloudManualPaymentMethods);
   els.featureMapGrid?.addEventListener("click", handleFeatureMapAction);
-  els.cloudExportDataBtn.addEventListener("click", cloudExportMyData);
-  els.cloudDeleteAccountBtn.addEventListener("click", cloudDeleteAccount);
-  els.cloudSendFeedbackBtn.addEventListener("click", cloudSendFeedback);
-  window.addEventListener("hashchange", handleHashRoute);
-  handleHashRoute();
 }
 
 function setupFileDrop(target, handler) {
@@ -1153,12 +1160,8 @@ function activateFeature(action) {
     return;
   }
   if (action === "admin") {
-    openStandaloneAdminPage();
+    cloudActionsController.openStandaloneAdminPage();
   }
-}
-
-function renderCloudManualPaymentMethods() {
-  cloudPanelRenderer.renderCloudManualPaymentMethods();
 }
 
 function normalizeCloudBaseUrl(value) {
@@ -1177,138 +1180,6 @@ function debounce(fn, delay = 250) {
   };
 }
 
-async function refreshCloudUsage(options = {}) {
-  if (!state.cloud?.authenticated) return;
-  const data = await cloudRequest("/usage/current", { method: "GET" });
-  state.cloud.usage = data.usage || null;
-  state.cloud.limits = data.limits || null;
-  if (!options.silent) toast("云端用量已刷新");
-}
-
-async function refreshCloudBilling(options = {}) {
-  if (!state.cloud?.authenticated) return;
-  try {
-    const data = await cloudRequest("/billing/summary", { method: "GET" });
-    state.cloud.billing = data || null;
-    if (!options.silent) toast("账单与套餐已刷新");
-  } catch (error) {
-    if (error.status === 403) {
-      try {
-        const data = await cloudRequest("/billing/manual-orders", { method: "GET" });
-        state.cloud.billing = {
-          organization: state.cloud.activeOrganization || null,
-          checkout: { enabled: false, available_plans: [] },
-          manual_payment: data.manual_payment || {},
-          manual_orders: data.orders || [],
-          credits: data.credits || null,
-          credit_ledger: data.credit_ledger || [],
-        };
-        return;
-      } catch {
-        state.cloud.billing = null;
-      }
-    }
-    state.cloud.billing = null;
-    if (error.status !== 403 && !options.silent) {
-      toast(`账单信息读取失败：${error.message}`, "warn");
-    }
-  }
-}
-
-async function cloudSubmitManualOrder() {
-  const packageId = els.cloudManualPackageSelect?.value || "";
-  const paymentChannel = els.cloudManualPaymentMethodSelect?.value || "wechat";
-  const payerNote = (els.cloudManualOrderNoteInput?.value || "").trim();
-  const proofText = (els.cloudManualProofInput?.value || "").trim();
-  if (!packageId) {
-    toast("请选择充值套餐", "warn");
-    return;
-  }
-  if (!payerNote && !proofText) {
-    toast("请填写付款备注或凭证说明，方便管理员核对", "warn");
-    els.cloudManualOrderNoteInput?.focus();
-    return;
-  }
-  await withLoading(els.cloudManualOrderBtn, "提交中", async () => {
-    const data = await cloudRequest("/billing/manual-orders", {
-      method: "POST",
-      body: JSON.stringify({
-        package_id: packageId,
-        payment_channel: paymentChannel,
-        payer_note: payerNote,
-        proof_text: proofText,
-      }),
-    });
-    if (els.cloudManualOrderNoteInput) els.cloudManualOrderNoteInput.value = "";
-    if (els.cloudManualProofInput) els.cloudManualProofInput.value = "";
-    await refreshCloudBilling({ silent: true });
-    renderCloudPanel();
-    const orderId = data.order?.id ? `（订单号：${data.order.id}）` : "";
-    toast(`充值订单已提交：${data.order?.title || packageId}${orderId}`);
-  });
-}
-
-async function cloudExportMyData() {
-  await withLoading(els.cloudExportDataBtn, "导出中", async () => {
-    const data = await cloudRequest("/me/export", { method: "GET" });
-    downloadBlob(`mowen-cloud-export-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
-    toast("我的云端数据已导出");
-  });
-}
-
-async function cloudDeleteAccount() {
-  if (!window.confirm("确定删除云端账号吗？这会退出云端并停用当前账号。")) return;
-  await withLoading(els.cloudDeleteAccountBtn, "删除中", async () => {
-    await cloudRequest("/me", { method: "DELETE" });
-    state.cloud = {
-      ...(state.cloud || {}),
-      authenticated: false,
-      user: null,
-      activeOrganization: null,
-      membership: null,
-      members: [],
-      invitations: [],
-      usage: null,
-      limits: null,
-    };
-    persist();
-    renderCloudPanel();
-    toast("云端账号已删除，本地数据仍保留", "warn");
-  });
-}
-
-function openStandaloneAdminPage() {
-  if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
-    toast("只有管理员可以查看管理后台", "warn");
-    switchTab("cloud");
-    return;
-  }
-  window.location.href = "./admin.html";
-}
-
-function handleHashRoute() {
-  if (window.location.hash === "#admin") {
-    openStandaloneAdminPage();
-  } else if (window.location.hash === "#cloud") {
-    switchMainView("cloud");
-  }
-}
-
-async function cloudSendFeedback() {
-  const message = els.cloudFeedbackInput.value.trim();
-  if (!message) {
-    toast("请先填写反馈内容", "warn");
-    return;
-  }
-  await withLoading(els.cloudSendFeedbackBtn, "提交中", async () => {
-    await cloudRequest("/feedback", {
-      method: "POST",
-      body: JSON.stringify({ message, source: "cloud_panel" }),
-    });
-    els.cloudFeedbackInput.value = "";
-    toast("反馈已提交");
-  });
-}
 
 function getCloudSettingsLocation() {
   return `${normalizeCloudBaseUrl(state.cloud?.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL)} / 当前工作区`;
