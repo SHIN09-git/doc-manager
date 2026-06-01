@@ -23,7 +23,7 @@ import { createCloudApiClient, getDefaultCloudApiBaseUrl } from "./src/modules/c
 import { createCloudPanelRenderer } from "./src/modules/cloud/cloudPanelRenderer.js";
 import { createCloudSessionController } from "./src/modules/cloud/cloudSessionController.js";
 import { createCloudSyncController } from "./src/modules/cloud/cloudSyncController.js";
-import { getFeatureByAction } from "./src/modules/product/featureCatalog.js";
+import { createFeatureActionController } from "./src/modules/product/featureActionController.js";
 import { createDocumentEditor } from "./src/modules/documents/documentEditor.js";
 import { createDocumentManager } from "./src/modules/documents/documentManager.js";
 import { createDocumentPanelController } from "./src/modules/documents/documentPanelController.js";
@@ -189,6 +189,12 @@ const cloudSyncController = createCloudSyncController({
   now,
   getCloudDocumentLocation,
   getCloudWriterLocation,
+});
+const featureActionController = createFeatureActionController({
+  els,
+  switchMainView,
+  switchTab,
+  openStandaloneAdminPage: () => cloudActionsController.openStandaloneAdminPage(),
 });
 const layoutController = createLayoutController({ els, ui });
 const folderManager = createFolderManager({
@@ -954,9 +960,9 @@ function bindEvents() {
   cloudActionsController.bindEvents();
   cloudSessionController.bindEvents();
   cloudSyncController.bindEvents();
+  featureActionController.bindEvents();
   els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
   els.pptBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
-  els.featureMapGrid?.addEventListener("click", handleFeatureMapAction);
 }
 
 function setupFileDrop(target, handler) {
@@ -1104,64 +1110,6 @@ function renderEditor() {
 
 function renderCloudPanel() {
   cloudPanelRenderer.renderCloudPanel();
-}
-
-function handleFeatureMapAction(event) {
-  const button = event.target.closest("[data-feature-action]");
-  if (!button) return;
-  const feature = getFeatureByAction(button.dataset.featureAction);
-  if (!feature) return;
-  activateFeature(feature.action);
-}
-
-function activateFeature(action) {
-  const focusLater = (element) => window.setTimeout(() => element?.focus?.({ preventScroll: false }), 0);
-  if (action === "documents") {
-    switchMainView("editor");
-    focusLater(els.searchInput);
-    return;
-  }
-  if (action === "editor") {
-    switchMainView("editor");
-    focusLater(els.contentEditor);
-    return;
-  }
-  if (action === "writer-use") {
-    switchMainView("editor");
-    switchTab("style");
-    focusLater(els.styleList || els.newStyleBtn);
-    return;
-  }
-  if (action === "writer-build") {
-    switchMainView("editor");
-    switchTab("style");
-    els.newStyleBtn?.click?.();
-    return;
-  }
-  if (action === "draft") {
-    switchMainView("editor");
-    switchTab("generate");
-    focusLater(els.generatePrompt);
-    return;
-  }
-  if (action === "ppt") {
-    switchMainView("ppt");
-    focusLater(els.pptPromptInput);
-    return;
-  }
-  if (action === "cloud-sync") {
-    switchMainView("cloud");
-    focusLater(els.cloudSaveDocBtn);
-    return;
-  }
-  if (action === "billing") {
-    switchMainView("cloud");
-    focusLater(els.cloudManualPackageSelect);
-    return;
-  }
-  if (action === "admin") {
-    cloudActionsController.openStandaloneAdminPage();
-  }
 }
 
 function normalizeCloudBaseUrl(value) {

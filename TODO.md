@@ -9,6 +9,8 @@
 - [x] 从 `app.js` 拆出 `cloudActionsController`，集中管理云端用量/账单刷新、人工充值订单、我的数据导出、账号删除、云端反馈和后台 hash 路由。
 - [x] 新增云端用户操作控制器单元测试，覆盖人工充值校验与提交、账单 403 兜底、数据导出、账号删除清理、后台路由守卫和反馈提交。
 - [x] 修复删除云端账号后旧账单摘要未清空的问题，避免退出云端后残留上一次的套餐/额度信息。
+- [x] 从 `app.js` 拆出 `featureActionController`，集中管理功能地图入口跳转、焦点落点和管理员后台入口委托。
+- [x] 新增功能地图入口动作单元测试，覆盖文档、编辑、执笔人、起草、PPT、云端同步、账单和后台入口。
 - [x] 从 `app.js` 拆出 `cloudApiClient`，集中管理云端 API 默认地址推导、地址归一化、组织请求头、`credentials: include`、JSON 响应解析和错误负载。
 - [x] 修复部署站点上旧的本地云端地址带多个尾随斜杠时不会自动替换为当前站点 `/api` 的问题。
 - [x] 新增云端 API 客户端单元测试，覆盖本地/部署地址推导、旧本地地址替换、请求头、服务端错误和网络失败提示。
@@ -82,7 +84,7 @@
 - [x] `ARCHITECTURE.md` 增补云端账单边界，明确人工充值、额度账户、流水、审计和前后台展示的模块归属。
 - [x] 新增前后端单元测试覆盖账单格式化和额度流水公开过滤。
 
-后续结构优化建议：`app.js` 的云端 API、会话、同步、用户操作和面板渲染已拆为独立模块，下一步可继续把功能地图动作和全局路由拆成小控制器；后端侧再把 `server/src/app.js` 中的 billing route 编排拆为 `server/src/billing/manualPaymentService.js`。
+后续结构优化建议：`app.js` 的云端 API、会话、同步、用户操作、面板渲染和功能地图入口动作已拆为独立模块，下一步可继续把主视图路由拆成小控制器；后端侧再把 `server/src/app.js` 中的 billing route 编排拆为 `server/src/billing/manualPaymentService.js`。
 
 ## 2026-05-29 阶段 C 人工确认版充值完善记录
 
@@ -348,7 +350,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：178 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：184 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
 
 ## 已完成
 
@@ -428,6 +430,7 @@
 - [x] 拆出 `cloudSessionController`
 - [x] 拆出 `cloudSyncController`
 - [x] 拆出 `cloudActionsController`
+- [x] 拆出 `featureActionController`
 
 目标：让 `app.js` 只负责装配，不再承载大量业务细节。
 

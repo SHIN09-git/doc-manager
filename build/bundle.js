@@ -25453,6 +25453,93 @@ ${formatListItems(items)}`;
     };
   }
 
+  // src/modules/product/featureActionController.js
+  function createFeatureActionController(deps = {}) {
+    const {
+      els: els2 = {},
+      switchMainView: switchMainView2 = () => {
+      },
+      switchTab: switchTab2 = () => {
+      },
+      openStandaloneAdminPage = () => {
+      },
+      windowRef = globalThis.window
+    } = deps;
+    let eventsBound = false;
+    function bindEvents2() {
+      if (eventsBound) return;
+      eventsBound = true;
+      els2.featureMapGrid?.addEventListener("click", handleFeatureMapAction);
+    }
+    function handleFeatureMapAction(event) {
+      const button = event.target?.closest?.("[data-feature-action]");
+      if (!button) return false;
+      const feature = getFeatureByAction(button.dataset?.featureAction);
+      if (!feature) return false;
+      activateFeature(feature.action);
+      return true;
+    }
+    function activateFeature(action) {
+      const focusLater = (element) => {
+        const focus = () => element?.focus?.({ preventScroll: false });
+        if (windowRef?.setTimeout) windowRef.setTimeout(focus, 0);
+        else focus();
+      };
+      if (action === "documents") {
+        switchMainView2("editor");
+        focusLater(els2.searchInput);
+        return true;
+      }
+      if (action === "editor") {
+        switchMainView2("editor");
+        focusLater(els2.contentEditor);
+        return true;
+      }
+      if (action === "writer-use") {
+        switchMainView2("editor");
+        switchTab2("style");
+        focusLater(els2.styleList || els2.newStyleBtn);
+        return true;
+      }
+      if (action === "writer-build") {
+        switchMainView2("editor");
+        switchTab2("style");
+        els2.newStyleBtn?.click?.();
+        return true;
+      }
+      if (action === "draft") {
+        switchMainView2("editor");
+        switchTab2("generate");
+        focusLater(els2.generatePrompt);
+        return true;
+      }
+      if (action === "ppt") {
+        switchMainView2("ppt");
+        focusLater(els2.pptPromptInput);
+        return true;
+      }
+      if (action === "cloud-sync") {
+        switchMainView2("cloud");
+        focusLater(els2.cloudSaveDocBtn);
+        return true;
+      }
+      if (action === "billing") {
+        switchMainView2("cloud");
+        focusLater(els2.cloudManualPackageSelect);
+        return true;
+      }
+      if (action === "admin") {
+        return openStandaloneAdminPage();
+      }
+      return false;
+    }
+    return {
+      bindEvents: bindEvents2,
+      handleFeatureMapAction,
+      activateFeature
+    };
+  }
+
   // src/modules/documents/documentEditor.js
   function createDocumentEditor(deps) {
     const {
@@ -37799,6 +37886,12 @@ ${mention} ` : `${mention} `;
     getCloudDocumentLocation,
     getCloudWriterLocation
   });
+  var featureActionController = createFeatureActionController({
+    els,
+    switchMainView,
+    switchTab,
+    openStandaloneAdminPage: () => cloudActionsController.openStandaloneAdminPage()
+  });
   var layoutController = createLayoutController({ els, ui });
   var folderManager = createFolderManager({
     state,
@@ -38533,9 +38626,9 @@ ${mention} ` : `${mention} `;
     cloudActionsController.bindEvents();
     cloudSessionController.bindEvents();
     cloudSyncController.bindEvents();
+    featureActionController.bindEvents();
     els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
     els.pptBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
-    els.featureMapGrid?.addEventListener("click", handleFeatureMapAction);
   }
   function setupFileDrop(target, handler) {
     if (!target) return;
@@ -38667,62 +38760,6 @@ ${mention} ` : `${mention} `;
   }
   function renderCloudPanel() {
     cloudPanelRenderer.renderCloudPanel();
-  }
-  function handleFeatureMapAction(event) {
-    const button = event.target.closest("[data-feature-action]");
-    if (!button) return;
-    const feature = getFeatureByAction(button.dataset.featureAction);
-    if (!feature) return;
-    activateFeature(feature.action);
-  }
-  function activateFeature(action) {
-    const focusLater = (element) => window.setTimeout(() => element?.focus?.({ preventScroll: false }), 0);
-    if (action === "documents") {
-      switchMainView("editor");
-      focusLater(els.searchInput);
-      return;
-    }
-    if (action === "editor") {
-      switchMainView("editor");
-      focusLater(els.contentEditor);
-      return;
-    }
-    if (action === "writer-use") {
-      switchMainView("editor");
-      switchTab("style");
-      focusLater(els.styleList || els.newStyleBtn);
-      return;
-    }
-    if (action === "writer-build") {
-      switchMainView("editor");
-      switchTab("style");
-      els.newStyleBtn?.click?.();
-      return;
-    }
-    if (action === "draft") {
-      switchMainView("editor");
-      switchTab("generate");
-      focusLater(els.generatePrompt);
-      return;
-    }
-    if (action === "ppt") {
-      switchMainView("ppt");
-      focusLater(els.pptPromptInput);
-      return;
-    }
-    if (action === "cloud-sync") {
-      switchMainView("cloud");
-      focusLater(els.cloudSaveDocBtn);
-      return;
-    }
-    if (action === "billing") {
-      switchMainView("cloud");
-      focusLater(els.cloudManualPackageSelect);
-      return;
-    }
-    if (action === "admin") {
-      cloudActionsController.openStandaloneAdminPage();
-    }
   }
   function normalizeCloudBaseUrl2(value) {
     return cloudApiClient.normalizeBaseUrl(value);
