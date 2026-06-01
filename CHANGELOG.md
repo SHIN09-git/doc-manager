@@ -19,6 +19,7 @@
 - 拆出 `globalShortcutController`，让 `Escape` 全局关闭、`Ctrl/Cmd+S` 保存当前文档和 `Ctrl/Cmd+Z` 正文撤销从 `app.js` 迁移到 UI 模块。
 - 拆出 `skillPackageController`，让执笔人说明 Markdown、规则 JSON、整包导出、导入预览确认和隐私风险确认从 `app.js` 迁移到执笔人模块。
 - 拆出 `skillDetailController`，让执笔人详情抽屉事件、说明.md 脏状态、测试生成和反馈重训入口从 `app.js` 迁移到执笔人模块。
+- 拆出 `importDropController`，让文件拖拽高亮、全局文件拖入路由、文档卡片拖入生成提示词和阻止浏览器误打开文件从 `app.js` 迁移到导入模块。
 - 拆出 `cloudApiClient`，让云端 API 默认地址推导、地址归一化、组织请求头、JSON 解析和错误负载从 `app.js` 迁移到独立模块。
 - 修复部署站点上旧的本地云端地址带多个尾随斜杠时不会自动替换为当前站点 `/api` 的问题。
 - 补充云端 API 客户端单元测试，覆盖本地/部署地址推导、请求头、服务端错误和网络失败提示。

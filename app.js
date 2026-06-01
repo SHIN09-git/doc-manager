@@ -32,6 +32,7 @@ import { createDocumentTypeController } from "./src/modules/documents/documentTy
 import { createFindReplaceController } from "./src/modules/editor/findReplaceController.js";
 import { createEditorContextMenuController } from "./src/modules/editor/editorContextMenuController.js";
 import { createGenerationController } from "./src/modules/generation/generationController.js";
+import { createImportDropController } from "./src/modules/imports/importDropController.js";
 import { createBrowserFileSystemAdapter } from "./src/modules/folders/fileSystemAdapter.js";
 import { createFolderManager } from "./src/modules/folders/folderManager.js";
 import { createFolderRenderer } from "./src/modules/folders/folderRenderer.js";
@@ -70,8 +71,6 @@ import {
   sanitizeFileName,
 } from "./src/utils/helpers.js";
 import { buildUnsupportedFileMessage, canImportFile, readImportFileText } from "./src/utils/fileReaders.js";
-import { isFileDragData } from "./src/utils/dragDrop.js";
-import { getDropImportTarget } from "./src/utils/dropRouting.js";
 import { filterImportableFilesBySize } from "./src/utils/importGuards.js";
 import { scanPrivacyRisksInObject } from "./src/utils/privacyScan.js";
 
@@ -511,6 +510,14 @@ const pptController = createPptController({
   pptStyleOptions: PPT_STYLE_OPTIONS,
   escapeHtml,
 });
+const importDropController = createImportDropController({
+  els,
+  documentRef: () => document,
+  windowRef: () => window,
+  importDocumentFiles,
+  importStyleDropFiles,
+  importPptPromptFiles: (files) => pptController.importPptPromptFiles(files),
+});
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindElements();
@@ -821,86 +828,15 @@ function bindEvents() {
 }
 
 function setupFileDrop(target, handler) {
-  if (!target) return;
-  ["dragenter", "dragover"].forEach((eventName) => {
-    target.addEventListener(eventName, (event) => {
-      if (!isFileDrag(event)) return;
-      event.preventDefault();
-      target.classList.add("drag-over");
-    });
-  });
-  ["dragleave", "dragend"].forEach((eventName) => {
-    target.addEventListener(eventName, () => target.classList.remove("drag-over"));
-  });
-  target.addEventListener("drop", async (event) => {
-    if (!isFileDrag(event)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    target.classList.remove("drag-over");
-    const files = Array.from(event.dataTransfer?.files || []);
-    if (files.length > 0) {
-      await handler(files);
-    }
-  });
+  return importDropController.setupFileDrop(target, handler);
 }
 
 function setupDocumentDrop(target, handler) {
-  if (!target) return;
-  ["dragenter", "dragover"].forEach((eventName) => {
-    target.addEventListener(eventName, (event) => {
-      if (!isDocumentDrag(event)) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "copy";
-      target.classList.add("drag-over");
-    });
-  });
-  ["dragleave", "dragend"].forEach((eventName) => {
-    target.addEventListener(eventName, () => target.classList.remove("drag-over"));
-  });
-  target.addEventListener("drop", (event) => {
-    if (!isDocumentDrag(event)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    target.classList.remove("drag-over");
-    const docId = event.dataTransfer?.getData("application/x-mowen-doc-id");
-    if (docId) handler(docId);
-  });
+  return importDropController.setupDocumentDrop(target, handler);
 }
 
 function preventWindowFileNavigation() {
-  ["dragover", "drop"].forEach((eventName) => {
-    window.addEventListener(eventName, async (event) => {
-      if (!isFileDrag(event)) return;
-      event.preventDefault();
-      if (eventName !== "drop") return;
-      const files = Array.from(event.dataTransfer?.files || []);
-      if (files.length === 0) return;
-      await importFilesFromGlobalDrop(files);
-    });
-  });
-}
-
-function isFileDrag(event) {
-  return isFileDragData(event.dataTransfer);
-}
-
-function isDocumentDrag(event) {
-  return Array.from(event.dataTransfer?.types || []).includes("application/x-mowen-doc-id");
-}
-
-async function importFilesFromGlobalDrop(files) {
-  const target = getDropImportTarget(document.querySelector(".tab-panel.active")?.id || "", {
-    skillBuilderOpen: Boolean(els.skillBuilderModal && !els.skillBuilderModal.hidden),
-  });
-  if (target === "ppt") {
-    await pptController.importPptPromptFiles(files);
-    return;
-  }
-  if (target === "style" || target === "skill-builder") {
-    await importStyleDropFiles(files);
-    return;
-  }
-  await importDocumentFiles(files);
+  return importDropController.preventWindowFileNavigation();
 }
 
 function isSkillPackageFile(file) {

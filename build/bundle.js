@@ -27670,6 +27670,126 @@ ${selection.text}`
     };
   }
 
+  // src/utils/dragDrop.js
+  function isFileDragData(dataTransfer) {
+    const types = Array.from(dataTransfer?.types || []);
+    const items = Array.from(dataTransfer?.items || []);
+    return types.includes("Files") || types.includes("application/x-moz-file") || items.some((item) => item?.kind === "file");
+  }
+
+  // src/utils/dropRouting.js
+  function getDropImportTarget(activePanelId = "", options = {}) {
+    if (options.skillBuilderOpen) return "skill-builder";
+    if (activePanelId === "pptPanel") return "ppt";
+    if (activePanelId === "stylePanel") return "style";
+    return "documents";
+  }
+
+  // src/modules/imports/importDropController.js
+  function createImportDropController(deps = {}) {
+    const {
+      els: els2 = {},
+      documentRef = () => globalThis.document,
+      windowRef = () => globalThis.window,
+      resolveDropTarget = getDropImportTarget,
+      importDocumentFiles: importDocumentFiles2 = async () => {
+      },
+      importStyleDropFiles: importStyleDropFiles2 = async () => {
+      },
+      importPptPromptFiles = async () => {
+      }
+    } = deps;
+    function setupFileDrop2(target, handler) {
+      if (!target) return false;
+      ["dragenter", "dragover"].forEach((eventName) => {
+        target.addEventListener(eventName, (event) => {
+          if (!isFileDrag(event)) return;
+          event.preventDefault();
+          target.classList.add("drag-over");
+        });
+      });
+      ["dragleave", "dragend"].forEach((eventName) => {
+        target.addEventListener(eventName, () => target.classList.remove("drag-over"));
+      });
+      target.addEventListener("drop", async (event) => {
+        if (!isFileDrag(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        target.classList.remove("drag-over");
+        const files = Array.from(event.dataTransfer?.files || []);
+        if (files.length > 0) {
+          await handler(files);
+        }
+      });
+      return true;
+    }
+    function setupDocumentDrop2(target, handler) {
+      if (!target) return false;
+      ["dragenter", "dragover"].forEach((eventName) => {
+        target.addEventListener(eventName, (event) => {
+          if (!isDocumentDrag(event)) return;
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+          target.classList.add("drag-over");
+        });
+      });
+      ["dragleave", "dragend"].forEach((eventName) => {
+        target.addEventListener(eventName, () => target.classList.remove("drag-over"));
+      });
+      target.addEventListener("drop", (event) => {
+        if (!isDocumentDrag(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        target.classList.remove("drag-over");
+        const docId = event.dataTransfer?.getData("application/x-mowen-doc-id");
+        if (docId) handler(docId);
+      });
+      return true;
+    }
+    function preventWindowFileNavigation2() {
+      ["dragover", "drop"].forEach((eventName) => {
+        windowRef()?.addEventListener?.(eventName, async (event) => {
+          if (!isFileDrag(event)) return;
+          event.preventDefault();
+          if (eventName !== "drop") return;
+          const files = Array.from(event.dataTransfer?.files || []);
+          if (files.length === 0) return;
+          await importFilesFromGlobalDrop(files);
+        });
+      });
+    }
+    async function importFilesFromGlobalDrop(files) {
+      const activePanelId = documentRef()?.querySelector?.(".tab-panel.active")?.id || "";
+      const target = resolveDropTarget(activePanelId, {
+        skillBuilderOpen: Boolean(els2.skillBuilderModal && !els2.skillBuilderModal.hidden)
+      });
+      if (target === "ppt") {
+        await importPptPromptFiles(files);
+        return "ppt";
+      }
+      if (target === "style" || target === "skill-builder") {
+        await importStyleDropFiles2(files);
+        return target;
+      }
+      await importDocumentFiles2(files);
+      return "document";
+    }
+    function isFileDrag(event) {
+      return isFileDragData(event?.dataTransfer);
+    }
+    function isDocumentDrag(event) {
+      return Array.from(event?.dataTransfer?.types || []).includes("application/x-mowen-doc-id");
+    }
+    return {
+      setupFileDrop: setupFileDrop2,
+      setupDocumentDrop: setupDocumentDrop2,
+      preventWindowFileNavigation: preventWindowFileNavigation2,
+      importFilesFromGlobalDrop,
+      isFileDrag,
+      isDocumentDrag
+    };
+  }
+
   // src/modules/folders/fileSystemAdapter.js
   function createBrowserFileSystemAdapter(options = {}) {
     const win = options.win || globalThis.window || globalThis;
@@ -38651,21 +38771,6 @@ ${mention} ` : `${mention} `;
     };
   }
 
-  // src/utils/dragDrop.js
-  function isFileDragData(dataTransfer) {
-    const types = Array.from(dataTransfer?.types || []);
-    const items = Array.from(dataTransfer?.items || []);
-    return types.includes("Files") || types.includes("application/x-moz-file") || items.some((item) => item?.kind === "file");
-  }
-
-  // src/utils/dropRouting.js
-  function getDropImportTarget(activePanelId = "", options = {}) {
-    if (options.skillBuilderOpen) return "skill-builder";
-    if (activePanelId === "pptPanel") return "ppt";
-    if (activePanelId === "stylePanel") return "style";
-    return "documents";
-  }
-
   // app.js
   var state = {};
   var ui = {
@@ -39102,6 +39207,14 @@ ${mention} ` : `${mention} `;
     pptStyleOptions: PPT_STYLE_OPTIONS,
     escapeHtml
   });
+  var importDropController = createImportDropController({
+    els,
+    documentRef: () => document,
+    windowRef: () => window,
+    importDocumentFiles,
+    importStyleDropFiles,
+    importPptPromptFiles: (files) => pptController.importPptPromptFiles(files)
+  });
   document.addEventListener("DOMContentLoaded", async () => {
     bindElements();
     mountCloudPage();
@@ -39399,81 +39512,13 @@ ${mention} ` : `${mention} `;
     featureActionController.bindEvents();
   }
   function setupFileDrop(target, handler) {
-    if (!target) return;
-    ["dragenter", "dragover"].forEach((eventName) => {
-      target.addEventListener(eventName, (event) => {
-        if (!isFileDrag(event)) return;
-        event.preventDefault();
-        target.classList.add("drag-over");
-      });
-    });
-    ["dragleave", "dragend"].forEach((eventName) => {
-      target.addEventListener(eventName, () => target.classList.remove("drag-over"));
-    });
-    target.addEventListener("drop", async (event) => {
-      if (!isFileDrag(event)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      target.classList.remove("drag-over");
-      const files = Array.from(event.dataTransfer?.files || []);
-      if (files.length > 0) {
-        await handler(files);
-      }
-    });
+    return importDropController.setupFileDrop(target, handler);
   }
   function setupDocumentDrop(target, handler) {
-    if (!target) return;
-    ["dragenter", "dragover"].forEach((eventName) => {
-      target.addEventListener(eventName, (event) => {
-        if (!isDocumentDrag(event)) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
-        target.classList.add("drag-over");
-      });
-    });
-    ["dragleave", "dragend"].forEach((eventName) => {
-      target.addEventListener(eventName, () => target.classList.remove("drag-over"));
-    });
-    target.addEventListener("drop", (event) => {
-      if (!isDocumentDrag(event)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      target.classList.remove("drag-over");
-      const docId = event.dataTransfer?.getData("application/x-mowen-doc-id");
-      if (docId) handler(docId);
-    });
+    return importDropController.setupDocumentDrop(target, handler);
   }
   function preventWindowFileNavigation() {
-    ["dragover", "drop"].forEach((eventName) => {
-      window.addEventListener(eventName, async (event) => {
-        if (!isFileDrag(event)) return;
-        event.preventDefault();
-        if (eventName !== "drop") return;
-        const files = Array.from(event.dataTransfer?.files || []);
-        if (files.length === 0) return;
-        await importFilesFromGlobalDrop(files);
-      });
-    });
-  }
-  function isFileDrag(event) {
-    return isFileDragData(event.dataTransfer);
-  }
-  function isDocumentDrag(event) {
-    return Array.from(event.dataTransfer?.types || []).includes("application/x-mowen-doc-id");
-  }
-  async function importFilesFromGlobalDrop(files) {
-    const target = getDropImportTarget(document.querySelector(".tab-panel.active")?.id || "", {
-      skillBuilderOpen: Boolean(els.skillBuilderModal && !els.skillBuilderModal.hidden)
-    });
-    if (target === "ppt") {
-      await pptController.importPptPromptFiles(files);
-      return;
-    }
-    if (target === "style" || target === "skill-builder") {
-      await importStyleDropFiles(files);
-      return;
-    }
-    await importDocumentFiles(files);
+    return importDropController.preventWindowFileNavigation();
   }
   function isSkillPackageFile(file) {
     return skillPackageController.isPackageFile(file);
