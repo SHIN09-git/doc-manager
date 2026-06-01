@@ -24924,6 +24924,347 @@ ${formatListItems(items)}`;
     };
   }
 
+  // src/modules/cloud/cloudSyncController.js
+  function parseJsonSafely(text, fallback = {}) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return fallback;
+    }
+  }
+  function createCloudSyncController(deps = {}) {
+    const {
+      state: state2 = {},
+      ui: ui2 = {},
+      els: els2 = {},
+      cloudRequest: cloudRequest2 = async () => ({}),
+      withLoading: withLoading2 = async (_button, _label, task) => task(),
+      persist: persist2 = () => {
+      },
+      eventBus: eventBus2 = { emit: () => {
+      } },
+      toast: toast2 = () => {
+      },
+      getCurrentDoc: getCurrentDoc2 = () => null,
+      normalizeSkill: normalizeSkill2 = (skill) => skill,
+      normalizeHandle: normalizeHandle2 = (value) => String(value || "").trim(),
+      clone: clone3 = (value) => JSON.parse(JSON.stringify(value)),
+      createId: createId2 = () => `id_${Date.now()}`,
+      now: now2 = () => (/* @__PURE__ */ new Date()).toISOString(),
+      getCloudDocumentLocation: getCloudDocumentLocation2 = (document2) => document2?.title || document2?.id || "",
+      getCloudWriterLocation: getCloudWriterLocation2 = (writer) => writer?.handle || writer?.id || "",
+      windowRef = globalThis.window
+    } = deps;
+    let eventsBound = false;
+    function bindEvents2() {
+      if (eventsBound) return;
+      eventsBound = true;
+      els2.cloudSaveDocBtn?.addEventListener("click", cloudSaveCurrentDocument);
+      els2.cloudPullDocsBtn?.addEventListener("click", cloudPullDocuments);
+      els2.cloudSaveWriterBtn?.addEventListener("click", cloudSaveCurrentWriter);
+      els2.cloudPullWritersBtn?.addEventListener("click", cloudPullWriters);
+    }
+    async function cloudSaveCurrentDocument() {
+      const doc = getCurrentDoc2();
+      if (!doc || doc.deletedAt) {
+        toast2("\u8BF7\u5148\u9009\u62E9\u8981\u540C\u6B65\u7684\u6587\u6863", "warn");
+        return null;
+      }
+      return withLoading2(els2.cloudSaveDocBtn, "\u540C\u6B65\u4E2D", async () => {
+        const payload = {
+          title: doc.title || "\u672A\u547D\u540D\u6587\u6863",
+          type: doc.type || "custom",
+          folder_id: doc.folderId || "",
+          local_id: doc.id,
+          content: doc.content || "",
+          metadata: {
+            localId: doc.id,
+            type: doc.type || "",
+            folderId: doc.folderId || "",
+            styleId: doc.styleId || ""
+          },
+          expected_version: doc.cloudVersion || void 0
+        };
+        const data = await saveCloudResourceWithConflict({
+          localName: doc.title || "\u5F53\u524D\u6587\u6863",
+          endpoint: doc.cloudId ? `/documents/${doc.cloudId}` : "/documents",
+          method: doc.cloudId ? "PUT" : "POST",
+          payload,
+          remoteKey: "document",
+          applyRemote: (remoteDoc) => applyRemoteDocumentToLocal(doc, remoteDoc),
+          createLocalCopy: (remoteDoc) => createDocumentCopyFromRemote(remoteDoc)
+        });
+        doc.cloudId = data.document.id;
+        doc.cloudUpdatedAt = data.document.updated_at || now2();
+        doc.cloudVersion = data.document.version || 1;
+        persist2();
+        eventBus2.emit(EVENTS.RENDER_EDITOR);
+        toast2(`\u5F53\u524D\u6587\u6863\u5DF2\u540C\u6B65\u5230\u4E91\u7AEF\uFF1A${getCloudDocumentLocation2(data.document)}`);
+        return data;
+      });
+    }
+    async function cloudPullDocuments() {
+      return withLoading2(els2.cloudPullDocsBtn, "\u62C9\u53D6\u4E2D", async () => {
+        const data = await cloudRequest2("/documents", { method: "GET" });
+        const documents = Array.isArray(data.documents) ? data.documents : [];
+        let imported = 0;
+        documents.forEach((remoteDoc) => {
+          const existing = state2.docs.find((doc) => doc.cloudId === remoteDoc.id);
+          const metadata = remoteDoc.metadata || {};
+          if (existing) {
+            existing.title = remoteDoc.title || existing.title;
+            existing.content = remoteDoc.content || "";
+            existing.type = remoteDoc.type || metadata.type || existing.type || "custom";
+            existing.folderId = metadata.folderId || existing.folderId || state2.folders[0]?.id || "";
+            existing.styleId = metadata.styleId || existing.styleId || state2.styles[0]?.id || "";
+            existing.cloudUpdatedAt = remoteDoc.updated_at || now2();
+            existing.cloudVersion = remoteDoc.version || 1;
+            existing.updatedAt = now2();
+            existing.deletedAt = remoteDoc.deleted_at || "";
+            return;
+          }
+          state2.docs.push({
+            id: createId2(),
+            title: remoteDoc.title || "\u4E91\u7AEF\u6587\u6863",
+            type: remoteDoc.type || metadata.type || "custom",
+            folderId: metadata.folderId || state2.folders[0]?.id || "",
+            styleId: metadata.styleId || state2.styles[0]?.id || "",
+            content: remoteDoc.content || "",
+            createdAt: remoteDoc.created_at || now2(),
+            updatedAt: remoteDoc.updated_at || now2(),
+            deletedAt: remoteDoc.deleted_at || "",
+            deletedFromFolderId: "",
+            cloudId: remoteDoc.id,
+            cloudUpdatedAt: remoteDoc.updated_at || now2(),
+            cloudVersion: remoteDoc.version || 1
+          });
+          imported += 1;
+        });
+        persist2();
+        eventBus2.emit(EVENTS.RENDER_DOC_LIST);
+        eventBus2.emit(EVENTS.RENDER_EDITOR);
+        toast2(`\u5DF2\u4ECE\u4E91\u7AEF\u62C9\u53D6 ${documents.length} \u4EFD\u6587\u6863\uFF0C\u65B0\u589E ${imported} \u4EFD`);
+        return { documents, imported };
+      });
+    }
+    async function saveCloudResourceWithConflict({ localName, endpoint, method, payload, remoteKey, applyRemote, createLocalCopy }) {
+      try {
+        return await cloudRequest2(endpoint, { method, body: JSON.stringify(payload) });
+      } catch (error) {
+        if (error.status !== 409 || error.payload?.error?.code !== "version_conflict") throw error;
+        const remote = error.payload?.error?.details?.remote;
+        const currentVersion = error.payload?.error?.details?.current_version || remote?.version || "\u672A\u77E5";
+        const choice = windowRef?.prompt?.(
+          `\u68C0\u6D4B\u5230\u4E91\u7AEF\u7248\u672C\u51B2\u7A81\uFF1A${localName}
+\u4E91\u7AEF\u7248\u672C\uFF1Av${currentVersion}
+\u8F93\u5165 1 \u8986\u76D6\u4E91\u7AEF\uFF1B\u8F93\u5165 2 \u53E6\u5B58\u672C\u5730\u526F\u672C\u540E\u62C9\u53D6\u4E91\u7AEF\uFF1B\u8F93\u5165 3 \u4EC5\u62C9\u53D6\u4E91\u7AEF\u3002`,
+          "3"
+        );
+        if (choice === "1") {
+          return cloudRequest2(endpoint, {
+            method,
+            body: JSON.stringify({ ...payload, expected_version: void 0, force: true })
+          });
+        }
+        if (choice === "2") {
+          createLocalCopy?.(remote);
+          applyRemote?.(remote);
+          persist2();
+          toast2("\u5DF2\u4FDD\u7559\u672C\u5730\u526F\u672C\uFF0C\u5E76\u62C9\u53D6\u4E91\u7AEF\u7248\u672C", "warn");
+          return { [remoteKey]: remote };
+        }
+        applyRemote?.(remote);
+        persist2();
+        toast2("\u5DF2\u62C9\u53D6\u4E91\u7AEF\u7248\u672C\uFF0C\u672C\u5730\u6539\u52A8\u672A\u8986\u76D6\u4E91\u7AEF", "warn");
+        return { [remoteKey]: remote };
+      }
+    }
+    function applyRemoteDocumentToLocal(doc, remoteDoc) {
+      if (!remoteDoc) return;
+      const metadata = remoteDoc.metadata || {};
+      doc.title = remoteDoc.title || doc.title;
+      doc.content = remoteDoc.content || "";
+      doc.type = remoteDoc.type || metadata.type || doc.type || "custom";
+      doc.folderId = metadata.folderId || doc.folderId || state2.folders[0]?.id || "";
+      doc.styleId = metadata.styleId || doc.styleId || state2.styles[0]?.id || "";
+      doc.cloudId = remoteDoc.id;
+      doc.cloudUpdatedAt = remoteDoc.updated_at || now2();
+      doc.cloudVersion = remoteDoc.version || 1;
+      doc.updatedAt = now2();
+      eventBus2.emit(EVENTS.RENDER_DOC_LIST);
+      eventBus2.emit(EVENTS.RENDER_EDITOR);
+    }
+    function createDocumentCopyFromRemote(remoteDoc) {
+      const current = getCurrentDoc2();
+      if (!current) return remoteDoc;
+      state2.docs.push({
+        ...current,
+        id: createId2(),
+        title: `${current.title || "\u672C\u5730\u526F\u672C"}\uFF08\u51B2\u7A81\u526F\u672C\uFF09`,
+        cloudId: "",
+        cloudUpdatedAt: "",
+        cloudVersion: "",
+        createdAt: now2(),
+        updatedAt: now2()
+      });
+      eventBus2.emit(EVENTS.RENDER_DOC_LIST);
+      return remoteDoc;
+    }
+    async function cloudSaveCurrentWriter() {
+      const style = getCurrentCloudWriter();
+      if (!style) {
+        toast2("\u8BF7\u5148\u9009\u62E9\u8981\u540C\u6B65\u7684\u6267\u7B14\u4EBA", "warn");
+        return null;
+      }
+      return withLoading2(els2.cloudSaveWriterBtn, "\u540C\u6B65\u4E2D", async () => {
+        const payload = {
+          name: style.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
+          handle: normalizeHandle2(style.handle || style.name),
+          category: style.category || "\u81EA\u5B9A\u4E49",
+          description: style.description || "",
+          enabled: style.enabled !== false,
+          summary_md: style.summary || "",
+          skill_json: parseJsonSafely(style.skillJson || "{}", {}),
+          quality_report: style.qualityReport || {},
+          expected_version: style.cloudVersion || void 0
+        };
+        const data = await saveCloudResourceWithConflict({
+          localName: style.name || "\u5F53\u524D\u6267\u7B14\u4EBA",
+          endpoint: style.cloudId ? `/writers/${style.cloudId}` : "/writers",
+          method: style.cloudId ? "PUT" : "POST",
+          payload,
+          remoteKey: "writer",
+          applyRemote: (remoteWriter) => applyRemoteWriterToLocal(style, remoteWriter),
+          createLocalCopy: (remoteWriter) => createWriterCopyFromRemote(remoteWriter)
+        });
+        style.cloudId = data.writer.id;
+        style.cloudUpdatedAt = data.writer.updated_at || now2();
+        style.cloudVersion = data.writer.version || 1;
+        style.updatedAt = now2();
+        persist2();
+        eventBus2.emit(EVENTS.RENDER_STYLE_LIST);
+        toast2(`\u6267\u7B14\u4EBA\u5DF2\u540C\u6B65\u5230\u4E91\u7AEF\uFF1A${getCloudWriterLocation2(data.writer)}`);
+        return data;
+      });
+    }
+    function applyRemoteWriterToLocal(style, remoteWriter) {
+      if (!remoteWriter) return;
+      const next = normalizeSkill2({
+        ...style,
+        name: remoteWriter.name || style.name,
+        handle: remoteWriter.handle || style.handle,
+        category: remoteWriter.category || style.category || "\u81EA\u5B9A\u4E49",
+        description: remoteWriter.description || style.description || "",
+        enabled: remoteWriter.enabled !== false,
+        summary: remoteWriter.summary_md || style.summary || "",
+        skillJson: JSON.stringify(remoteWriter.skill_json || {}, null, 2),
+        qualityReport: remoteWriter.quality_report || style.qualityReport || null,
+        versions: style.versions || [],
+        cloudId: remoteWriter.id,
+        cloudUpdatedAt: remoteWriter.updated_at || now2(),
+        cloudVersion: remoteWriter.version || 1,
+        updatedAt: now2()
+      });
+      Object.assign(style, next);
+      if (ui2.editingStyle?.id === style.id) ui2.editingStyle = clone3(style);
+      eventBus2.emit(EVENTS.RENDER_STYLE_SELECT);
+      eventBus2.emit(EVENTS.RENDER_STYLE_LIST);
+      eventBus2.emit(EVENTS.RENDER_STYLE_EDITOR);
+    }
+    function createWriterCopyFromRemote(remoteWriter) {
+      const style = getCurrentCloudWriter();
+      if (!style) return remoteWriter;
+      state2.styles.push(normalizeSkill2({
+        ...style,
+        id: createId2(),
+        name: `${style.name || "\u672C\u5730\u526F\u672C"}\uFF08\u51B2\u7A81\u526F\u672C\uFF09`,
+        handle: normalizeHandle2(`${style.handle || style.name || "copy"}${state2.styles.length + 1}`),
+        cloudId: "",
+        cloudUpdatedAt: "",
+        cloudVersion: "",
+        createdAt: now2(),
+        updatedAt: now2()
+      }));
+      eventBus2.emit(EVENTS.RENDER_STYLE_LIST);
+      return remoteWriter;
+    }
+    async function cloudPullWriters() {
+      return withLoading2(els2.cloudPullWritersBtn, "\u62C9\u53D6\u4E2D", async () => {
+        const data = await cloudRequest2("/writers", { method: "GET" });
+        const writers = Array.isArray(data.writers) ? data.writers : [];
+        let imported = 0;
+        writers.forEach((remoteWriter) => {
+          const existing = state2.styles.find((style) => style.cloudId === remoteWriter.id || style.handle === remoteWriter.handle);
+          const next = normalizeSkill2({
+            ...existing || {},
+            id: existing?.id || createId2(),
+            name: remoteWriter.name || existing?.name || "\u4E91\u7AEF\u6267\u7B14\u4EBA",
+            handle: remoteWriter.handle || existing?.handle || "",
+            category: remoteWriter.category || existing?.category || "\u81EA\u5B9A\u4E49",
+            description: remoteWriter.description || existing?.description || "",
+            enabled: remoteWriter.enabled !== false,
+            summary: remoteWriter.summary_md || existing?.summary || "",
+            skillJson: JSON.stringify(remoteWriter.skill_json || {}, null, 2),
+            qualityReport: remoteWriter.quality_report || existing?.qualityReport || null,
+            versions: Array.isArray(remoteWriter.versions) ? remoteWriter.versions.map(mapRemoteWriterVersion) : existing?.versions || [],
+            examples: existing?.examples || [],
+            createdAt: remoteWriter.created_at || existing?.createdAt || now2(),
+            updatedAt: remoteWriter.updated_at || now2(),
+            cloudId: remoteWriter.id,
+            cloudUpdatedAt: remoteWriter.updated_at || now2(),
+            cloudVersion: remoteWriter.version || 1
+          });
+          if (existing) Object.assign(existing, next);
+          else {
+            state2.styles.push(next);
+            imported += 1;
+          }
+        });
+        if (!ui2.editingStyle && state2.styles[0]) ui2.editingStyle = clone3(state2.styles[0]);
+        persist2();
+        eventBus2.emit(EVENTS.RENDER_STYLE_SELECT);
+        eventBus2.emit(EVENTS.RENDER_STYLE_LIST);
+        eventBus2.emit(EVENTS.RENDER_STYLE_EDITOR);
+        toast2(`\u5DF2\u4ECE\u4E91\u7AEF\u62C9\u53D6 ${writers.length} \u4E2A\u6267\u7B14\u4EBA\uFF0C\u65B0\u589E ${imported} \u4E2A`);
+        return { writers, imported };
+      });
+    }
+    function mapRemoteWriterVersion(version) {
+      return {
+        id: version.id || createId2(),
+        version: Number(version.version || 1),
+        createdAt: version.created_at || now2(),
+        summary: version.summary_md || "",
+        skillJson: JSON.stringify(version.skill_json || {}, null, 2),
+        qualityReport: version.quality_report || null,
+        sourceExamples: [],
+        analyses: [],
+        analysis: "",
+        aggregation: "",
+        aggregationData: null,
+        testDoc: "",
+        testReport: ""
+      };
+    }
+    function getCurrentCloudWriter() {
+      return state2.styles.find((style) => style.id === ui2.selectedSkillCardId) || state2.styles.find((style) => style.id === ui2.editingStyle?.id) || state2.styles[0] || null;
+    }
+    return {
+      bindEvents: bindEvents2,
+      cloudSaveCurrentDocument,
+      cloudPullDocuments,
+      saveCloudResourceWithConflict,
+      applyRemoteDocumentToLocal,
+      createDocumentCopyFromRemote,
+      cloudSaveCurrentWriter,
+      applyRemoteWriterToLocal,
+      createWriterCopyFromRemote,
+      cloudPullWriters,
+      mapRemoteWriterVersion,
+      getCurrentCloudWriter
+    };
+  }
+
   // src/modules/documents/documentEditor.js
   function createDocumentEditor(deps) {
     const {
@@ -37239,6 +37580,24 @@ ${mention} ` : `${mention} `;
     toast,
     getCloudSettingsLocation
   });
+  var cloudSyncController = createCloudSyncController({
+    state,
+    ui,
+    els,
+    cloudRequest,
+    withLoading,
+    persist,
+    eventBus,
+    toast,
+    getCurrentDoc,
+    normalizeSkill,
+    normalizeHandle,
+    clone,
+    createId,
+    now,
+    getCloudDocumentLocation,
+    getCloudWriterLocation
+  });
   var layoutController = createLayoutController({ els, ui });
   var folderManager = createFolderManager({
     state,
@@ -37971,12 +38330,9 @@ ${mention} ` : `${mention} `;
     });
     apiSettingsController.bindEvents();
     cloudSessionController.bindEvents();
+    cloudSyncController.bindEvents();
     els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
     els.pptBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
-    els.cloudSaveDocBtn.addEventListener("click", cloudSaveCurrentDocument);
-    els.cloudPullDocsBtn.addEventListener("click", cloudPullDocuments);
-    els.cloudSaveWriterBtn.addEventListener("click", cloudSaveCurrentWriter);
-    els.cloudPullWritersBtn.addEventListener("click", cloudPullWriters);
     els.cloudManualOrderBtn?.addEventListener("click", cloudSubmitManualOrder);
     els.cloudManualPackageSelect?.addEventListener("change", renderCloudManualPaymentMethods);
     els.cloudManualPaymentMethodSelect?.addEventListener("change", renderCloudManualPaymentMethods);
@@ -38183,13 +38539,6 @@ ${mention} ` : `${mention} `;
   async function cloudRequest(path, options = {}) {
     return cloudApiClient.request(path, options);
   }
-  function parseJsonSafely(text, fallback = {}) {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return fallback;
-    }
-  }
   async function refreshCloudUsage(options = {}) {
     if (!state.cloud?.authenticated) return;
     const data = await cloudRequest("/usage/current", { method: "GET" });
@@ -38314,287 +38663,6 @@ ${mention} ` : `${mention} `;
       els.cloudFeedbackInput.value = "";
       toast("\u53CD\u9988\u5DF2\u63D0\u4EA4");
     });
-  }
-  async function cloudSaveCurrentDocument() {
-    const doc = getCurrentDoc();
-    if (!doc || doc.deletedAt) {
-      toast("\u8BF7\u5148\u9009\u62E9\u8981\u540C\u6B65\u7684\u6587\u6863", "warn");
-      return;
-    }
-    await withLoading(els.cloudSaveDocBtn, "\u540C\u6B65\u4E2D", async () => {
-      const payload = {
-        title: doc.title || "\u672A\u547D\u540D\u6587\u6863",
-        type: doc.type || "custom",
-        folder_id: doc.folderId || "",
-        local_id: doc.id,
-        content: doc.content || "",
-        metadata: {
-          localId: doc.id,
-          type: doc.type || "",
-          folderId: doc.folderId || "",
-          styleId: doc.styleId || ""
-        },
-        expected_version: doc.cloudVersion || void 0
-      };
-      const data = await saveCloudResourceWithConflict({
-        localName: doc.title || "\u5F53\u524D\u6587\u6863",
-        endpoint: doc.cloudId ? `/documents/${doc.cloudId}` : "/documents",
-        method: doc.cloudId ? "PUT" : "POST",
-        payload,
-        remoteKey: "document",
-        applyRemote: (remoteDoc) => applyRemoteDocumentToLocal(doc, remoteDoc),
-        createLocalCopy: (remoteDoc) => createDocumentCopyFromRemote(remoteDoc)
-      });
-      doc.cloudId = data.document.id;
-      doc.cloudUpdatedAt = data.document.updated_at || now();
-      doc.cloudVersion = data.document.version || 1;
-      persist();
-      renderEditor();
-      toast(`\u5F53\u524D\u6587\u6863\u5DF2\u540C\u6B65\u5230\u4E91\u7AEF\uFF1A${getCloudDocumentLocation(data.document)}`);
-    });
-  }
-  async function cloudPullDocuments() {
-    await withLoading(els.cloudPullDocsBtn, "\u62C9\u53D6\u4E2D", async () => {
-      const data = await cloudRequest("/documents", { method: "GET" });
-      const documents = Array.isArray(data.documents) ? data.documents : [];
-      let imported = 0;
-      documents.forEach((remoteDoc) => {
-        const existing = state.docs.find((doc) => doc.cloudId === remoteDoc.id);
-        const metadata = remoteDoc.metadata || {};
-        if (existing) {
-          existing.title = remoteDoc.title || existing.title;
-          existing.content = remoteDoc.content || "";
-          existing.type = remoteDoc.type || metadata.type || existing.type || "custom";
-          existing.folderId = metadata.folderId || existing.folderId || state.folders[0]?.id || "";
-          existing.styleId = metadata.styleId || existing.styleId || state.styles[0]?.id || "";
-          existing.cloudUpdatedAt = remoteDoc.updated_at || now();
-          existing.cloudVersion = remoteDoc.version || 1;
-          existing.updatedAt = now();
-          existing.deletedAt = remoteDoc.deleted_at || "";
-          return;
-        }
-        state.docs.push({
-          id: createId(),
-          title: remoteDoc.title || "\u4E91\u7AEF\u6587\u6863",
-          type: remoteDoc.type || metadata.type || "custom",
-          folderId: metadata.folderId || state.folders[0]?.id || "",
-          styleId: metadata.styleId || state.styles[0]?.id || "",
-          content: remoteDoc.content || "",
-          createdAt: remoteDoc.created_at || now(),
-          updatedAt: remoteDoc.updated_at || now(),
-          deletedAt: remoteDoc.deleted_at || "",
-          deletedFromFolderId: "",
-          cloudId: remoteDoc.id,
-          cloudUpdatedAt: remoteDoc.updated_at || now(),
-          cloudVersion: remoteDoc.version || 1
-        });
-        imported += 1;
-      });
-      persist();
-      eventBus.emit(EVENTS.RENDER_DOC_LIST);
-      eventBus.emit(EVENTS.RENDER_EDITOR);
-      toast(`\u5DF2\u4ECE\u4E91\u7AEF\u62C9\u53D6 ${documents.length} \u4EFD\u6587\u6863\uFF0C\u65B0\u589E ${imported} \u4EFD`);
-    });
-  }
-  async function saveCloudResourceWithConflict({ localName, endpoint, method, payload, remoteKey, applyRemote, createLocalCopy }) {
-    try {
-      return await cloudRequest(endpoint, { method, body: JSON.stringify(payload) });
-    } catch (error) {
-      if (error.status !== 409 || error.payload?.error?.code !== "version_conflict") throw error;
-      const remote = error.payload?.error?.details?.remote;
-      const currentVersion = error.payload?.error?.details?.current_version || remote?.version || "\u672A\u77E5";
-      const choice = window.prompt(
-        `\u68C0\u6D4B\u5230\u4E91\u7AEF\u7248\u672C\u51B2\u7A81\uFF1A${localName}
-\u4E91\u7AEF\u7248\u672C\uFF1Av${currentVersion}
-\u8F93\u5165 1 \u8986\u76D6\u4E91\u7AEF\uFF1B\u8F93\u5165 2 \u53E6\u5B58\u672C\u5730\u526F\u672C\u540E\u62C9\u53D6\u4E91\u7AEF\uFF1B\u8F93\u5165 3 \u4EC5\u62C9\u53D6\u4E91\u7AEF\u3002`,
-        "3"
-      );
-      if (choice === "1") {
-        return cloudRequest(endpoint, {
-          method,
-          body: JSON.stringify({ ...payload, expected_version: void 0, force: true })
-        });
-      }
-      if (choice === "2") {
-        createLocalCopy?.(remote);
-        applyRemote?.(remote);
-        persist();
-        toast("\u5DF2\u4FDD\u7559\u672C\u5730\u526F\u672C\uFF0C\u5E76\u62C9\u53D6\u4E91\u7AEF\u7248\u672C", "warn");
-        return { [remoteKey]: remote };
-      }
-      applyRemote?.(remote);
-      persist();
-      toast("\u5DF2\u62C9\u53D6\u4E91\u7AEF\u7248\u672C\uFF0C\u672C\u5730\u6539\u52A8\u672A\u8986\u76D6\u4E91\u7AEF", "warn");
-      return { [remoteKey]: remote };
-    }
-  }
-  function applyRemoteDocumentToLocal(doc, remoteDoc) {
-    if (!remoteDoc) return;
-    const metadata = remoteDoc.metadata || {};
-    doc.title = remoteDoc.title || doc.title;
-    doc.content = remoteDoc.content || "";
-    doc.type = remoteDoc.type || metadata.type || doc.type || "custom";
-    doc.folderId = metadata.folderId || doc.folderId || state.folders[0]?.id || "";
-    doc.styleId = metadata.styleId || doc.styleId || state.styles[0]?.id || "";
-    doc.cloudId = remoteDoc.id;
-    doc.cloudUpdatedAt = remoteDoc.updated_at || now();
-    doc.cloudVersion = remoteDoc.version || 1;
-    doc.updatedAt = now();
-    eventBus.emit(EVENTS.RENDER_DOC_LIST);
-    eventBus.emit(EVENTS.RENDER_EDITOR);
-  }
-  function createDocumentCopyFromRemote(remoteDoc) {
-    const current = getCurrentDoc();
-    if (!current) return remoteDoc;
-    state.docs.push({
-      ...current,
-      id: createId(),
-      title: `${current.title || "\u672C\u5730\u526F\u672C"}\uFF08\u51B2\u7A81\u526F\u672C\uFF09`,
-      cloudId: "",
-      cloudUpdatedAt: "",
-      cloudVersion: "",
-      createdAt: now(),
-      updatedAt: now()
-    });
-    eventBus.emit(EVENTS.RENDER_DOC_LIST);
-    return remoteDoc;
-  }
-  async function cloudSaveCurrentWriter() {
-    const style = getCurrentCloudWriter();
-    if (!style) {
-      toast("\u8BF7\u5148\u9009\u62E9\u8981\u540C\u6B65\u7684\u6267\u7B14\u4EBA", "warn");
-      return;
-    }
-    await withLoading(els.cloudSaveWriterBtn, "\u540C\u6B65\u4E2D", async () => {
-      const payload = {
-        name: style.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
-        handle: normalizeHandle(style.handle || style.name),
-        category: style.category || "\u81EA\u5B9A\u4E49",
-        description: style.description || "",
-        enabled: style.enabled !== false,
-        summary_md: style.summary || "",
-        skill_json: parseJsonSafely(style.skillJson || "{}", {}),
-        quality_report: style.qualityReport || {},
-        expected_version: style.cloudVersion || void 0
-      };
-      const data = await saveCloudResourceWithConflict({
-        localName: style.name || "\u5F53\u524D\u6267\u7B14\u4EBA",
-        endpoint: style.cloudId ? `/writers/${style.cloudId}` : "/writers",
-        method: style.cloudId ? "PUT" : "POST",
-        payload,
-        remoteKey: "writer",
-        applyRemote: (remoteWriter) => applyRemoteWriterToLocal(style, remoteWriter),
-        createLocalCopy: (remoteWriter) => createWriterCopyFromRemote(remoteWriter)
-      });
-      style.cloudId = data.writer.id;
-      style.cloudUpdatedAt = data.writer.updated_at || now();
-      style.cloudVersion = data.writer.version || 1;
-      style.updatedAt = now();
-      persist();
-      eventBus.emit(EVENTS.RENDER_STYLE_LIST);
-      toast(`\u6267\u7B14\u4EBA\u5DF2\u540C\u6B65\u5230\u4E91\u7AEF\uFF1A${getCloudWriterLocation(data.writer)}`);
-    });
-  }
-  function applyRemoteWriterToLocal(style, remoteWriter) {
-    if (!remoteWriter) return;
-    const next = normalizeSkill({
-      ...style,
-      name: remoteWriter.name || style.name,
-      handle: remoteWriter.handle || style.handle,
-      category: remoteWriter.category || style.category || "\u81EA\u5B9A\u4E49",
-      description: remoteWriter.description || style.description || "",
-      enabled: remoteWriter.enabled !== false,
-      summary: remoteWriter.summary_md || style.summary || "",
-      skillJson: JSON.stringify(remoteWriter.skill_json || {}, null, 2),
-      qualityReport: remoteWriter.quality_report || style.qualityReport || null,
-      versions: style.versions || [],
-      cloudId: remoteWriter.id,
-      cloudUpdatedAt: remoteWriter.updated_at || now(),
-      cloudVersion: remoteWriter.version || 1,
-      updatedAt: now()
-    });
-    Object.assign(style, next);
-    if (ui.editingStyle?.id === style.id) ui.editingStyle = clone(style);
-    eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
-    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
-    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-  }
-  function createWriterCopyFromRemote(remoteWriter) {
-    const style = getCurrentCloudWriter();
-    if (!style) return remoteWriter;
-    state.styles.push(normalizeSkill({
-      ...style,
-      id: createId(),
-      name: `${style.name || "\u672C\u5730\u526F\u672C"}\uFF08\u51B2\u7A81\u526F\u672C\uFF09`,
-      handle: normalizeHandle(`${style.handle || style.name || "copy"}${state.styles.length + 1}`),
-      cloudId: "",
-      cloudUpdatedAt: "",
-      cloudVersion: "",
-      createdAt: now(),
-      updatedAt: now()
-    }));
-    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
-    return remoteWriter;
-  }
-  async function cloudPullWriters() {
-    await withLoading(els.cloudPullWritersBtn, "\u62C9\u53D6\u4E2D", async () => {
-      const data = await cloudRequest("/writers", { method: "GET" });
-      const writers = Array.isArray(data.writers) ? data.writers : [];
-      let imported = 0;
-      writers.forEach((remoteWriter) => {
-        const existing = state.styles.find((style) => style.cloudId === remoteWriter.id || style.handle === remoteWriter.handle);
-        const next = normalizeSkill({
-          ...existing || {},
-          id: existing?.id || createId(),
-          name: remoteWriter.name || existing?.name || "\u4E91\u7AEF\u6267\u7B14\u4EBA",
-          handle: remoteWriter.handle || existing?.handle || "",
-          category: remoteWriter.category || existing?.category || "\u81EA\u5B9A\u4E49",
-          description: remoteWriter.description || existing?.description || "",
-          enabled: remoteWriter.enabled !== false,
-          summary: remoteWriter.summary_md || existing?.summary || "",
-          skillJson: JSON.stringify(remoteWriter.skill_json || {}, null, 2),
-          qualityReport: remoteWriter.quality_report || existing?.qualityReport || null,
-          versions: Array.isArray(remoteWriter.versions) ? remoteWriter.versions.map(mapRemoteWriterVersion) : existing?.versions || [],
-          examples: existing?.examples || [],
-          createdAt: remoteWriter.created_at || existing?.createdAt || now(),
-          updatedAt: remoteWriter.updated_at || now(),
-          cloudId: remoteWriter.id,
-          cloudUpdatedAt: remoteWriter.updated_at || now(),
-          cloudVersion: remoteWriter.version || 1
-        });
-        if (existing) Object.assign(existing, next);
-        else {
-          state.styles.push(next);
-          imported += 1;
-        }
-      });
-      if (!ui.editingStyle && state.styles[0]) ui.editingStyle = clone(state.styles[0]);
-      persist();
-      eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
-      eventBus.emit(EVENTS.RENDER_STYLE_LIST);
-      eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-      toast(`\u5DF2\u4ECE\u4E91\u7AEF\u62C9\u53D6 ${writers.length} \u4E2A\u6267\u7B14\u4EBA\uFF0C\u65B0\u589E ${imported} \u4E2A`);
-    });
-  }
-  function mapRemoteWriterVersion(version) {
-    return {
-      id: version.id || createId(),
-      version: Number(version.version || 1),
-      createdAt: version.created_at || now(),
-      summary: version.summary_md || "",
-      skillJson: JSON.stringify(version.skill_json || {}, null, 2),
-      qualityReport: version.quality_report || null,
-      sourceExamples: [],
-      analyses: [],
-      analysis: "",
-      aggregation: "",
-      aggregationData: null,
-      testDoc: "",
-      testReport: ""
-    };
-  }
-  function getCurrentCloudWriter() {
-    return state.styles.find((style) => style.id === ui.selectedSkillCardId) || state.styles.find((style) => style.id === ui.editingStyle?.id) || state.styles[0] || null;
   }
   function getCloudSettingsLocation() {
     return `${normalizeCloudBaseUrl2(state.cloud?.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL)} / \u5F53\u524D\u5DE5\u4F5C\u533A`;
