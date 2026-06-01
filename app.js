@@ -18,6 +18,7 @@ import {
 } from "./src/core/storageBootstrap.js";
 import { EVENTS, eventBus } from "./src/core/eventBus.js";
 import { createAiClient } from "./src/modules/ai/aiClient.js";
+import { createCloudApiClient, getDefaultCloudApiBaseUrl } from "./src/modules/cloud/cloudApiClient.js";
 import { createCloudPanelRenderer } from "./src/modules/cloud/cloudPanelRenderer.js";
 import { getFeatureByAction } from "./src/modules/product/featureCatalog.js";
 import { createDocumentEditor } from "./src/modules/documents/documentEditor.js";
@@ -100,8 +101,7 @@ const ui = {
 
 const els = {};
 const EDITOR_UNDO_LIMIT = 80;
-const LOCAL_CLOUD_API_BASE_URL = "http://127.0.0.1:8787/api";
-const DEFAULT_CLOUD_API_BASE_URL = getDefaultCloudApiBaseUrl();
+const DEFAULT_CLOUD_API_BASE_URL = getDefaultCloudApiBaseUrl(window.location);
 const aiClient = createAiClient({
   getSettings: () => state.settings || {},
   notify: (message, tone) => toast(message, tone),
@@ -132,6 +132,11 @@ const progressController = createProgressController({
   setCurrent: (element) => {
     ui.progressElement = element;
   },
+});
+const cloudApiClient = createCloudApiClient({
+  state,
+  els,
+  defaultCloudApiBaseUrl: DEFAULT_CLOUD_API_BASE_URL,
 });
 const cloudPanelRenderer = createCloudPanelRenderer({
   state,
@@ -1135,30 +1140,8 @@ function renderCloudManualPaymentMethods() {
   cloudPanelRenderer.renderCloudManualPaymentMethods();
 }
 
-function getDefaultCloudApiBaseUrl() {
-  const location = window.location;
-  if (!location || !["http:", "https:"].includes(location.protocol)) {
-    return LOCAL_CLOUD_API_BASE_URL;
-  }
-  if (isLocalDevelopmentHost(location.hostname)) {
-    return LOCAL_CLOUD_API_BASE_URL;
-  }
-  return `${location.origin}/api`;
-}
-
-function isLocalDevelopmentHost(hostname) {
-  return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(String(hostname || "").toLowerCase());
-}
-
-function shouldReplaceLocalApiBaseUrl(value) {
-  if (DEFAULT_CLOUD_API_BASE_URL === LOCAL_CLOUD_API_BASE_URL) return false;
-  return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\]):8787\/api\/?$/i.test(String(value || "").trim());
-}
-
 function normalizeCloudBaseUrl(value) {
-  const raw = String(value || "").trim();
-  if (shouldReplaceLocalApiBaseUrl(raw)) return DEFAULT_CLOUD_API_BASE_URL;
-  return (raw || DEFAULT_CLOUD_API_BASE_URL).replace(/\/+$/, "") || DEFAULT_CLOUD_API_BASE_URL;
+  return cloudApiClient.normalizeBaseUrl(value);
 }
 
 function saveCloudBaseUrlFromInput() {
@@ -1169,33 +1152,7 @@ function saveCloudBaseUrlFromInput() {
 }
 
 async function cloudRequest(path, options = {}) {
-  const baseUrl = normalizeCloudBaseUrl(state.cloud?.apiBaseUrl || els.cloudBaseUrlInput?.value);
-  const headers = {
-    "Content-Type": "application/json",
-    ...(options.headers || {}),
-  };
-  const orgId = state.cloud?.activeOrganization?.id;
-  if (orgId) headers["x-organization-id"] = orgId;
-  let response;
-  try {
-    response = await fetch(`${baseUrl}${path}`, {
-      ...options,
-      headers,
-      credentials: "include",
-    });
-  } catch (error) {
-    throw new Error(`无法连接云端 API：${baseUrl}。请确认后端服务已启动，或检查云端 API 地址。`);
-  }
-  const text = await response.text();
-  const data = text ? parseJsonSafely(text) : {};
-  if (!response.ok) {
-    const message = data?.error?.message || data?.message || text || response.statusText;
-    const error = new Error(message);
-    error.status = response.status;
-    error.payload = data;
-    throw error;
-  }
-  return data;
+  return cloudApiClient.request(path, options);
 }
 
 function parseJsonSafely(text, fallback = {}) {

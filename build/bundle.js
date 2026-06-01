@@ -24243,6 +24243,84 @@ ${formatListItems(items)}`;
     return typeof window !== "undefined" ? window : globalThis;
   }
 
+  // src/modules/cloud/cloudApiClient.js
+  var LOCAL_CLOUD_API_BASE_URL = "http://127.0.0.1:8787/api";
+  function isLocalDevelopmentHost(hostname) {
+    return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(String(hostname || "").toLowerCase());
+  }
+  function getDefaultCloudApiBaseUrl(location = globalThis.window?.location) {
+    if (!location || !["http:", "https:"].includes(location.protocol)) {
+      return LOCAL_CLOUD_API_BASE_URL;
+    }
+    if (isLocalDevelopmentHost(location.hostname)) {
+      return LOCAL_CLOUD_API_BASE_URL;
+    }
+    return `${location.origin}/api`;
+  }
+  function shouldReplaceLocalApiBaseUrl(value, options = {}) {
+    const defaultCloudApiBaseUrl = options.defaultCloudApiBaseUrl || getDefaultCloudApiBaseUrl();
+    const localCloudApiBaseUrl = options.localCloudApiBaseUrl || LOCAL_CLOUD_API_BASE_URL;
+    if (defaultCloudApiBaseUrl === localCloudApiBaseUrl) return false;
+    return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\]):8787\/api\/*$/i.test(String(value || "").trim());
+  }
+  function normalizeCloudBaseUrl(value, options = {}) {
+    const defaultCloudApiBaseUrl = options.defaultCloudApiBaseUrl || getDefaultCloudApiBaseUrl();
+    const raw = String(value || "").trim();
+    if (shouldReplaceLocalApiBaseUrl(raw, options)) return defaultCloudApiBaseUrl;
+    return (raw || defaultCloudApiBaseUrl).replace(/\/+$/, "") || defaultCloudApiBaseUrl;
+  }
+  function parseCloudJsonSafely(text, fallback = {}) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return fallback;
+    }
+  }
+  function createCloudApiClient(deps = {}) {
+    const {
+      state: state2 = {},
+      els: els2 = {},
+      defaultCloudApiBaseUrl = getDefaultCloudApiBaseUrl(),
+      fetchImpl = globalThis.fetch?.bind(globalThis)
+    } = deps;
+    function normalizeBaseUrl(value) {
+      return normalizeCloudBaseUrl(value, { defaultCloudApiBaseUrl });
+    }
+    async function request(path, options = {}) {
+      const baseUrl = normalizeBaseUrl(state2.cloud?.apiBaseUrl || els2.cloudBaseUrlInput?.value);
+      const headers = {
+        "Content-Type": "application/json",
+        ...options.headers || {}
+      };
+      const orgId = state2.cloud?.activeOrganization?.id;
+      if (orgId) headers["x-organization-id"] = orgId;
+      let response;
+      try {
+        response = await fetchImpl(`${baseUrl}${path}`, {
+          ...options,
+          headers,
+          credentials: "include"
+        });
+      } catch {
+        throw new Error(`\u65E0\u6CD5\u8FDE\u63A5\u4E91\u7AEF API\uFF1A${baseUrl}\u3002\u8BF7\u786E\u8BA4\u540E\u7AEF\u670D\u52A1\u5DF2\u542F\u52A8\uFF0C\u6216\u68C0\u67E5\u4E91\u7AEF API \u5730\u5740\u3002`);
+      }
+      const text = await response.text();
+      const data = text ? parseCloudJsonSafely(text) : {};
+      if (!response.ok) {
+        const message = data?.error?.message || data?.message || text || response.statusText;
+        const error = new Error(message);
+        error.status = response.status;
+        error.payload = data;
+        throw error;
+      }
+      return data;
+    }
+    return {
+      normalizeBaseUrl,
+      request
+    };
+  }
+
   // src/modules/cloud/billingFormatters.js
   function formatManualPaymentPackage(item = {}) {
     const amount = Number(item.amount_cny || 0);
@@ -36851,8 +36929,7 @@ ${mention} ` : `${mention} `;
   };
   var els = {};
   var EDITOR_UNDO_LIMIT = 80;
-  var LOCAL_CLOUD_API_BASE_URL = "http://127.0.0.1:8787/api";
-  var DEFAULT_CLOUD_API_BASE_URL = getDefaultCloudApiBaseUrl();
+  var DEFAULT_CLOUD_API_BASE_URL = getDefaultCloudApiBaseUrl(window.location);
   var aiClient = createAiClient({
     getSettings: () => state.settings || {},
     notify: (message, tone) => toast(message, tone)
@@ -36883,6 +36960,11 @@ ${mention} ` : `${mention} `;
     setCurrent: (element) => {
       ui.progressElement = element;
     }
+  });
+  var cloudApiClient = createCloudApiClient({
+    state,
+    els,
+    defaultCloudApiBaseUrl: DEFAULT_CLOUD_API_BASE_URL
   });
   var cloudPanelRenderer = createCloudPanelRenderer({
     state,
@@ -37470,7 +37552,7 @@ ${mention} ` : `${mention} `;
       model: "",
       ...state.cloud || {}
     };
-    state.cloud.apiBaseUrl = normalizeCloudBaseUrl(state.cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL);
+    state.cloud.apiBaseUrl = normalizeCloudBaseUrl2(state.cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL);
     state.cloud.organizations = Array.isArray(state.cloud.organizations) ? state.cloud.organizations : [];
     state.cloud.members = Array.isArray(state.cloud.members) ? state.cloud.members : [];
     state.cloud.invitations = Array.isArray(state.cloud.invitations) ? state.cloud.invitations : [];
@@ -37836,62 +37918,17 @@ ${mention} ` : `${mention} `;
   function renderCloudManualPaymentMethods() {
     cloudPanelRenderer.renderCloudManualPaymentMethods();
   }
-  function getDefaultCloudApiBaseUrl() {
-    const location = window.location;
-    if (!location || !["http:", "https:"].includes(location.protocol)) {
-      return LOCAL_CLOUD_API_BASE_URL;
-    }
-    if (isLocalDevelopmentHost(location.hostname)) {
-      return LOCAL_CLOUD_API_BASE_URL;
-    }
-    return `${location.origin}/api`;
-  }
-  function isLocalDevelopmentHost(hostname) {
-    return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(String(hostname || "").toLowerCase());
-  }
-  function shouldReplaceLocalApiBaseUrl(value) {
-    if (DEFAULT_CLOUD_API_BASE_URL === LOCAL_CLOUD_API_BASE_URL) return false;
-    return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\]):8787\/api\/?$/i.test(String(value || "").trim());
-  }
-  function normalizeCloudBaseUrl(value) {
-    const raw = String(value || "").trim();
-    if (shouldReplaceLocalApiBaseUrl(raw)) return DEFAULT_CLOUD_API_BASE_URL;
-    return (raw || DEFAULT_CLOUD_API_BASE_URL).replace(/\/+$/, "") || DEFAULT_CLOUD_API_BASE_URL;
+  function normalizeCloudBaseUrl2(value) {
+    return cloudApiClient.normalizeBaseUrl(value);
   }
   function saveCloudBaseUrlFromInput() {
-    state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+    state.cloud.apiBaseUrl = normalizeCloudBaseUrl2(els.cloudBaseUrlInput.value);
     persist();
     renderCloudPanel();
     toast(`\u4E91\u7AEF\u5730\u5740\u5DF2\u4FDD\u5B58\u5230\uFF1A${getCloudSettingsLocation()}`);
   }
   async function cloudRequest(path, options = {}) {
-    const baseUrl = normalizeCloudBaseUrl(state.cloud?.apiBaseUrl || els.cloudBaseUrlInput?.value);
-    const headers = {
-      "Content-Type": "application/json",
-      ...options.headers || {}
-    };
-    const orgId = state.cloud?.activeOrganization?.id;
-    if (orgId) headers["x-organization-id"] = orgId;
-    let response;
-    try {
-      response = await fetch(`${baseUrl}${path}`, {
-        ...options,
-        headers,
-        credentials: "include"
-      });
-    } catch (error) {
-      throw new Error(`\u65E0\u6CD5\u8FDE\u63A5\u4E91\u7AEF API\uFF1A${baseUrl}\u3002\u8BF7\u786E\u8BA4\u540E\u7AEF\u670D\u52A1\u5DF2\u542F\u52A8\uFF0C\u6216\u68C0\u67E5\u4E91\u7AEF API \u5730\u5740\u3002`);
-    }
-    const text = await response.text();
-    const data = text ? parseJsonSafely(text) : {};
-    if (!response.ok) {
-      const message = data?.error?.message || data?.message || text || response.statusText;
-      const error = new Error(message);
-      error.status = response.status;
-      error.payload = data;
-      throw error;
-    }
-    return data;
+    return cloudApiClient.request(path, options);
   }
   function parseJsonSafely(text, fallback = {}) {
     try {
@@ -37914,7 +37951,7 @@ ${mention} ` : `${mention} `;
   async function refreshCloudStatus() {
     await withLoading(els.cloudRefreshBtn, "\u5237\u65B0\u4E2D", async () => {
       try {
-        state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+        state.cloud.apiBaseUrl = normalizeCloudBaseUrl2(els.cloudBaseUrlInput.value);
         const data = await cloudRequest("/me", { method: "GET" });
         applyCloudSession(data);
         if (state.cloud.authenticated) {
@@ -37937,7 +37974,7 @@ ${mention} ` : `${mention} `;
   }
   async function cloudLogin() {
     await withLoading(els.cloudLoginBtn, "\u767B\u5F55\u4E2D", async () => {
-      state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+      state.cloud.apiBaseUrl = normalizeCloudBaseUrl2(els.cloudBaseUrlInput.value);
       const data = await cloudRequest("/auth/login", {
         method: "POST",
         body: JSON.stringify({
@@ -37958,7 +37995,7 @@ ${mention} ` : `${mention} `;
   }
   async function cloudRegister() {
     await withLoading(els.cloudRegisterBtn, "\u6CE8\u518C\u4E2D", async () => {
-      state.cloud.apiBaseUrl = normalizeCloudBaseUrl(els.cloudBaseUrlInput.value);
+      state.cloud.apiBaseUrl = normalizeCloudBaseUrl2(els.cloudBaseUrlInput.value);
       const data = await cloudRequest("/auth/register", {
         method: "POST",
         body: JSON.stringify({
@@ -38495,7 +38532,7 @@ ${mention} ` : `${mention} `;
     return state.styles.find((style) => style.id === ui.selectedSkillCardId) || state.styles.find((style) => style.id === ui.editingStyle?.id) || state.styles[0] || null;
   }
   function getCloudSettingsLocation() {
-    return `${normalizeCloudBaseUrl(state.cloud?.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL)} / \u5F53\u524D\u5DE5\u4F5C\u533A`;
+    return `${normalizeCloudBaseUrl2(state.cloud?.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL)} / \u5F53\u524D\u5DE5\u4F5C\u533A`;
   }
   function getCloudDocumentLocation(document2) {
     return `${state.cloud?.activeOrganization?.name || "\u4E91\u7AEF\u5DE5\u4F5C\u533A"} / \u6587\u6863 / ${document2.title || document2.id}`;
