@@ -35593,6 +35593,225 @@ ${JSON.stringify(payload, null, 2)}`
     };
   }
 
+  // src/modules/skills/skillWorkbenchController.js
+  function createSkillWorkbenchController(deps = {}) {
+    const {
+      state: state2 = { styles: [] },
+      ui: ui2 = {},
+      els: els2 = {},
+      normalizeSkill: normalizeSkill2 = (skill) => skill,
+      persist: persist2 = () => {
+      },
+      eventBus: eventBus2 = { emit: () => {
+      } },
+      toast: toast2 = () => {
+      },
+      getSkillLocation: getSkillLocation2 = () => "\u6267\u7B14\u4EBA\u5E93",
+      switchTab: switchTab2 = () => {
+      },
+      openResponsiveTools = () => {
+      },
+      openSkillDetail: openSkillDetail2 = () => {
+      },
+      switchSkillDetailTab: switchSkillDetailTab2 = () => {
+      },
+      exportSkillPackage: exportSkillPackage2 = () => {
+      },
+      deleteStyle: deleteStyle2 = () => {
+      },
+      cancelActiveTask: cancelActiveTask2 = () => {
+      },
+      documentRef = () => globalThis.document,
+      clipboard = () => globalThis.navigator?.clipboard,
+      createInputEvent = () => new Event("input", { bubbles: true })
+    } = deps;
+    function updateBuildState(skillId, patch) {
+      const index = state2.styles.findIndex((style) => style.id === skillId);
+      if (index < 0) return null;
+      state2.styles[index] = normalizeSkill2({
+        ...state2.styles[index],
+        ...patch,
+        updatedAt: now()
+      });
+      if (ui2.editingStyle?.id === skillId) ui2.editingStyle = clone(state2.styles[index]);
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_STYLE_SELECT);
+      eventBus2.emit(EVENTS.RENDER_STYLE_LIST);
+      return state2.styles[index];
+    }
+    function createCardProgress(skillId) {
+      return {
+        update(message, progress = 0) {
+          updateBuildState(skillId, {
+            status: "building",
+            buildProgress: { message, progress },
+            lastBuildError: ""
+          });
+        }
+      };
+    }
+    function getBuildResult(style, version, outputs = {}) {
+      const aggregationData = outputs.aggregationData || {};
+      const qualityReport = outputs.qualityReport || {};
+      let parsedTestReport = {};
+      try {
+        parsedTestReport = JSON.parse(outputs.testReport || "{}");
+      } catch {
+        parsedTestReport = {};
+      }
+      return {
+        version: version.version,
+        confidence: qualityReport.confidence || aggregationData.overall_confidence || "low",
+        strongRuleCount: (aggregationData.strong_rules || qualityReport.strong_rules || []).length || 0,
+        candidateRuleCount: (aggregationData.candidate_rules || qualityReport.candidate_rules || []).length || 0,
+        privacyCount: (aggregationData.privacy_findings || qualityReport.privacy_filter_notes || []).length || 0,
+        caseSpecificCount: (aggregationData.case_specific_exclusions || qualityReport.excluded_case_specific_items || []).length || 0,
+        passed: parsedTestReport.passed ?? parsedTestReport.check_report?.passed ?? null,
+        sampleCount: (style.examples || []).length
+      };
+    }
+    function invokeFromCard(skillId) {
+      const skill = state2.styles.find((item) => item.id === skillId);
+      if (!skill) return "";
+      const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
+      const prompt = els2.generatePrompt;
+      const current = prompt.value.trimEnd();
+      prompt.value = current ? `${current}
+${mention} ` : `${mention} `;
+      prompt.dispatchEvent?.(createInputEvent());
+      switchTab2("generate");
+      openResponsiveTools();
+      prompt.focus?.();
+      toast2(`\u5DF2\u63D2\u5165 ${mention}\uFF0C\u53EF\u7EE7\u7EED\u8865\u5145\u751F\u6210\u8981\u6C42`);
+      return mention;
+    }
+    function copyHandleFromCard(skillId) {
+      const skill = state2.styles.find((item) => item.id === skillId);
+      if (!skill) return "";
+      const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
+      try {
+        const result2 = clipboard()?.writeText?.(mention);
+        if (result2?.catch) result2.catch(() => fallbackCopyText(mention));
+      } catch {
+        fallbackCopyText(mention);
+      }
+      toast2(`\u5DF2\u590D\u5236 ${mention}`);
+      return mention;
+    }
+    function fallbackCopyText(text) {
+      const doc = documentRef();
+      if (!doc?.createElement || !doc?.body) return false;
+      const input = doc.createElement("textarea");
+      input.value = text;
+      input.setAttribute("readonly", "");
+      input.style.position = "fixed";
+      input.style.left = "-9999px";
+      doc.body.appendChild(input);
+      input.select();
+      try {
+        doc.execCommand?.("copy");
+      } catch {
+      } finally {
+        input.remove();
+      }
+      return true;
+    }
+    function toggleEnabledFromCard(skillId, enabled) {
+      const skill = updateBuildState(skillId, { enabled });
+      if (!skill) return null;
+      toast2(`${enabled ? "\u5DF2\u542F\u7528" : "\u5DF2\u505C\u7528"} @${skill.handle}`);
+      return skill;
+    }
+    function openTestFromCard(skillId) {
+      openSkillDetail2(skillId);
+      switchSkillDetailTab2("test");
+    }
+    function editMarkdownFromCard(skillId) {
+      flushMarkdownEdits();
+      openSkillDetail2(skillId);
+      switchSkillDetailTab2("markdown");
+      els2.styleSummaryInput?.focus?.();
+      toast2("\u5DF2\u6253\u5F00\u6267\u7B14\u4EBA\u8BF4\u660E.md\uFF0C\u53EF\u76F4\u63A5\u7F16\u8F91\u5E76\u4FDD\u5B58");
+    }
+    function updateMarkdownSaveState() {
+      if (!els2.saveSkillMdBtn) return;
+      const isDirty = Boolean(ui2.skillMarkdownDirty && ui2.skillMarkdownDirtySkillId === ui2.editingStyle?.id);
+      els2.saveSkillMdBtn.classList.toggle("is-dirty", isDirty);
+      els2.saveSkillMdBtn.title = isDirty ? "\u8BF4\u660E.md \u6709\u672A\u4FDD\u5B58\u4FEE\u6539" : "\u4FDD\u5B58\u8BF4\u660E.md \u4FEE\u6539";
+      els2.saveSkillMdBtn.dataset.dirty = isDirty ? "true" : "false";
+    }
+    function flushMarkdownEdits() {
+      if (!ui2.skillMarkdownDirty || ui2.skillMarkdownDirtySkillId !== ui2.editingStyle?.id) return;
+      saveMarkdownEdits({ silent: true });
+    }
+    function saveMarkdownEdits({ silent = false } = {}) {
+      const skillId = ui2.editingStyle?.id;
+      if (!skillId) {
+        if (!silent) toast2("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u6267\u7B14\u4EBA", "warn");
+        clearMarkdownDirtyState();
+        return null;
+      }
+      const index = state2.styles.findIndex((style) => style.id === skillId);
+      if (index < 0) {
+        if (!silent) toast2("\u672A\u627E\u5230\u5F53\u524D\u6267\u7B14\u4EBA", "warn");
+        clearMarkdownDirtyState();
+        return null;
+      }
+      const next = normalizeSkill2({
+        ...state2.styles[index],
+        summary: els2.styleSummaryInput.value,
+        updatedAt: now()
+      });
+      state2.styles[index] = next;
+      ui2.editingStyle = clone(next);
+      clearMarkdownDirtyState();
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_STYLE_LIST);
+      if (!silent) toast2(`\u8BF4\u660E.md \u5DF2\u4FDD\u5B58\u5230\uFF1A${getSkillLocation2(next)} / \u8BF4\u660E.md`);
+      return next;
+    }
+    function clearMarkdownDirtyState() {
+      ui2.skillMarkdownDirty = false;
+      ui2.skillMarkdownDirtySkillId = null;
+      updateMarkdownSaveState();
+    }
+    function exportPackageById(skillId) {
+      const skill = state2.styles.find((item) => item.id === skillId);
+      if (!skill) return false;
+      ui2.editingStyle = clone(skill);
+      eventBus2.emit(EVENTS.RENDER_STYLE_EDITOR);
+      exportSkillPackage2();
+      return true;
+    }
+    function deleteById(skillId) {
+      const skill = state2.styles.find((item) => item.id === skillId);
+      if (!skill) return false;
+      ui2.editingStyle = clone(skill);
+      eventBus2.emit(EVENTS.RENDER_STYLE_EDITOR);
+      deleteStyle2();
+      return true;
+    }
+    function cancelBuild(skillId) {
+      return cancelActiveTask2(`skill-build:${skillId}`);
+    }
+    return {
+      updateBuildState,
+      createCardProgress,
+      getBuildResult,
+      invokeFromCard,
+      copyHandleFromCard,
+      toggleEnabledFromCard,
+      openTestFromCard,
+      editMarkdownFromCard,
+      updateMarkdownSaveState,
+      flushMarkdownEdits,
+      saveMarkdownEdits,
+      exportPackageById,
+      deleteById,
+      cancelBuild
+    };
+  }
+
   // src/ui/components/progress.js
   function createProgressController({ getCurrent, setCurrent }) {
     function closeProgress(progressBar) {
@@ -36044,6 +36263,23 @@ ${JSON.stringify(payload, null, 2)}`
     onDeleteSkill: deleteSkillById,
     onRetrySkill: (skillId) => openSkillBuilderModal(skillId),
     onCancelSkillBuild: cancelSkillBuild
+  });
+  var skillWorkbenchController = createSkillWorkbenchController({
+    state,
+    ui,
+    els,
+    normalizeSkill,
+    persist,
+    eventBus,
+    toast,
+    getSkillLocation,
+    switchTab,
+    openResponsiveTools: () => layoutController.openResponsiveTools(),
+    openSkillDetail,
+    switchSkillDetailTab,
+    exportSkillPackage,
+    deleteStyle,
+    cancelActiveTask
   });
   var skillBuilderModalController = createSkillBuilderModalController({
     state,
@@ -38107,164 +38343,46 @@ ${JSON.stringify(payload, null, 2)}`
     return skillBuilderModalController.getSelectedCategory();
   }
   function updateSkillBuildState(skillId, patch) {
-    const index = state.styles.findIndex((style) => style.id === skillId);
-    if (index < 0) return null;
-    state.styles[index] = normalizeSkill({
-      ...state.styles[index],
-      ...patch,
-      updatedAt: now()
-    });
-    if (ui.editingStyle?.id === skillId) ui.editingStyle = clone(state.styles[index]);
-    persist();
-    eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
-    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
-    return state.styles[index];
+    return skillWorkbenchController.updateBuildState(skillId, patch);
   }
   function createSkillCardProgress(skillId) {
-    return {
-      update(message, progress = 0) {
-        updateSkillBuildState(skillId, {
-          status: "building",
-          buildProgress: { message, progress },
-          lastBuildError: ""
-        });
-      }
-    };
+    return skillWorkbenchController.createCardProgress(skillId);
   }
   function getSkillBuildResult(style, version, outputs) {
-    const aggregationData = outputs.aggregationData || {};
-    const qualityReport = outputs.qualityReport || {};
-    let parsedTestReport = {};
-    try {
-      parsedTestReport = JSON.parse(outputs.testReport || "{}");
-    } catch {
-      parsedTestReport = {};
-    }
-    return {
-      version: version.version,
-      confidence: qualityReport.confidence || aggregationData.overall_confidence || "low",
-      strongRuleCount: (aggregationData.strong_rules || qualityReport.strong_rules || []).length || 0,
-      candidateRuleCount: (aggregationData.candidate_rules || qualityReport.candidate_rules || []).length || 0,
-      privacyCount: (aggregationData.privacy_findings || qualityReport.privacy_filter_notes || []).length || 0,
-      caseSpecificCount: (aggregationData.case_specific_exclusions || qualityReport.excluded_case_specific_items || []).length || 0,
-      passed: parsedTestReport.passed ?? parsedTestReport.check_report?.passed ?? null,
-      sampleCount: (style.examples || []).length
-    };
+    return skillWorkbenchController.getBuildResult(style, version, outputs);
   }
   function invokeSkillFromCard(skillId) {
-    const skill = state.styles.find((item) => item.id === skillId);
-    if (!skill) return;
-    const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
-    const prompt = els.generatePrompt;
-    const current = prompt.value.trimEnd();
-    prompt.value = current ? `${current}
-${mention} ` : `${mention} `;
-    prompt.dispatchEvent(new Event("input", { bubbles: true }));
-    switchTab("generate");
-    layoutController.openResponsiveTools();
-    prompt.focus();
-    toast(`\u5DF2\u63D2\u5165 ${mention}\uFF0C\u53EF\u7EE7\u7EED\u8865\u5145\u751F\u6210\u8981\u6C42`);
+    return skillWorkbenchController.invokeFromCard(skillId);
   }
   function copySkillHandleFromCard(skillId) {
-    const skill = state.styles.find((item) => item.id === skillId);
-    if (!skill) return;
-    const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(mention).catch(() => fallbackCopyText(mention));
-    } else {
-      fallbackCopyText(mention);
-    }
-    toast(`\u5DF2\u590D\u5236 ${mention}`);
-  }
-  function fallbackCopyText(text) {
-    const input = document.createElement("textarea");
-    input.value = text;
-    input.setAttribute("readonly", "");
-    input.style.position = "fixed";
-    input.style.left = "-9999px";
-    document.body.appendChild(input);
-    input.select();
-    try {
-      document.execCommand("copy");
-    } catch {
-    } finally {
-      input.remove();
-    }
+    return skillWorkbenchController.copyHandleFromCard(skillId);
   }
   function toggleSkillEnabledFromCard(skillId, enabled) {
-    const skill = updateSkillBuildState(skillId, { enabled });
-    if (!skill) return;
-    toast(`${enabled ? "\u5DF2\u542F\u7528" : "\u5DF2\u505C\u7528"} @${skill.handle}`);
+    return skillWorkbenchController.toggleEnabledFromCard(skillId, enabled);
   }
   function openSkillTestFromCard(skillId) {
-    openSkillDetail(skillId);
-    switchSkillDetailTab("test");
+    return skillWorkbenchController.openTestFromCard(skillId);
   }
   function editSkillMarkdownFromCard(skillId) {
-    flushSkillMarkdownEdits();
-    openSkillDetail(skillId);
-    switchSkillDetailTab("markdown");
-    els.styleSummaryInput?.focus();
-    toast("\u5DF2\u6253\u5F00\u6267\u7B14\u4EBA\u8BF4\u660E.md\uFF0C\u53EF\u76F4\u63A5\u7F16\u8F91\u5E76\u4FDD\u5B58");
+    return skillWorkbenchController.editMarkdownFromCard(skillId);
   }
   function updateSkillMarkdownSaveState() {
-    if (!els.saveSkillMdBtn) return;
-    const isDirty = Boolean(ui.skillMarkdownDirty && ui.skillMarkdownDirtySkillId === ui.editingStyle?.id);
-    els.saveSkillMdBtn.classList.toggle("is-dirty", isDirty);
-    els.saveSkillMdBtn.title = isDirty ? "\u8BF4\u660E.md \u6709\u672A\u4FDD\u5B58\u4FEE\u6539" : "\u4FDD\u5B58\u8BF4\u660E.md \u4FEE\u6539";
-    els.saveSkillMdBtn.dataset.dirty = isDirty ? "true" : "false";
+    return skillWorkbenchController.updateMarkdownSaveState();
   }
   function flushSkillMarkdownEdits() {
-    if (!ui.skillMarkdownDirty || ui.skillMarkdownDirtySkillId !== ui.editingStyle?.id) return;
-    saveSkillMarkdownEdits({ silent: true });
+    return skillWorkbenchController.flushMarkdownEdits();
   }
   function saveSkillMarkdownEdits({ silent = false } = {}) {
-    const skillId = ui.editingStyle?.id;
-    if (!skillId) {
-      if (!silent) toast("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u6267\u7B14\u4EBA", "warn");
-      ui.skillMarkdownDirty = false;
-      ui.skillMarkdownDirtySkillId = null;
-      updateSkillMarkdownSaveState();
-      return;
-    }
-    const index = state.styles.findIndex((style) => style.id === skillId);
-    if (index < 0) {
-      if (!silent) toast("\u672A\u627E\u5230\u5F53\u524D\u6267\u7B14\u4EBA", "warn");
-      ui.skillMarkdownDirty = false;
-      ui.skillMarkdownDirtySkillId = null;
-      updateSkillMarkdownSaveState();
-      return;
-    }
-    const next = normalizeSkill({
-      ...state.styles[index],
-      summary: els.styleSummaryInput.value,
-      updatedAt: now()
-    });
-    state.styles[index] = next;
-    ui.editingStyle = clone(next);
-    ui.skillMarkdownDirty = false;
-    ui.skillMarkdownDirtySkillId = null;
-    updateSkillMarkdownSaveState();
-    persist();
-    eventBus.emit(EVENTS.RENDER_STYLE_LIST);
-    if (!silent) toast(`\u8BF4\u660E.md \u5DF2\u4FDD\u5B58\u5230\uFF1A${getSkillLocation(next)} / \u8BF4\u660E.md`);
+    return skillWorkbenchController.saveMarkdownEdits({ silent });
   }
   function exportSkillPackageById(skillId) {
-    const skill = state.styles.find((item) => item.id === skillId);
-    if (!skill) return;
-    ui.editingStyle = clone(skill);
-    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-    exportSkillPackage();
+    return skillWorkbenchController.exportPackageById(skillId);
   }
   function deleteSkillById(skillId) {
-    const skill = state.styles.find((item) => item.id === skillId);
-    if (!skill) return;
-    ui.editingStyle = clone(skill);
-    eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-    deleteStyle();
+    return skillWorkbenchController.deleteById(skillId);
   }
   function cancelSkillBuild(skillId) {
-    cancelActiveTask(`skill-build:${skillId}`);
+    return skillWorkbenchController.cancelBuild(skillId);
   }
   function exportSkillMarkdown() {
     const skill = {

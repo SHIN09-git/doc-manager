@@ -1,5 +1,10 @@
 # TODO
 
+## 2026-06-01 全量审阅发现问题修复记录
+
+- [x] 从 `app.js` 拆出 `skillWorkbenchController`，集中管理执笔人卡片调用、复制、启停、测试入口、说明.md 编辑保存、构建进度状态和卡片级导出/删除/取消。
+- [x] 新增执笔人工作台控制器单元测试，覆盖构建状态回写、@调用插入、复制、说明.md 保存、测试/导出/删除/取消等卡片动作。
+
 ## 2026-05-31 全量审阅发现问题修复记录
 
 - [x] 加固执笔人包导入与旧数据归一化：第三方包或历史存档中的 `versions[].sourceExamples[].text` 会被剥离，只保留样本名、长度和添加时间，避免训练全文或敏感信息悄悄写入本地版本记录。
@@ -324,7 +329,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：116 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：124 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
 
 ## 已完成
 
@@ -392,7 +397,7 @@
 
 ### 1. 继续拆分 `app.js`
 
-- [ ] 拆出 `skillWorkbenchController`
+- [x] 拆出 `skillWorkbenchController`
 - [x] 拆出 `skillBuilderModalController`
 - [ ] 拆出 `documentPanelController`
 - [x] 拆出 `apiSettingsController`
