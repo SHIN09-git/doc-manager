@@ -1290,6 +1290,137 @@ test("unexpected request errors are recorded under the active organization", asy
   }
 });
 
+test("ops triage uses repository hook for AI usage when available", async () => {
+  const now = new Date().toISOString();
+  const token = `ops-repo-${crypto.randomUUID()}`;
+  const data = normalizeData({
+    users: [{
+      id: "usr_ops_repo",
+      email: "ops-repo@example.com",
+      name: "Ops Repo",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_ops_repo",
+      name: "Ops Repo Org",
+      slug: "ops-repo-org",
+      plan: "free",
+      created_by: "usr_ops_repo",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_ops_repo",
+      organization_id: "org_ops_repo",
+      user_id: "usr_ops_repo",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_ops_repo",
+      user_id: "usr_ops_repo",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+    ai_usage: [{
+      id: "use_ops_repo_failed",
+      organization_id: "org_ops_repo",
+      user_id: "usr_ops_repo",
+      provider: "openai-compatible",
+      model: "gpt-test",
+      task_type: "draft",
+      prompt_tokens: 12,
+      completion_tokens: 0,
+      total_tokens: 12,
+      estimated_cost: 0.01,
+      status: "failed",
+      error: "provider timeout",
+      created_at: now,
+    }],
+  });
+  let writeCalled = false;
+  let savedTriageOptions = null;
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      writeCalled = true;
+      return mutator(data);
+    },
+    async saveOpsTriage(options) {
+      savedTriageOptions = options;
+      const record = {
+        id: "tri_ops_repo",
+        organization_id: options.organizationId,
+        source_type: options.sourceType,
+        source_id: options.sourceId,
+        metadata: options.metadata,
+        updated_by: options.userId,
+        created_at: now,
+        updated_at: now,
+      };
+      data.ops_triage.push(record);
+      data.audit_logs.push({
+        id: "aud_ops_repo",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "ops.error.triage",
+        target_type: options.sourceType,
+        target_id: options.sourceId,
+        metadata: { triage_status: options.metadata.triage_status },
+        created_at: now,
+      });
+      return record;
+    },
+  };
+  const opsServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+    },
+    store,
+  });
+  await new Promise((resolve) => opsServer.listen(0, "127.0.0.1", resolve));
+  const address = opsServer.address();
+  const opsBaseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${opsBaseUrl}/api/ops/events/use_ops_repo_failed/triage`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `mowen_session=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({
+        status: "processing",
+        priority: "high",
+        assignee: "ops@example.com",
+        note: "repository path",
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(writeCalled, false);
+    assert.equal(savedTriageOptions.organizationId, "org_ops_repo");
+    assert.equal(savedTriageOptions.sourceType, "ai_usage");
+    assert.equal(savedTriageOptions.sourceId, "use_ops_repo_failed");
+    assert.equal(body.event.source_type, "ai_usage");
+    assert.equal(body.event.metadata.triage_status, "processing");
+    assert.equal(body.event.metadata.assignee, "ops@example.com");
+    assert.equal(data.ops_triage.length, 1);
+    assert.equal(data.audit_logs[0].target_type, "ai_usage");
+  } finally {
+    await new Promise((resolve) => opsServer.close(resolve));
+  }
+});
+
 async function register(email, options = {}) {
   const response = await api("/api/auth/register", {
     method: "POST",

@@ -7,6 +7,7 @@ import { runMigrations } from "../src/db/migrations/migrationRunner.js";
 import { buildAdminPreferencesGetQuery, deleteAdminPreferences, getAdminPreferences, upsertAdminPreferences } from "../src/db/repositories/adminPreferenceRepository.js";
 import { buildAuditHistoryQuery, insertAuditLog, listAuditByOrganization } from "../src/db/repositories/auditRepository.js";
 import { buildDocumentListQuery, listDocumentsByOrganization } from "../src/db/repositories/documentRepository.js";
+import { buildOpsTriageGetQuery, getOpsTriage, upsertOpsTriage } from "../src/db/repositories/opsTriageRepository.js";
 import { buildUsageHistoryQuery, listUsageByOrganization } from "../src/db/repositories/usageRepository.js";
 
 test("migration runner records executed versions and skips repeats", async () => {
@@ -334,6 +335,143 @@ test("admin preferences repository inserts and deletes scoped preferences", asyn
   assert.match(calls[2].text, /delete from admin_preferences/);
   assert.deepEqual(calls[2].values, ["org_pref", "usr_pref"]);
   assert.deepEqual(deleted, { deleted_count: 2 });
+});
+
+test("ops triage repository scopes records by organization source pair", async () => {
+  const query = buildOpsTriageGetQuery({
+    organizationId: "org_ops",
+    sourceType: "ai_usage",
+    sourceId: "use_failed",
+  });
+
+  assert.match(query.text, /from ops_triage/);
+  assert.match(query.text, /organization_id = \$1 and source_type = \$2 and source_id = \$3/);
+  assert.deepEqual(query.values, ["org_ops", "ai_usage", "use_failed"]);
+});
+
+test("ops triage repository reads and normalizes metadata", async () => {
+  const pool = {
+    async query(text, values) {
+      return {
+        rows: [{
+          id: "tri_001",
+          organization_id: values[0],
+          source_type: values[1],
+          source_id: values[2],
+          metadata: "{\"triage_status\":\"processing\",\"assignee\":\"ops@example.com\"}",
+          updated_by: "usr_ops",
+          created_at: new Date("2026-05-24T01:00:00.000Z"),
+          updated_at: new Date("2026-05-24T02:00:00.000Z"),
+        }],
+      };
+    },
+  };
+
+  const record = await getOpsTriage(pool, {
+    organizationId: "org_ops",
+    sourceType: "ai_usage",
+    sourceId: "use_failed",
+  });
+
+  assert.equal(record.organization_id, "org_ops");
+  assert.equal(record.source_type, "ai_usage");
+  assert.deepEqual(record.metadata, { triage_status: "processing", assignee: "ops@example.com" });
+  assert.equal(record.updated_at, "2026-05-24T02:00:00.000Z");
+});
+
+test("ops triage repository updates an existing record", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/select/.test(text)) {
+        return {
+          rows: [{
+            id: "tri_existing",
+            organization_id: values[0],
+            source_type: values[1],
+            source_id: values[2],
+            metadata: {},
+            updated_by: "usr_old",
+            created_at: "2026-05-24T01:00:00.000Z",
+            updated_at: "2026-05-24T01:00:00.000Z",
+          }],
+        };
+      }
+      return {
+        rows: [{
+          id: values[0],
+          organization_id: "org_ops",
+          source_type: "ai_usage",
+          source_id: "use_failed",
+          metadata: values[1],
+          updated_by: values[2],
+          created_at: "2026-05-24T01:00:00.000Z",
+          updated_at: values[3],
+        }],
+      };
+    },
+  };
+
+  const record = await upsertOpsTriage(pool, {
+    organizationId: "org_ops",
+    sourceType: "ai_usage",
+    sourceId: "use_failed",
+    metadata: { triage_status: "resolved", note: "done" },
+    userId: "usr_ops",
+    now: "2026-05-24T03:00:00.000Z",
+  });
+
+  assert.match(calls[1].text, /update ops_triage/);
+  assert.deepEqual(calls[1].values, [
+    "tri_existing",
+    { triage_status: "resolved", note: "done" },
+    "usr_ops",
+    "2026-05-24T03:00:00.000Z",
+  ]);
+  assert.equal(record.id, "tri_existing");
+  assert.deepEqual(record.metadata, { triage_status: "resolved", note: "done" });
+});
+
+test("ops triage repository inserts a new scoped record", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/select/.test(text)) return { rows: [] };
+      return {
+        rows: [{
+          id: values[0],
+          organization_id: values[1],
+          source_type: values[2],
+          source_id: values[3],
+          metadata: values[4],
+          updated_by: values[5],
+          created_at: values[6],
+          updated_at: values[7],
+        }],
+      };
+    },
+  };
+
+  const record = await upsertOpsTriage(pool, {
+    organizationId: "org_ops",
+    sourceType: "ai_usage",
+    sourceId: "use_new_failed",
+    metadata: { triage_status: "processing" },
+    userId: "usr_ops",
+    now: "2026-05-24T04:00:00.000Z",
+  });
+
+  assert.match(calls[1].text, /insert into ops_triage/);
+  assert.match(record.id, /^tri_/);
+  assert.deepEqual(calls[1].values.slice(1, 5), [
+    "org_ops",
+    "ai_usage",
+    "use_new_failed",
+    { triage_status: "processing" },
+  ]);
+  assert.equal(record.updated_by, "usr_ops");
 });
 
 test("document repository query supports pagination without deleted documents by default", async () => {

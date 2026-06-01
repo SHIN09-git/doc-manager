@@ -1418,8 +1418,36 @@ async function updateOpsEventTriage(ctx, eventId) {
   const body = await readJsonBody(ctx.request, ctx.env.maxJsonBodyBytes);
   const triage = normalizeTriagePayload(body);
   const triageStatus = normalizeTriageStatus(body.triage_status || body.status);
-  const { organization, membership } = await loadOrg(ctx);
+  const { data, organization, membership } = await loadOrg(ctx);
   if (!ADMIN_ROLES.has(membership.role)) throw new HttpError(403, "只有管理员可以处理错误事件", "forbidden");
+  const systemEvent = data.system_events.find((entry) =>
+    entry.id === eventId &&
+    entry.organization_id === organization.id &&
+    ["warn", "error"].includes(entry.level));
+  if (!systemEvent) {
+    const usage = data.ai_usage.find((entry) =>
+      entry.id === eventId &&
+      entry.organization_id === organization.id &&
+      entry.status === "failed");
+    if (!usage) throw new HttpError(404, "错误事件不存在", "not_found");
+    const existing = findOpsTriage(data, organization.id, "ai_usage", usage.id);
+    const metadata = applyTriageMetadata(
+      { ...(existing?.metadata || {}), triage_status: triageStatus },
+      triage,
+      ctx.auth.user.id,
+    );
+    if (typeof ctx.store.saveOpsTriage === "function") {
+      const record = await ctx.store.saveOpsTriage({
+        organizationId: organization.id,
+        sourceType: "ai_usage",
+        sourceId: usage.id,
+        metadata,
+        userId: ctx.auth.user.id,
+      });
+      sendJson(ctx.response, 200, { event: buildAiUsageErrorItem(usage, record) });
+      return;
+    }
+  }
   const event = await ctx.store.write((data) => {
     const item = data.system_events.find((entry) =>
       entry.id === eventId &&

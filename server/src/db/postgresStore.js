@@ -6,6 +6,7 @@ import { runMigrations } from "./migrations/migrationRunner.js";
 import { getAdminPreferences, upsertAdminPreferences, deleteAdminPreferences } from "./repositories/adminPreferenceRepository.js";
 import { insertAuditLog, listAuditByOrganization } from "./repositories/auditRepository.js";
 import { listDocumentsByOrganization } from "./repositories/documentRepository.js";
+import { getOpsTriage, upsertOpsTriage } from "./repositories/opsTriageRepository.js";
 import { listUsageByOrganization } from "./repositories/usageRepository.js";
 
 const TABLES = {
@@ -165,6 +166,33 @@ export class PostgresStore {
         created_at: now,
       });
       return result;
+    });
+  }
+
+  async getOpsTriage(options) {
+    await this.init();
+    return getOpsTriage(this.pool, options);
+  }
+
+  async saveOpsTriage(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const record = await upsertOpsTriage(client, { ...options, now });
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "ops.error.triage",
+        target_type: options.sourceType,
+        target_id: options.sourceId,
+        metadata: {
+          triage_status: record.metadata?.triage_status || "",
+          assignee: record.metadata?.assignee || "",
+          sla_at: record.metadata?.sla_at || "",
+        },
+        created_at: now,
+      });
+      return record;
     });
   }
 

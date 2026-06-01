@@ -9,6 +9,8 @@
 - PostgreSQL Store 新增 `adminPreferenceRepository`，后台审计筛选、错误筛选和反馈筛选的读写/清空在 PostgreSQL 下可走表级事务，不再依赖整库快照写回。
 - `admin_preferences` 表级写入仍与旧快照写队列共享 advisory lock，并在同一事务内写入审计日志，降低灰度运营时个人偏好保存覆盖其他数据的风险。
 - 补充 PostgreSQL repository 测试，覆盖后台偏好读取、插入、更新、删除和审计日志插入。
+- PostgreSQL Store 新增 `opsTriageRepository`，AI 失败记录的后台跟进状态、负责人、备注和 SLA 在 PostgreSQL 下可走表级 upsert，并保持同事务审计。
+- 补充 AI 失败跟进回归测试，确认 Store 提供 repository hook 时不会落回整库 `write()`。
 
 ## 2026-06-01
 

@@ -26,8 +26,9 @@
 - SLA 运营：后台概览新增 SLA 风险摘要，反馈和错误列表支持 SLA 筛选，并可复制运营日报。
 - 权限细分：新增 `operator` 运营只读角色，可查看独立后台运营数据并保存个人筛选偏好，但不能修改组织、成员、接口、账单、反馈或错误跟进。
 - 存储拆分：`admin_preferences` 已在 PostgreSQL Store 下改为表级 repository 读写，保存/清空后台偏好不再依赖整库快照写回。
+- 存储拆分：`ops_triage` 已在 PostgreSQL Store 下改为表级 repository upsert，AI 失败记录跟进不再依赖整库快照写回。
 
-这意味着独立后台已经从“可看数据”进入“可跟进、可批量处理、可成本观察、可只读授权、部分高频偏好写入表级化”的灰度运营状态。下一阶段建议继续处理 `ops_triage` 和执笔人相关 PostgreSQL 写入 repository 化、真实支付渠道和真实邮件投递联调。
+这意味着独立后台已经从“可看数据”进入“可跟进、可批量处理、可成本观察、可只读授权、部分高频运营写入表级化”的灰度运营状态。下一阶段建议继续处理执笔人相关 PostgreSQL 写入 repository 化、真实支付渠道和真实邮件投递联调。
 
 本报告总结“摹文拟笔工作台”近期商业化补齐工作，并列出仍未完成的事项。当前已完成 P0 最小商业化底座、P1 三轮灰度试用能力补齐，以及 P2 前四轮邮件、支付、管理后台、备份、组织治理、外部服务实接准备、PostgreSQL repository 试点、备份加固和整轮收口施工；第五轮已完成阶段 A Resend 邮件服务商适配、阶段 C PostgreSQL 只读 repository 扩面，以及阶段 E 的独立后台深水区增强。阶段 B 真实支付渠道接入暂缓。
 
@@ -356,11 +357,11 @@ Review 后修复：
 
 ### 3. PostgreSQL Store 生产级改造
 
-当前 PostgreSQL Store 已完成迁移版本表、`ai_usage` 历史查询、`audit_logs` 审计查询、`documents` 文档列表只读 repository，以及 `admin_preferences` 表级读写 repository 试点；但执笔人和 `ops_triage` 写入路径仍主要采用快照式兼容层，适合小团队灰度，不适合高并发多租户。
+当前 PostgreSQL Store 已完成迁移版本表、`ai_usage` 历史查询、`audit_logs` 审计查询、`documents` 文档列表只读 repository，以及 `admin_preferences`、`ops_triage` 表级读写 repository 试点；但执笔人写入路径仍主要采用快照式兼容层，适合小团队灰度，不适合高并发多租户。
 
 需要完成：
 
-- 继续拆出 `writer_profiles`、`writer_versions`、`ops_triage` 表级 repository。
+- 继续拆出 `writer_profiles`、`writer_versions` 表级 repository。
 - 用增量 SQL 替代整库快照写回。
 - 给文档、执笔人、用量、审计等高频表增加分页查询。
 - 增加 PostgreSQL 集成测试。

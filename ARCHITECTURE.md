@@ -289,10 +289,11 @@ P2 第五轮阶段 C 已补充：
 - `audit_logs` 只读 repository，`GET /api/audit` 在 PostgreSQL Store 下优先走表级查询。
 - `documents` 分页只读 repository，`GET /api/documents` 在 PostgreSQL Store 下优先走表级查询，并返回可选 `page_info`。
 - `admin_preferences` 表级 repository，后台偏好读取、保存和清空在 PostgreSQL Store 下走独立事务，并与旧快照写队列共享 advisory lock。
+- `ops_triage` 表级 repository，AI 失败记录的后台跟进映射在 PostgreSQL Store 下走独立 upsert，并在同一事务写审计日志。
 - `ai_usage` 写入暂不切为 insert-only；在审计写入和快照事务边界拆清前，继续避免增量写被快照写覆盖。
 - Repository 测试覆盖组织隔离、limit、筛选、游标分页、JSON/日期归一和迁移版本跳过重复执行。
 
-仍需继续完成真实支付服务商 SDK、备份恢复演练、`ops_triage`/执笔人相关表的增量写 repository 和企业部署增强。
+仍需继续完成真实支付服务商 SDK、备份恢复演练、执笔人相关表的增量写 repository 和企业部署增强。
 
 ## PPT 链路
 
@@ -350,7 +351,7 @@ npm run test:e2e
 独立后台 `admin.html` 直接调用商业化 API，不依赖主工作台 DOM。当前后台运营链路包括：
 
 - 用量：`ai_usage` 记录任务类型、token、状态和后端统一估算成本；`AI_COST_RATES` 可按 provider/model 配置价格。
-- 错误：`system_events` 保存组织归属的系统事件；`ai_usage` 失败记录通过 `ops_triage` 保存跟进状态，避免污染原始用量事实。
+- 错误：`system_events` 保存组织归属的系统事件；`ai_usage` 失败记录通过 `ops_triage` 保存跟进状态，避免污染原始用量事实；PostgreSQL Store 下 AI 失败跟进已走表级 repository 写入。
 - 反馈：`user.feedback` 仍保存在 `system_events`，单条和批量状态流转都会写审计。
 - 偏好：`admin_preferences` 保存后台审计筛选、错误筛选和反馈筛选，按 `organization_id + user_id` 隔离；PostgreSQL Store 下已走表级 repository 写入。
 - 权限：owner/admin 可管理后台数据，operator 为运营只读角色；组织后台只返回当前组织事件，平台级 `organization_id === null` 事件预留给未来平台管理后台。

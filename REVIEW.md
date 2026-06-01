@@ -1,5 +1,24 @@
 # 代码评审记录
 
+## 2026-06-02 错误跟进 PostgreSQL Repository Review
+
+范围：`server/src/db/repositories/opsTriageRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
+
+结论：本轮没有发现阻断问题。AI 失败记录的后台跟进映射已从整库快照写回拆为 `ops_triage` 表级 repository；系统事件跟进仍修改 `system_events` 本体，保留原路径。PostgreSQL Store 下的 AI 失败跟进会在同一事务 upsert `ops_triage` 并写入 `audit_logs`，同时和旧写路径共享 advisory lock。
+
+已确认：
+
+- `POST /api/ops/events/:id/triage` 处理 `ai_usage` 失败记录时，如果 Store 提供 `saveOpsTriage`，不会再调用整库 `write()`。
+- `ops_triage` repository 按 `organization_id + source_type + source_id` 查询和 upsert，避免跨组织串写。
+- 返回给后台的 AI 失败事件仍复用原 `buildAiUsageErrorItem` 结构，前端契约不变。
+- Repository 测试覆盖查询构建、读取归一、已有记录更新和新记录插入；API 回归测试覆盖 repository hook 路径。
+
+残余风险：
+
+- `system_events` 的跟进仍走快照写回，因为它修改事件本体；如后续要彻底增量化，需要单独设计 `system_events` update repository。
+- `writer_profiles`、`writer_versions` 仍未拆成表级写入 repository。
+- 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
+
 ## 2026-06-02 后台偏好 PostgreSQL Repository Review
 
 范围：`server/src/db/repositories/adminPreferenceRepository.js`、`server/src/db/repositories/auditRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`。
