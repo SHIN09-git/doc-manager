@@ -1701,6 +1701,165 @@ test("AI chat usage uses repository hook when available", async () => {
   }
 });
 
+test("AI overage credit spend uses repository hook when available", async () => {
+  const now = new Date().toISOString();
+  const token = `credit-spend-repo-${crypto.randomUUID()}`;
+  const data = normalizeData({
+    users: [{
+      id: "usr_credit_repo",
+      email: "credit-repo@example.com",
+      name: "Credit Repo",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_credit_repo",
+      name: "Credit Repo Org",
+      slug: "credit-repo-org",
+      plan: "free",
+      created_by: "usr_credit_repo",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_credit_repo",
+      organization_id: "org_credit_repo",
+      user_id: "usr_credit_repo",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_credit_repo",
+      user_id: "usr_credit_repo",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+    ai_usage: [{
+      id: "use_existing_limit",
+      organization_id: "org_credit_repo",
+      user_id: "usr_credit_repo",
+      provider: "mock",
+      model: "mock",
+      task_type: "draft",
+      prompt_tokens: 1,
+      completion_tokens: 0,
+      total_tokens: 1,
+      estimated_cost: 0,
+      status: "success",
+      error: "",
+      created_at: now,
+    }],
+    credit_accounts: [{
+      id: "crd_credit_repo",
+      organization_id: "org_credit_repo",
+      user_id: "usr_credit_repo",
+      balance: 2,
+      updated_at: now,
+    }],
+  });
+  let writeCount = 0;
+  let recordedUsageOptions = null;
+  let spendOptions = null;
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      writeCount += 1;
+      return mutator(data);
+    },
+    async recordAiUsage(options) {
+      recordedUsageOptions = options;
+      data.ai_usage.push(options.usage);
+      data.audit_logs.push({
+        id: "aud_credit_usage",
+        organization_id: options.usage.organization_id,
+        user_id: options.usage.user_id,
+        action: "ai.chat",
+        target_type: "ai_usage",
+        target_id: options.usage.id,
+        metadata: { status: options.usage.status },
+        created_at: options.usage.created_at,
+      });
+      return options.usage;
+    },
+    async spendCreditsForUsage(options) {
+      spendOptions = options;
+      const account = data.credit_accounts.find((item) => item.organization_id === options.organizationId && item.user_id === options.userId);
+      account.balance -= Number(options.amount || 1);
+      account.updated_at = now;
+      data.credit_ledger.push({
+        id: "led_credit_spend",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        order_id: null,
+        usage_id: options.usageId,
+        direction: "out",
+        amount: Number(options.amount || 1),
+        balance_after: account.balance,
+        reason: "ai_quota_overage",
+        created_at: now,
+      });
+      data.audit_logs.push({
+        id: "aud_credit_spend",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "billing.credit.spend",
+        target_type: "ai_usage",
+        target_id: options.usageId,
+        metadata: { amount: Number(options.amount || 1), balance_after: account.balance },
+        created_at: now,
+      });
+      return account;
+    },
+  };
+  const creditServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+      DAILY_USER_REQUEST_LIMIT: "1",
+      DAILY_ORG_REQUEST_LIMIT: "10",
+    },
+    store,
+  });
+  await new Promise((resolve) => creditServer.listen(0, "127.0.0.1", resolve));
+  const address = creditServer.address();
+  const creditBaseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${creditBaseUrl}/api/ai/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `mowen_session=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({
+        task_type: "draft",
+        messages: [{ role: "user", content: "hello credit spend" }],
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(writeCount, 1);
+    assert.equal(data.rate_limits.length, 1);
+    assert.equal(recordedUsageOptions.usage.id, body.usage.id);
+    assert.equal(spendOptions.organizationId, "org_credit_repo");
+    assert.equal(spendOptions.userId, "usr_credit_repo");
+    assert.equal(spendOptions.usageId, body.usage.id);
+    assert.equal(spendOptions.amount, 1);
+    assert.equal(data.credit_accounts[0].balance, 1);
+    assert.equal(data.credit_ledger[0].usage_id, body.usage.id);
+    assert.ok(data.audit_logs.some((item) => item.action === "billing.credit.spend"));
+  } finally {
+    await new Promise((resolve) => creditServer.close(resolve));
+  }
+});
+
 async function register(email, options = {}) {
   const response = await api("/api/auth/register", {
     method: "POST",

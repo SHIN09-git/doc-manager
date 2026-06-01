@@ -2498,6 +2498,9 @@ function grantCredits(data, { organizationId, userId, orderId = null, amount, re
 }
 
 async function spendCreditsForUsage(ctx, organizationId, userId, usageId, amount) {
+  if (typeof ctx.store.spendCreditsForUsage === "function") {
+    return ctx.store.spendCreditsForUsage({ organizationId, userId, usageId, amount });
+  }
   await ctx.store.write((data) => {
     const creditAmount = Math.max(1, Math.floor(Number(amount || 1)));
     const account = ensureCreditAccount(data, organizationId, userId);

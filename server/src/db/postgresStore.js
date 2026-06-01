@@ -5,6 +5,7 @@ import { normalizeData } from "./jsonStore.js";
 import { runMigrations } from "./migrations/migrationRunner.js";
 import { getAdminPreferences, upsertAdminPreferences, deleteAdminPreferences } from "./repositories/adminPreferenceRepository.js";
 import { insertAuditLog, listAuditByOrganization } from "./repositories/auditRepository.js";
+import { spendCreditsForUsage as spendCreditsForUsageRecord } from "./repositories/creditRepository.js";
 import { listDocumentsByOrganization } from "./repositories/documentRepository.js";
 import { getOpsTriage, upsertOpsTriage } from "./repositories/opsTriageRepository.js";
 import { insertUsageRecord, listUsageByOrganization } from "./repositories/usageRepository.js";
@@ -142,6 +143,37 @@ export class PostgresStore {
         created_at: record.created_at || new Date().toISOString(),
       });
       return record;
+    });
+  }
+
+  async spendCreditsForUsage(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const result = await spendCreditsForUsageRecord(client, { ...options, now });
+      if (result.skipped) {
+        await insertSystemEvent(client, {
+          id: createId("evt"),
+          organization_id: options.organizationId,
+          user_id: options.userId,
+          level: "warn",
+          type: "billing.credit.spend_skipped",
+          message: "额度扣减失败，余额不足",
+          metadata: { usage_id: options.usageId, amount: result.amount },
+          created_at: now,
+        });
+        return result.account;
+      }
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "billing.credit.spend",
+        target_type: "ai_usage",
+        target_id: options.usageId,
+        metadata: { amount: result.amount, balance_after: result.account.balance },
+        created_at: now,
+      });
+      return result.account;
     });
   }
 
@@ -380,6 +412,14 @@ async function insertRows(client, table, rows) {
       values,
     );
   }
+}
+
+async function insertSystemEvent(client, event) {
+  const columns = TABLES.system_events;
+  await client.query(
+    `insert into system_events (${columns.join(", ")}) values (${columns.map((_, index) => `$${index + 1}`).join(", ")})`,
+    columns.map((column) => serializeValue(column, event[column])),
+  );
 }
 
 function serializeValue(column, value) {

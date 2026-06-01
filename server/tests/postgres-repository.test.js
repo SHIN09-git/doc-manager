@@ -6,6 +6,7 @@ import path from "node:path";
 import { runMigrations } from "../src/db/migrations/migrationRunner.js";
 import { buildAdminPreferencesGetQuery, deleteAdminPreferences, getAdminPreferences, upsertAdminPreferences } from "../src/db/repositories/adminPreferenceRepository.js";
 import { buildAuditHistoryQuery, insertAuditLog, listAuditByOrganization } from "../src/db/repositories/auditRepository.js";
+import { spendCreditsForUsage } from "../src/db/repositories/creditRepository.js";
 import { buildDocumentListQuery, listDocumentsByOrganization } from "../src/db/repositories/documentRepository.js";
 import { buildOpsTriageGetQuery, getOpsTriage, upsertOpsTriage } from "../src/db/repositories/opsTriageRepository.js";
 import { buildUsageHistoryQuery, insertUsageRecord, listUsageByOrganization } from "../src/db/repositories/usageRepository.js";
@@ -172,6 +173,106 @@ test("usage repository inserts normalized usage rows", async () => {
   assert.equal(record.total_tokens, 20);
   assert.equal(record.estimated_cost, 0.03);
   assert.equal(record.created_at, "2026-05-24T02:00:00.000Z");
+});
+
+test("credit repository spends credits and records an out ledger", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/insert into credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_usage",
+            organization_id: values[1],
+            user_id: values[2],
+            balance: 3,
+            updated_at: "2026-05-24T03:00:00.000Z",
+          }],
+        };
+      }
+      if (/update credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_usage",
+            organization_id: values[0],
+            user_id: values[1],
+            balance: 1,
+            updated_at: values[3],
+          }],
+        };
+      }
+      if (/insert into credit_ledger/.test(text)) {
+        return {
+          rows: [{
+            id: values[0],
+            organization_id: values[1],
+            user_id: values[2],
+            order_id: values[3],
+            usage_id: values[4],
+            direction: values[5],
+            amount: values[6],
+            balance_after: values[7],
+            reason: values[8],
+            created_at: values[9],
+          }],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const result = await spendCreditsForUsage(pool, {
+    organizationId: "org_credit",
+    userId: "usr_credit",
+    usageId: "use_credit",
+    amount: 2,
+    now: "2026-05-24T03:00:00.000Z",
+  });
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.account.balance, 1);
+  assert.equal(result.ledger.usage_id, "use_credit");
+  assert.equal(result.ledger.direction, "out");
+  assert.equal(result.ledger.amount, 2);
+  assert.equal(result.ledger.balance_after, 1);
+  assert.match(calls[1].text, /balance >= \$3/);
+  assert.equal(calls[2].values[8], "ai_quota_overage");
+});
+
+test("credit repository reports skipped spends without writing a ledger", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/insert into credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_empty",
+            organization_id: values[1],
+            user_id: values[2],
+            balance: 0,
+            updated_at: values[4],
+          }],
+        };
+      }
+      if (/update credit_accounts/.test(text)) return { rows: [] };
+      throw new Error("ledger should not be written for skipped spends");
+    },
+  };
+
+  const result = await spendCreditsForUsage(pool, {
+    organizationId: "org_credit",
+    userId: "usr_credit",
+    usageId: "use_credit",
+    amount: 1,
+    now: "2026-05-24T04:00:00.000Z",
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.account.balance, 0);
+  assert.equal(result.ledger, null);
+  assert.equal(calls.length, 2);
 });
 
 test("audit repository query is organization-scoped and filterable", async () => {

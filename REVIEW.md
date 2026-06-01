@@ -1,5 +1,34 @@
 # 代码评审记录
 
+## 2026-06-02 额度扣减 PostgreSQL Repository Review
+
+范围：`server/src/db/repositories/creditRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
+
+结论：本轮没有发现阻断问题。AI 日限用完后消耗已购额度的扣减链路已从整库快照写回拆成 `credit_accounts`/`credit_ledger` 表级 repository；PostgreSQL Store 下会在同一事务更新余额、写扣减流水和 `billing.credit.spend` 审计。JSON Store 兼容路径不变。
+
+已确认：
+
+- `spendCreditsForUsage` 在 Store 支持 repository hook 时走表级扣减，否则仍走原 JSON Store 写入。
+- 扣减 SQL 使用 `balance >= amount` 条件更新，余额不足时不写扣减流水，并记录 `billing.credit.spend_skipped` 系统事件。
+- `POST /api/ai/chat` 在触发超额额度消费时，会先走用量 repository，再走额度扣减 repository；除额度检查外，不再通过兼容 `write()` 写入用量或扣减流水。
+- Repository 测试覆盖扣减成功和余额不足跳过；API 回归测试覆盖超额调用消耗已购额度的 hook 路径。
+
+残余风险：
+
+- 人工充值订单创建/审核、充值入账和套餐开通仍走兼容写入；真实运营并发升高前建议继续拆出 `manual_payment_orders` 和充值入账 repository。
+- 失败 AI 调用后的 `system_events` 追加仍走兼容写入；当前与 repository 写入共享队列和 advisory lock，不会覆盖新记录，但后续可继续拆为表级事件插入。
+- 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
+
+验证命令：
+
+```bash
+node --check server\src\db\repositories\creditRepository.js
+node --check server\src\db\postgresStore.js
+node --check server\src\app.js
+node --test server\tests\postgres-repository.test.js
+node --test server\tests\commercial-api.test.js
+```
+
 ## 2026-06-02 AI 用量写入 PostgreSQL Repository Review
 
 范围：`server/src/db/repositories/usageRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
@@ -16,7 +45,7 @@
 残余风险：
 
 - 失败 AI 调用后的 `system_events` 追加仍走兼容写入；当前与 repository 写入共享队列和 advisory lock，不会覆盖新用量记录，但后续可继续拆为表级事件插入。
-- 额度扣减与额度流水仍走兼容写入；商业化并发升高前建议继续拆出 `credit_accounts`/`credit_ledger` repository。
+- 额度扣减与额度流水已在后一轮切到 `credit_accounts`/`credit_ledger` repository；本节保留系统事件拆分风险记录。
 - 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
 
 验证命令：
@@ -915,8 +944,9 @@ npm run test:e2e
 
 结果：
 
-- 单元测试：78 项通过
-- 端到端测试：25 项通过
+- 前端与核心单元测试：238 项通过
+- 后端服务与 repository 测试：83 项通过
+- 端到端测试：30 项通过
 
 GitHub Actions 已配置基础 CI，自动运行：
 

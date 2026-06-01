@@ -16,6 +16,8 @@
 - 补充执笔人 repository 与 API hook 回归测试，确认 Store 提供表级方法时 `/api/writers` 不再回退整库 `write()`。
 - `ai_usage` 新增表级插入 repository，AI 调用用量与 `ai.chat` 审计日志在 PostgreSQL 下同事务写入，不再通过整库快照保存用量记录。
 - 补充 AI 用量写入 API hook 回归测试，确认正常 AI 调用只保留额度检查写入，实际用量记录走 repository hook。
+- `credit_accounts`/`credit_ledger` 新增超额 AI 调用扣减 repository，额度账户更新、扣减流水和扣减审计在 PostgreSQL 下同事务写入。
+- 补充额度扣减 repository 与 API hook 回归测试，确认超额调用消耗已购额度时不再通过整库 `write()` 扣减余额。
 
 ## 2026-06-01
 

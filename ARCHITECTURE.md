@@ -291,10 +291,10 @@ P2 第五轮阶段 C 已补充：
 - `admin_preferences` 表级 repository，后台偏好读取、保存和清空在 PostgreSQL Store 下走独立事务，并与旧快照写队列共享 advisory lock。
 - `ops_triage` 表级 repository，AI 失败记录的后台跟进映射在 PostgreSQL Store 下走独立 upsert，并在同一事务写审计日志。
 - `writer_profiles`/`writer_versions` 表级 repository，执笔人创建、更新、软删除、版本列表和版本恢复在 PostgreSQL Store 下走独立事务，并保持版本快照和审计日志同事务写入。
-- `ai_usage` 表级写入 repository，AI 调用用量记录与 `ai.chat` 审计日志在 PostgreSQL Store 下同事务插入；失败系统事件与额度扣减仍走兼容写入，但和 repository 写入共享同一写队列与 advisory lock。
+- `ai_usage` 表级写入 repository，AI 调用用量记录与 `ai.chat` 审计日志在 PostgreSQL Store 下同事务插入；AI 超额调用的额度扣减走 `credit_accounts`/`credit_ledger` repository，并在同事务写入扣减审计。
 - Repository 测试覆盖组织隔离、limit、筛选、游标分页、JSON/日期归一和迁移版本跳过重复执行。
 
-仍需继续完成真实支付服务商 SDK、备份恢复演练、剩余系统事件/额度写入 repository 评估、真实 PostgreSQL 集成测试和企业部署增强。
+仍需继续完成真实支付服务商 SDK、备份恢复演练、剩余系统事件和人工充值审核写入 repository 评估、真实 PostgreSQL 集成测试和企业部署增强。
 
 ## PPT 链路
 

@@ -162,6 +162,7 @@
 - [x] 执笔人调用名冲突统一返回 `handle_exists`，避免 PostgreSQL 唯一约束错误泄漏成 500。
 - [x] 补充执笔人 repository 单测和 API hook 测试，确认新路径不会调用兼容 `write()`。
 - [x] AI 用量写入已接入 `ai_usage` 表级插入 repository，用量记录与 `ai.chat` 审计日志不再依赖整库快照写回。
+- [x] AI 超额调用的额度扣减已接入 `credit_accounts`/`credit_ledger` repository，余额更新、扣减流水和审计日志不再依赖整库快照写回。
 
 ## 2026-05-24 后台深水区完成记录
 
@@ -385,7 +386,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：238 项前端与核心单元测试通过，80 项后端服务与 repository 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：238 项前端与核心单元测试通过，83 项后端服务与 repository 测试通过，30 项端到端测试通过。
 
 ## 已完成
 

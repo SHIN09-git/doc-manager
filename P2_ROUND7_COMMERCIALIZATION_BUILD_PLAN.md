@@ -2,7 +2,7 @@
 
 更新时间：2026-05-26
 
-进度更新：2026-06-02 已完成阶段 B 后台角色细分，并完成阶段 A 的 `admin_preferences`、`ops_triage`、`writer_profiles`、`writer_versions` 与 `ai_usage` 写入 repository。当前已新增 `operator` 运营只读角色，可查看独立后台运营数据并保存个人筛选偏好，组织、成员、接口、账单、反馈和错误跟进等写操作仍限定 owner/admin。
+进度更新：2026-06-02 已完成阶段 B 后台角色细分，并完成阶段 A 的 `admin_preferences`、`ops_triage`、`writer_profiles`、`writer_versions`、`ai_usage` 与超额额度扣减 repository。当前已新增 `operator` 运营只读角色，可查看独立后台运营数据并保存个人筛选偏好，组织、成员、接口、账单、反馈和错误跟进等写操作仍限定 owner/admin。
 
 第六轮已经把独立后台的运营闭环补到可灰度使用：组织级权限边界、AI 失败跟进、反馈批量处理、后端成本估算、后台偏好云端化和 SLA 摘要均已落地。第七轮建议把重心转向“生产稳定性与权限细分”，避免后台能力继续堆在 owner/admin 和快照式数据库写回之上。
 
@@ -15,7 +15,7 @@
 
 ## 阶段 A：PostgreSQL 写入路径拆分
 
-状态：已完成本轮目标，`admin_preferences`、`ops_triage`、`writer_profiles`、`writer_versions` 与 `ai_usage` 用量插入已完成表级读写；失败系统事件和额度扣减仍保留现有兼容写入，并通过同一写队列与 advisory lock 串行。
+状态：已完成本轮目标，`admin_preferences`、`ops_triage`、`writer_profiles`、`writer_versions`、`ai_usage` 用量插入与 AI 超额额度扣减已完成表级读写；失败系统事件仍保留现有兼容写入，并通过同一写队列与 advisory lock 串行。
 
 任务：
 
@@ -25,10 +25,11 @@
 - [x] 执笔人 API 在 Store 提供 repository hook 时不再调用整库 `write()`，版本冲突和调用名冲突保持原有前端错误契约。
 - [x] 补 JSON Store 与 PostgreSQL Store 的行为一致性测试。
 - [x] 将 `recordUsage` 的用量记录切到 `ai_usage` insert-only repository，并在同事务写入 `ai.chat` 审计日志。
+- [x] 将 AI 超额调用的额度扣减切到 `credit_accounts`/`credit_ledger` repository，并在同事务写入扣减审计。
 
 验收：
 
-- PostgreSQL Store 下 `admin_preferences`、`ops_triage`、`writer_profiles`、`writer_versions` 和 `ai_usage` 用量插入可独立读写。
+- PostgreSQL Store 下 `admin_preferences`、`ops_triage`、`writer_profiles`、`writer_versions`、`ai_usage` 用量插入和 AI 超额额度扣减可独立读写。
 - JSON Store 行为不变。
 - 不引入跨表快照覆盖风险。
 
