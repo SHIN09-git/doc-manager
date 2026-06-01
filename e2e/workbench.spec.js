@@ -977,7 +977,7 @@ test("standalone admin page supports core management actions with API session", 
   await expect(page.locator('[data-admin-action="invite-copy"]')).toBeEnabled();
   await page.locator('[data-member-role="mem-2"]').selectOption("admin");
   await page.locator('[data-admin-action="member-role"][data-member-id="mem-2"]').click();
-  await expect(page.locator("#adminContent")).toContainText("admin");
+  await expect(page.locator("#adminContent")).toContainText("管理员");
 
   await page.locator('[data-admin-view="keys"]').click();
   await page.locator('[data-admin-form="api-key"] input[name="provider"]').fill("deepseek");

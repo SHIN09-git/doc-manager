@@ -46,9 +46,11 @@ const EMAIL_REQUEST_WINDOW_MS = 1000 * 60 * 10;
 const EMAIL_REQUEST_LIMIT = 3;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ADMIN_ROLES = new Set(["owner", "admin"]);
+const ADMIN_VIEW_ROLES = new Set(["owner", "admin", "operator"]);
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const manualPaymentHandlers = createManualPaymentHandlers({
   adminRoles: ADMIN_ROLES,
+  viewerRoles: ADMIN_VIEW_ROLES,
   addAudit,
   addSystemEvent,
   applyApprovedPlanOrder,
@@ -637,7 +639,7 @@ async function updateOrganization(ctx, organizationId) {
 
 async function listOrganizationMembers(ctx, organizationId) {
   const data = await ctx.store.read();
-  requireOrganizationRole(data, ctx.auth.user.id, organizationId, ["owner", "admin", "member"]);
+  requireOrganizationRole(data, ctx.auth.user.id, organizationId, ["owner", "admin", "operator", "member"]);
   const members = data.memberships
     .filter((membership) => membership.organization_id === organizationId)
     .map((membership) => ({
@@ -999,7 +1001,8 @@ async function restoreWriterVersion(ctx, writerId, versionId) {
 
 async function listApiKeys(ctx) {
   requireVerifiedUser(ctx);
-  const { data, organization } = await loadOrg(ctx);
+  const { data, organization, membership } = await loadOrg(ctx);
+  if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以查看组织接口", "forbidden");
   const keys = data.api_keys
     .filter((key) => key.organization_id === organization.id && !key.disabled_at)
     .map(publicApiKey);
@@ -1138,18 +1141,18 @@ async function currentUsage(ctx) {
 
 async function usageHistory(ctx) {
   const { data, organization, membership } = await loadOrg(ctx);
-  const isAdmin = ADMIN_ROLES.has(membership.role);
+  const canViewOrganization = ADMIN_VIEW_ROLES.has(membership.role);
   const limit = getQueryLimit(ctx.url, 200, 1000);
   const usageItems = typeof ctx.store.listUsageByOrganization === "function"
     ? await ctx.store.listUsageByOrganization({
       organizationId: organization.id,
-      userId: isAdmin ? "" : ctx.auth.user.id,
+      userId: canViewOrganization ? "" : ctx.auth.user.id,
       filters: normalizeUsageFiltersFromUrl(ctx.url),
       limit,
     })
     : filterByQuery(data.ai_usage.filter((item) =>
       item.organization_id === organization.id &&
-      (isAdmin || item.user_id === ctx.auth.user.id)), ctx.url)
+      (canViewOrganization || item.user_id === ctx.auth.user.id)), ctx.url)
       .slice(-limit);
   const usage = usageItems
     .map(publicUsage);
@@ -1158,32 +1161,33 @@ async function usageHistory(ctx) {
 
 async function billingSummary(ctx) {
   const { data, organization, membership } = await loadOrg(ctx);
-  const isAdmin = ADMIN_ROLES.has(membership.role);
+  const canManageBilling = ADMIN_ROLES.has(membership.role);
+  const canViewOrganization = ADMIN_VIEW_ROLES.has(membership.role);
   const today = todayKey();
   const usage = data.ai_usage.filter((item) =>
     item.organization_id === organization.id &&
     item.created_at?.startsWith(today) &&
-    (isAdmin || item.user_id === ctx.auth.user.id));
+    (canViewOrganization || item.user_id === ctx.auth.user.id));
   const plan = getEffectivePlan(organization);
   const limits = getPlanLimits(plan, ctx.env);
-  const webhooks = isAdmin
+  const webhooks = canViewOrganization
     ? data.payment_webhooks
       .filter((item) => item.organization_id === organization.id)
       .slice(-20)
     : [];
   const orders = data.manual_payment_orders
-    .filter((item) => item.organization_id === organization.id && (isAdmin || item.user_id === ctx.auth.user.id))
+    .filter((item) => item.organization_id === organization.id && (canViewOrganization || item.user_id === ctx.auth.user.id))
     .slice(-20);
   const creditLedger = listPublicCreditLedger(data, {
     organizationId: organization.id,
     userId: ctx.auth.user.id,
-    isAdmin,
+    isAdmin: canViewOrganization,
     limit: 50,
   });
   const monthUsage = data.ai_usage.filter((item) =>
     item.organization_id === organization.id &&
     item.created_at?.startsWith(monthKey()) &&
-    (isAdmin || item.user_id === ctx.auth.user.id));
+    (canViewOrganization || item.user_id === ctx.auth.user.id));
   const credits = getCreditAccount(data, organization.id, ctx.auth.user.id);
   sendJson(ctx.response, 200, {
     organization: { id: organization.id, name: organization.name, plan, stored_plan: organization.plan, plan_expires_at: organization.plan_expires_at || null },
@@ -1192,12 +1196,12 @@ async function billingSummary(ctx) {
     usage: summarizeUsage(usage),
     budget: summarizeUsageBudget(usage, monthUsage, ctx.env),
     payment_webhooks: webhooks,
-    manual_orders: orders.map((item) => publicManualPaymentOrder(item, { admin: isAdmin, userId: ctx.auth.user.id })),
+    manual_orders: orders.map((item) => publicManualPaymentOrder(item, { admin: canViewOrganization, userId: ctx.auth.user.id })),
     credit_ledger: creditLedger,
     checkout: {
       mode: ctx.env.paymentCheckoutMode,
-      enabled: isAdmin && ctx.env.paymentCheckoutMode !== "disabled",
-      available_plans: isAdmin ? getCheckoutPlanOptions(ctx.env) : [],
+      enabled: canManageBilling && ctx.env.paymentCheckoutMode !== "disabled",
+      available_plans: canManageBilling ? getCheckoutPlanOptions(ctx.env) : [],
     },
     manual_payment: getManualPaymentSummary(ctx.env),
   });
@@ -1244,7 +1248,7 @@ async function createBillingCheckout(ctx) {
 
 async function auditHistory(ctx) {
   const { data, organization, membership } = await loadOrg(ctx);
-  if (!ADMIN_ROLES.has(membership.role)) throw new HttpError(403, "只有管理员可以查看审计日志", "forbidden");
+  if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以查看审计日志", "forbidden");
   if (typeof ctx.store.listAuditByOrganization === "function") {
     const logs = await ctx.store.listAuditByOrganization({
       organizationId: organization.id,
@@ -1261,7 +1265,7 @@ async function auditHistory(ctx) {
 
 async function recentErrors(ctx) {
   const { data, organization, membership } = await loadOrg(ctx);
-  if (!ADMIN_ROLES.has(membership.role)) throw new HttpError(403, "只有管理员可以查看错误记录", "forbidden");
+  if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以查看错误记录", "forbidden");
   sendJson(ctx.response, 200, {
     errors: buildRecentErrorItems(data, organization.id, 100),
   });
@@ -1514,7 +1518,7 @@ function normalizePreferenceFilter(value) {
 
 async function getAdminPreferences(ctx) {
   const { data, organization, membership } = await loadOrg(ctx);
-  if (!ADMIN_ROLES.has(membership.role)) throw new HttpError(403, "只有管理员可以查看后台偏好", "forbidden");
+  if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以查看后台偏好", "forbidden");
   const preferences = findAdminPreferences(data, organization.id, ctx.auth.user.id)?.preferences || {};
   sendJson(ctx.response, 200, { preferences: normalizeAdminPreferences(preferences) });
 }
@@ -1523,7 +1527,7 @@ async function updateAdminPreferences(ctx) {
   const body = await readJsonBody(ctx.request, ctx.env.maxJsonBodyBytes);
   const preferences = normalizeAdminPreferences(body.preferences || body);
   const { organization, membership } = await loadOrg(ctx);
-  if (!ADMIN_ROLES.has(membership.role)) throw new HttpError(403, "只有管理员可以保存后台偏好", "forbidden");
+  if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以保存后台偏好", "forbidden");
   const record = await ctx.store.write((data) => {
     const saved = upsertAdminPreferences(data, organization.id, ctx.auth.user.id, preferences);
     addAudit(data, organization.id, ctx.auth.user.id, "admin.preferences.update", "admin_preferences", saved.id, {
@@ -1536,7 +1540,7 @@ async function updateAdminPreferences(ctx) {
 
 async function deleteAdminPreferences(ctx) {
   const { organization, membership } = await loadOrg(ctx);
-  if (!ADMIN_ROLES.has(membership.role)) throw new HttpError(403, "只有管理员可以清空后台偏好", "forbidden");
+  if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以清空后台偏好", "forbidden");
   await ctx.store.write((data) => {
     data.admin_preferences = data.admin_preferences.filter((item) =>
       !(item.organization_id === organization.id && item.user_id === ctx.auth.user.id));
@@ -1547,7 +1551,7 @@ async function deleteAdminPreferences(ctx) {
 
 async function adminDashboard(ctx) {
   const { data, organization, membership } = await loadOrg(ctx);
-  if (!ADMIN_ROLES.has(membership.role)) throw new HttpError(403, "只有管理员可以查看管理汇总", "forbidden");
+  if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以查看管理汇总", "forbidden");
   const today = todayKey();
   const members = data.memberships
     .filter((item) => item.organization_id === organization.id)
@@ -2167,11 +2171,15 @@ function normalizeEmail(email) {
 }
 
 function normalizeInviteRole(role) {
-  return role === "admin" ? "admin" : "member";
+  if (role === "admin") return "admin";
+  if (role === "operator") return "operator";
+  return "member";
 }
 
 function normalizeMemberRole(role) {
-  return role === "admin" ? "admin" : "member";
+  if (role === "admin") return "admin";
+  if (role === "operator") return "operator";
+  return "member";
 }
 
 function normalizePlan(plan) {

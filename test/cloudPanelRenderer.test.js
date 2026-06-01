@@ -77,6 +77,7 @@ function createHarness(state = {}) {
 test("role and currency helpers keep cloud copy stable", () => {
   assert.equal(roleLabel("owner"), "所有者");
   assert.equal(roleLabel("admin"), "管理员");
+  assert.equal(roleLabel("operator"), "运营只读");
   assert.equal(roleLabel("member"), "成员");
   assert.equal(roleLabel("ops"), "ops");
   assert.equal(formatCurrencyCny(1.23456), "¥1.2346");

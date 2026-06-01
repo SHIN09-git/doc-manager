@@ -5,6 +5,7 @@ import { listPublicCreditLedger } from "./creditLedger.js";
 export function createManualPaymentHandlers(options = {}) {
   const {
     adminRoles = new Set(["owner", "admin"]),
+    viewerRoles = adminRoles,
     addAudit,
     addSystemEvent,
     applyApprovedPlanOrder,
@@ -24,7 +25,7 @@ export function createManualPaymentHandlers(options = {}) {
 
   async function listManualPaymentOrders(ctx) {
     const { data, organization, membership } = await loadOrg(ctx);
-    const isAdmin = adminRoles.has(membership.role);
+    const isAdmin = viewerRoles.has(membership.role);
     const orders = data.manual_payment_orders
       .filter((item) => item.organization_id === organization.id && (isAdmin || item.user_id === ctx.auth.user.id))
       .slice(-100);

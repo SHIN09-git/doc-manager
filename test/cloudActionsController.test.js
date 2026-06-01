@@ -228,6 +228,14 @@ test("admin and cloud hash routes route through the proper surfaces", () => {
   assert.equal(admin.controller.handleHashRoute(), true);
   assert.equal(admin.windowRef.location.href, "./admin.html");
 
+  const operator = createHarness({
+    state: { cloud: { authenticated: true, membership: { role: "operator" } } },
+    windowRef: { location: { hash: "#admin", href: "" } },
+  });
+
+  assert.equal(operator.controller.handleHashRoute(), true);
+  assert.equal(operator.windowRef.location.href, "./admin.html");
+
   const blocked = createHarness({
     state: { cloud: { authenticated: true, membership: { role: "member" } } },
     windowRef: { location: { hash: "#admin", href: "" } },

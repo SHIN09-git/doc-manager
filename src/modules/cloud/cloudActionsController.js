@@ -138,8 +138,8 @@ export function createCloudActionsController(deps = {}) {
   }
 
   function openStandaloneAdminPage() {
-    if (!["owner", "admin"].includes(state.cloud?.membership?.role || "")) {
-      toast("只有管理员可以查看管理后台", "warn");
+    if (!["owner", "admin", "operator"].includes(state.cloud?.membership?.role || "")) {
+      toast("只有后台成员可以查看管理后台", "warn");
       switchTab("cloud");
       return false;
     }

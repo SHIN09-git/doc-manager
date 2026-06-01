@@ -622,6 +622,143 @@ test("organization invitations add members without exposing cross-org data", asy
   assert.equal(afterRemove.json.members.length, 1);
 });
 
+test("operator role can view operations data without mutating the organization", async () => {
+  const owner = await register("operator-owner@example.com");
+  const operator = await register("operator-viewer@example.com");
+  const invitation = await api(`/api/orgs/${owner.orgId}/invitations`, {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { email: "operator-viewer@example.com", role: "operator" },
+  });
+  assert.equal(invitation.status, 201);
+  const accepted = await api(`/api/orgs/${owner.orgId}/invitations/${invitation.json.invitation.id}/accept`, {
+    method: "POST",
+    cookie: operator.cookie,
+    body: { token: invitation.json.invitation.token },
+  });
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.json.membership.role, "operator");
+  const operatorHeaders = { "x-organization-id": owner.orgId };
+
+  const renamed = await api(`/api/orgs/${owner.orgId}`, {
+    method: "PUT",
+    cookie: owner.cookie,
+    body: { name: "运营只读测试组织" },
+  });
+  assert.equal(renamed.status, 200);
+  const feedback = await api("/api/feedback", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { message: "需要运营查看的反馈" },
+  });
+  assert.equal(feedback.status, 201);
+  const manualOrder = await api("/api/billing/manual-orders", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: {
+      package_id: "credits_1000",
+      payment_channel: "alipay",
+      payer_note: "operator proof",
+    },
+  });
+  assert.equal(manualOrder.status, 201);
+  await api("/api/api-keys", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { provider: "openai-compatible", api_key: "sk-test-operator-view" },
+  });
+  await server.store.write((data) => {
+    const now = new Date().toISOString();
+    data.system_events.push({ id: "evt-operator-warning", organization_id: owner.orgId, user_id: owner.userId, level: "warn", type: "operator.warning", message: "operator", metadata: {}, created_at: now });
+    data.ai_usage.push({
+      id: "use-operator-owned",
+      organization_id: owner.orgId,
+      user_id: owner.userId,
+      provider: "mock",
+      model: "mock",
+      task_type: "operator_view",
+      status: "success",
+      prompt_tokens: 11,
+      completion_tokens: 1,
+      total_tokens: 12,
+      estimated_cost: 0,
+      error: "",
+      created_at: now,
+    });
+  });
+
+  const dashboard = await api("/api/admin/dashboard", { cookie: operator.cookie, headers: operatorHeaders });
+  assert.equal(dashboard.status, 200);
+  assert.ok(dashboard.json.members.some((item) => item.role === "operator"));
+  const usage = await api("/api/usage/history?task_type=operator_view", { cookie: operator.cookie, headers: operatorHeaders });
+  assert.equal(usage.status, 200);
+  assert.ok(usage.json.usage.some((item) => item.id === "use-operator-owned"));
+  const audit = await api("/api/audit?action=organization.update", { cookie: operator.cookie, headers: operatorHeaders });
+  assert.equal(audit.status, 200);
+  assert.equal(audit.json.audit_logs.length, 1);
+  const errors = await api("/api/ops/recent-errors", { cookie: operator.cookie, headers: operatorHeaders });
+  assert.equal(errors.status, 200);
+  assert.ok(errors.json.errors.some((item) => item.id === "evt-operator-warning"));
+  const billing = await api("/api/billing/summary", { cookie: operator.cookie, headers: operatorHeaders });
+  assert.equal(billing.status, 200);
+  assert.equal(billing.json.checkout.enabled, false);
+  assert.ok(billing.json.manual_orders.some((item) => item.id === manualOrder.json.order.id && item.proof_text === ""));
+  const keys = await api("/api/api-keys", { cookie: operator.cookie, headers: operatorHeaders });
+  assert.equal(keys.status, 200);
+  assert.ok(keys.json.api_keys.some((item) => item.key_hint));
+  const preferences = await api("/api/admin/preferences", {
+    method: "PUT",
+    cookie: operator.cookie,
+    headers: operatorHeaders,
+    body: { preferences: { audit_filters: [{ name: "只读筛选", action: "organization.update" }] } },
+  });
+  assert.equal(preferences.status, 200);
+
+  const blockedOrgUpdate = await api(`/api/orgs/${owner.orgId}`, {
+    method: "PUT",
+    cookie: operator.cookie,
+    headers: operatorHeaders,
+    body: { name: "不应修改" },
+  });
+  assert.equal(blockedOrgUpdate.status, 403);
+  const blockedKeySave = await api("/api/api-keys", {
+    method: "POST",
+    cookie: operator.cookie,
+    headers: operatorHeaders,
+    body: { provider: "openai-compatible", api_key: "sk-denied" },
+  });
+  assert.equal(blockedKeySave.status, 403);
+  const blockedCheckout = await api("/api/billing/checkout", {
+    method: "POST",
+    cookie: operator.cookie,
+    headers: operatorHeaders,
+    body: { plan: "pro" },
+  });
+  assert.equal(blockedCheckout.status, 403);
+  const blockedReview = await api(`/api/billing/manual-orders/${manualOrder.json.order.id}/review`, {
+    method: "POST",
+    cookie: operator.cookie,
+    headers: operatorHeaders,
+    body: { action: "approve" },
+  });
+  assert.equal(blockedReview.status, 403);
+  const feedbackItem = dashboard.json.feedbacks.find((item) => item.message === "需要运营查看的反馈");
+  const blockedFeedback = await api(`/api/feedback/${feedbackItem.id}/status`, {
+    method: "POST",
+    cookie: operator.cookie,
+    headers: operatorHeaders,
+    body: { status: "resolved" },
+  });
+  assert.equal(blockedFeedback.status, 403);
+  const blockedTriage = await api("/api/ops/events/evt-operator-warning/triage", {
+    method: "POST",
+    cookie: operator.cookie,
+    headers: operatorHeaders,
+    body: { status: "resolved" },
+  });
+  assert.equal(blockedTriage.status, 403);
+});
+
 test("document and writer sync updates reject stale versions unless forced", async () => {
   const owner = await register("version-owner@example.com");
   const createdDoc = await api("/api/documents", {

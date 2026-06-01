@@ -24684,8 +24684,8 @@ ${formatListItems(items)}`;
       });
     }
     function openStandaloneAdminPage() {
-      if (!["owner", "admin"].includes(state2.cloud?.membership?.role || "")) {
-        toast2("\u53EA\u6709\u7BA1\u7406\u5458\u53EF\u4EE5\u67E5\u770B\u7BA1\u7406\u540E\u53F0", "warn");
+      if (!["owner", "admin", "operator"].includes(state2.cloud?.membership?.role || "")) {
+        toast2("\u53EA\u6709\u540E\u53F0\u6210\u5458\u53EF\u4EE5\u67E5\u770B\u7BA1\u7406\u540E\u53F0", "warn");
         switchTab2("cloud");
         return false;
       }
@@ -24964,6 +24964,7 @@ ${formatListItems(items)}`;
     const value = String(role || "member");
     if (value === "owner") return "\u6240\u6709\u8005";
     if (value === "admin") return "\u7BA1\u7406\u5458";
+    if (value === "operator") return "\u8FD0\u8425\u53EA\u8BFB";
     if (value === "member") return "\u6210\u5458";
     return value;
   }

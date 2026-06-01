@@ -1,5 +1,22 @@
 # 代码评审记录
 
+## 2026-06-02 运营只读角色 Review
+
+范围：`server/src/app.js`、`server/src/billing/manualPaymentService.js`、`src/admin/adminPage.js`、`src/modules/cloud/cloudActionsController.js`、`src/modules/cloud/cloudPanelRenderer.js`、`server/tests/commercial-api.test.js`。
+
+结论：本轮没有发现阻断问题。后台权限从 owner/admin 两级扩展为 owner/admin/operator，其中 operator 可以进入独立后台查看组织运营数据、用量、审计、错误、账单、接口摘要和保存个人筛选偏好，但关键写操作仍由 owner/admin 执行。
+
+已确认：
+
+- `operator` 可通过组织邀请加入，并通过 `admin.html` 或主工作台后台入口进入后台。
+- `operator` 能读取 `/api/admin/dashboard`、`/api/usage/history`、`/api/audit`、`/api/ops/recent-errors`、`/api/billing/summary` 和接口摘要。
+- `operator` 不能修改组织名称、保存接口密钥、发起 checkout、审核人工充值、处理反馈或保存错误跟进。
+- 前端后台会对 `operator` 隐藏或降级展示写操作入口，避免只读用户误以为可以执行运营变更。
+
+残余风险：
+
+- `operator` 仍可查看较多组织运营元数据和接口尾号提示；正式商用前如需更细授权，应继续拆分“财务只读”“运维只读”等更窄角色。
+
 ## 2026-05-26 P2 第六轮施工后 Review
 
 范围：`server/src/app.js`、`server/src/db/jsonStore.js`、`server/src/db/postgresStore.js`、`server/migrations/001_initial.sql`、`src/admin/adminPage.js`、`server/tests/commercial-api.test.js`、`e2e/workbench.spec.js`。

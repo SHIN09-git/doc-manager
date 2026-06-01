@@ -10,6 +10,7 @@ export function roleLabel(role) {
   const value = String(role || "member");
   if (value === "owner") return "所有者";
   if (value === "admin") return "管理员";
+  if (value === "operator") return "运营只读";
   if (value === "member") return "成员";
   return value;
 }

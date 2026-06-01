@@ -10,7 +10,8 @@ const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
 const API_BASE_STORAGE_KEY = "mowen-admin:api-base-url";
 const ADMIN_AUDIT_FILTERS_STORAGE_KEY = "mowen-admin:audit-filters";
 const DEFAULT_TOKEN_COST_PER_1K = 0.01;
-const ADMIN_ROLES = new Set(["owner", "admin"]);
+const ADMIN_ACCESS_ROLES = new Set(["owner", "admin", "operator"]);
+const ADMIN_WRITE_ROLES = new Set(["owner", "admin"]);
 
 const state = {
   apiBaseUrl: DEFAULT_API_BASE_URL,
@@ -128,10 +129,10 @@ async function refreshSession(options = {}) {
     applySession(data);
     if (!state.authenticated) {
       renderGate();
-      if (!options.silent) toast("请先登录管理员账号", "warn");
+      if (!options.silent) toast("请先登录后台账号", "warn");
       return;
     }
-    if (!ADMIN_ROLES.has(state.membership?.role || "")) {
+    if (!canAccessAdmin()) {
       renderDenied();
       return;
     }
@@ -158,7 +159,7 @@ async function login() {
       }),
     });
     applySession(data);
-    if (!ADMIN_ROLES.has(state.membership?.role || "")) {
+    if (!canAccessAdmin()) {
       renderDenied();
       toast("当前账号没有后台权限", "warn");
       return;
@@ -198,7 +199,7 @@ async function logout() {
 }
 
 async function refreshAdminData(options = {}) {
-  if (!state.authenticated || !ADMIN_ROLES.has(state.membership?.role || "")) {
+  if (!state.authenticated || !canAccessAdmin()) {
     renderGate();
     return;
   }
@@ -237,8 +238,25 @@ function renderDenied() {
   els.adminDeniedView.hidden = false;
   els.adminMainView.hidden = true;
   els.adminLogoutBtn.disabled = false;
-  els.adminDeniedText.textContent = `${state.user?.email || "当前账号"} 不是组织管理员。`;
+  els.adminDeniedText.textContent = `${state.user?.email || "当前账号"} 不是组织后台成员。`;
   els.adminSubtitle.textContent = "当前账号没有进入管理后台的权限。";
+}
+
+function canAccessAdmin() {
+  return ADMIN_ACCESS_ROLES.has(state.membership?.role || "");
+}
+
+function canManageAdmin() {
+  return ADMIN_WRITE_ROLES.has(state.membership?.role || "");
+}
+
+function roleLabel(role) {
+  const value = String(role || "member");
+  if (value === "owner") return "所有者";
+  if (value === "admin") return "管理员";
+  if (value === "operator") return "运营只读";
+  if (value === "member") return "成员";
+  return value;
 }
 
 function renderAdmin() {
@@ -256,6 +274,8 @@ function renderAdmin() {
   els.adminMainView.hidden = false;
   els.adminLogoutBtn.disabled = false;
   els.adminSubtitle.textContent = `${org.name || "未命名组织"} · ${org.plan || "free"} · ${state.user?.email || ""}`;
+  els.adminExportOrgBtn.disabled = !canManageAdmin();
+  els.adminDeletionRequestBtn.disabled = !canManageAdmin();
   els.adminSummary.innerHTML = [
     metricCard(org.plan || "free", "当前套餐"),
     metricCard(members.length, "组织成员"),
@@ -281,7 +301,7 @@ function renderAdmin() {
     errors: "错误",
   };
   els.adminPanelTitle.textContent = titles[state.view] || "概览";
-  els.adminDeletionRequestBtn.hidden = state.view !== "overview";
+  els.adminDeletionRequestBtn.hidden = state.view !== "overview" || !canManageAdmin();
 
   if (state.view === "members") return renderMembers();
   if (state.view === "keys") return renderApiKeys();
@@ -303,19 +323,25 @@ function renderOverview() {
   const currentUsage = dashboard.usage || {};
   const feedbackSlaRisk = countSlaRisks(feedbacks);
   const errorSlaRisk = countSlaRisks(errors);
-  els.adminContent.innerHTML = `<div class="cloud-admin-grid">
-    <section class="cloud-admin-card">
-      <h3>组织</h3>
-      <form class="admin-inline-form" data-admin-form="org-name">
+  const organizationBlock = canManageAdmin()
+    ? `<form class="admin-inline-form" data-admin-form="org-name">
         <label>
           <span>组织名称</span>
           <input name="name" type="text" maxlength="120" value="${escapeHtml(org.name || "")}" required />
         </label>
         <button type="submit">保存组织名称</button>
-      </form>
+      </form>`
+    : `<div class="cloud-admin-list">
+        ${row(org.name || "未命名组织", "组织名称")}
+        ${row("只读", "当前权限")}
+      </div>`;
+  els.adminContent.innerHTML = `<div class="cloud-admin-grid">
+    <section class="cloud-admin-card">
+      <h3>组织</h3>
+      ${organizationBlock}
       <div class="cloud-admin-list">
         ${row(org.plan || "free", "当前套餐")}
-        ${row(state.membership?.role || "-", "我的角色")}
+        ${row(roleLabel(state.membership?.role || "-"), "我的角色")}
       </div>
     </section>
     <section class="cloud-admin-card">
@@ -339,21 +365,25 @@ function renderMembers() {
   const invitations = Array.isArray(dashboard.invitations) ? dashboard.invitations : [];
   const memberRows = members.map(renderMemberRow);
   const invitationRows = invitations.map(renderInvitationRow);
+  const inviteForm = canManageAdmin()
+    ? `<form class="admin-inline-form admin-inline-form-wide" data-admin-form="invite-member">
+        <label>
+          <span>邀请邮箱</span>
+          <input name="email" type="email" placeholder="name@example.com" required />
+        </label>
+        <label>
+          <span>角色</span>
+          <select name="role">
+            <option value="member">成员</option>
+            <option value="operator">运营只读</option>
+            <option value="admin">管理员</option>
+          </select>
+        </label>
+        <button type="submit">发送邀请</button>
+      </form>`
+    : `<p class="admin-inline-note">当前为运营只读权限，可查看成员和邀请状态，不能邀请或调整角色。</p>`;
   els.adminContent.innerHTML = `<div class="admin-action-stack">
-    <form class="admin-inline-form admin-inline-form-wide" data-admin-form="invite-member">
-      <label>
-        <span>邀请邮箱</span>
-        <input name="email" type="email" placeholder="name@example.com" required />
-      </label>
-      <label>
-        <span>角色</span>
-        <select name="role">
-          <option value="member">成员</option>
-          <option value="admin">管理员</option>
-        </select>
-      </label>
-      <button type="submit">发送邀请</button>
-    </form>
+    ${inviteForm}
     <div class="cloud-admin-list">
       ${memberRows.length ? memberRows.join("") : emptyRow("暂无成员")}
       ${invitationRows.length ? invitationRows.join("") : ""}
@@ -367,9 +397,12 @@ function renderMemberRow(member) {
   const isSelf = member.user_id && member.user_id === state.user?.id;
   const controls = isOwner
     ? `<span class="admin-row-note">拥有者</span>`
-    : `<span class="cloud-row-actions">
+    : !canManageAdmin()
+      ? `<span class="admin-row-note">只读</span>`
+      : `<span class="cloud-row-actions">
         <select aria-label="成员角色" data-member-role="${escapeHtml(member.id)}">
           <option value="member"${member.role === "member" ? " selected" : ""}>成员</option>
+          <option value="operator"${member.role === "operator" ? " selected" : ""}>运营只读</option>
           <option value="admin"${member.role === "admin" ? " selected" : ""}>管理员</option>
         </select>
         <button type="button" data-admin-action="member-role" data-member-id="${escapeHtml(member.id)}">保存角色</button>
@@ -377,7 +410,7 @@ function renderMemberRow(member) {
       </span>`;
   return `<div class="admin-member-row" data-member-row="${escapeHtml(member.id)}">
     <strong>${escapeHtml(email)}</strong>
-    <span>${escapeHtml(member.role || "member")} · ${escapeHtml(member.created_at || "")}</span>
+    <span>${escapeHtml(roleLabel(member.role || "member"))} · ${escapeHtml(member.created_at || "")}</span>
     ${controls}
   </div>`;
 }
@@ -387,12 +420,12 @@ function renderInvitationRow(invitation) {
   const token = state.invitationTokens[invitation.id] || invitation.token || "";
   return `<div class="admin-member-row" data-invitation-row="${escapeHtml(invitation.id)}">
     <strong>${escapeHtml(invitation.email || "")}</strong>
-    <span>${escapeHtml(invitation.role || "member")} · ${status} · ${escapeHtml(invitation.expires_at || "")}</span>
-    <span class="cloud-row-actions">
+    <span>${escapeHtml(roleLabel(invitation.role || "member"))} · ${status} · ${escapeHtml(invitation.expires_at || "")}</span>
+    ${canManageAdmin() ? `<span class="cloud-row-actions">
       <button type="button" data-admin-action="invite-resend" data-invitation-id="${escapeHtml(invitation.id)}">重发</button>
       <button type="button" data-admin-action="invite-copy" data-invitation-id="${escapeHtml(invitation.id)}"${token ? "" : " disabled"}>复制口令</button>
       <button type="button" data-admin-action="invite-revoke" data-invitation-id="${escapeHtml(invitation.id)}">撤销</button>
-    </span>
+    </span>` : `<span class="admin-row-note">只读</span>`}
   </div>`;
 }
 
@@ -400,22 +433,25 @@ function renderApiKeys() {
   const rows = state.apiKeys.map((key) => `<div class="admin-member-row">
     <strong>${escapeHtml(key.provider || "")}</strong>
     <span>${escapeHtml(key.key_hint || "已保存")} · ${escapeHtml(key.updated_at || key.created_at || "")}</span>
-    <span class="cloud-row-actions">
+    ${canManageAdmin() ? `<span class="cloud-row-actions">
       <button type="button" data-admin-action="key-delete" data-key-id="${escapeHtml(key.id)}">删除</button>
-    </span>
+    </span>` : `<span class="admin-row-note">只读</span>`}
   </div>`);
+  const form = canManageAdmin()
+    ? `<form class="admin-inline-form admin-inline-form-wide" data-admin-form="api-key">
+        <label>
+          <span>服务商</span>
+          <input name="provider" type="text" value="openai-compatible" required />
+        </label>
+        <label>
+          <span>API Key</span>
+          <input name="apiKey" type="password" autocomplete="off" placeholder="只保存密文，不会回显原文" required />
+        </label>
+        <button type="submit">保存接口</button>
+      </form>`
+    : `<p class="admin-inline-note">当前为运营只读权限，只能查看接口配置摘要，不能新增或删除密钥。</p>`;
   els.adminContent.innerHTML = `<div class="admin-action-stack">
-    <form class="admin-inline-form admin-inline-form-wide" data-admin-form="api-key">
-      <label>
-        <span>服务商</span>
-        <input name="provider" type="text" value="openai-compatible" required />
-      </label>
-      <label>
-        <span>API Key</span>
-        <input name="apiKey" type="password" autocomplete="off" placeholder="只保存密文，不会回显原文" required />
-      </label>
-      <button type="submit">保存接口</button>
-    </form>
+    ${form}
     <p class="admin-inline-note">接口密钥只用于组织级 AI 代理；后台只显示尾号提示，不返回原始密钥。</p>
     <div class="cloud-admin-list">${rows.length ? rows.join("") : emptyRow("暂无接口配置")}</div>
   </div>`;
@@ -509,11 +545,12 @@ function renderFeedback() {
       <strong>${escapeHtml(item.message || "")}</strong>
       <span>${escapeHtml(feedbackStatusLabel(status))} · ${escapeHtml(item.created_at || "")}</span>
       <span class="admin-row-note">负责人：${escapeHtml(metadata.assignee || "未分配")} · SLA：${escapeHtml(metadata.sla_at || "未设置")} · 备注：${escapeHtml(metadata.note || "无")}</span>
-      <span class="cloud-row-actions">
+      ${canManageAdmin() ? `<span class="cloud-row-actions">
         <button type="button" data-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="processing">处理中</button>
         <button type="button" data-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="resolved">已解决</button>
         <button type="button" data-admin-action="feedback-status" data-feedback-id="${escapeHtml(item.id)}" data-status="closed">关闭</button>
-      </span>
+      </span>` : `<span class="admin-row-note">只读</span>`}
+      ${canManageAdmin() ? `
       <form class="admin-triage-form" data-admin-form="feedback-triage" data-feedback-id="${escapeHtml(item.id)}">
         <label>
           <span>状态</span>
@@ -532,7 +569,7 @@ function renderFeedback() {
           <input name="note" type="text" maxlength="300" value="${escapeHtml(metadata.note || "")}" placeholder="处理说明" />
         </label>
         <button type="submit">保存跟进</button>
-      </form>
+      </form>` : ""}
     </div>`;
   });
   els.adminContent.innerHTML = `<div class="admin-action-stack">
@@ -545,9 +582,9 @@ function renderFeedback() {
         <select data-admin-feedback-sla aria-label="反馈 SLA 筛选">
           ${renderSlaFilterOptions(state.feedbackSlaFilter)}
         </select>
-        <button type="button" data-admin-action="feedback-batch" data-status="processing">全部标为处理中</button>
+        ${canManageAdmin() ? `<button type="button" data-admin-action="feedback-batch" data-status="processing">全部标为处理中</button>
         <button type="button" data-admin-action="feedback-batch" data-status="resolved">全部标为已解决</button>
-        <button type="button" data-admin-action="feedback-batch" data-status="closed">全部关闭</button>
+        <button type="button" data-admin-action="feedback-batch" data-status="closed">全部关闭</button>` : ""}
       </span>
     </div>
     <div class="cloud-admin-list">${rows.length ? rows.join("") : emptyRow("暂无反馈。")}</div>
@@ -568,13 +605,13 @@ function renderBilling(payments) {
   const manualOrders = getManualPaymentOrders().slice().reverse();
   const creditLedger = getCreditLedger().slice().reverse();
   const creditSummary = billing.credits || state.dashboard?.billing?.credits || {};
-  const planCards = options.length
+  const planCards = canManageAdmin() && options.length
     ? options.map((item) => `<div class="admin-plan-card">
         <strong>${escapeHtml(item.plan || "")}</strong>
         <span>${escapeHtml(item.price_id || "未绑定价格 ID")}</span>
         <button type="button" data-admin-action="billing-checkout" data-plan="${escapeHtml(item.plan || "")}" data-price-id="${escapeHtml(item.price_id || "")}">发起升级</button>
       </div>`).join("")
-    : `<div class="admin-plan-card"><strong>未配置升级项</strong><span>后端仍会保留账单事件查看能力</span></div>`;
+    : `<div class="admin-plan-card"><strong>${canManageAdmin() ? "未配置升级项" : "只读账单"}</strong><span>${canManageAdmin() ? "后端仍会保留账单事件查看能力" : "可查看套餐、订单、额度和账单事件，不能发起升级或审核订单"}</span></div>`;
   els.adminContent.innerHTML = `<div class="admin-action-stack">
     <div class="admin-plan-grid">
       <div class="admin-plan-card">
@@ -598,7 +635,7 @@ function renderBilling(payments) {
         const note = item.payer_note ? `备注：${item.payer_note}` : "备注：未填写";
         const proof = item.proof_text ? `凭证：${item.proof_text}` : "凭证：未填写";
         const review = item.review_note ? `审核：${item.review_note}` : item.reviewed_at ? "审核：未填写备注" : "";
-        const actions = pending
+        const actions = pending && canManageAdmin()
           ? `<span class="cloud-row-actions"><button type="button" data-admin-action="manual-order-approve" data-order-id="${escapeHtml(item.id)}">确认</button><button type="button" data-admin-action="manual-order-reject" data-order-id="${escapeHtml(item.id)}">拒绝</button><button type="button" data-admin-action="copy-manual-order" data-order-id="${escapeHtml(item.id)}">复制</button></span>`
           : `<span class="cloud-row-actions"><span>${escapeHtml(formatManualOrderStatus(item.status))}${item.reviewed_at ? ` · ${escapeHtml(item.reviewed_at)}` : ""}</span><button type="button" data-admin-action="copy-manual-order" data-order-id="${escapeHtml(item.id)}">复制</button></span>`;
         return `<div class="cloud-admin-ops-row">
@@ -1255,6 +1292,7 @@ function renderErrorRow(item, index) {
     <span class="cloud-row-actions">
       <button type="button" data-admin-action="copy-error" data-error-index="${index}">复制详情</button>
     </span>
+    ${canManageAdmin() ? `
     <form class="admin-triage-form" data-admin-form="error-triage" data-error-id="${escapeHtml(item.id || "")}">
       <label>
         <span>状态</span>
@@ -1277,7 +1315,7 @@ function renderErrorRow(item, index) {
         <input name="note" type="text" maxlength="300" value="${escapeHtml(metadata.note || "")}" placeholder="排查说明" />
       </label>
       <button type="submit"${item.id ? "" : " disabled"}>保存跟进</button>
-    </form>
+    </form>` : `<span class="admin-row-note">当前为运营只读权限，不能保存错误跟进。</span>`}
   </div>`;
 }
 

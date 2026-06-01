@@ -24,6 +24,7 @@
 - 拆出 `pptSkillController`，让自定义 PPT 风格保存为执笔人的表单读取、规则 JSON 组装、提交保存和错误提示从 `app.js` 迁移到 PPT 模块。
 - 拆出 `workspacePersistenceController`，让 IndexedDB 保存、localStorage 迁移兜底、存储位置文案和下载位置文案从 `app.js` 迁移到核心模块。
 - 拆出 `manualPaymentService`，让人工充值订单列表、提交、审核、套餐解析和凭证公开字段从 `server/src/app.js` 迁移到后端账单模块。
+- 新增 `operator` 运营只读角色，可进入独立后台查看组织运营数据、用量、审计、错误、账单和接口摘要，但不能修改组织、密钥、账单、反馈或错误跟进。
 - 拆出 `cloudApiClient`，让云端 API 默认地址推导、地址归一化、组织请求头、JSON 解析和错误负载从 `app.js` 迁移到独立模块。
 - 修复部署站点上旧的本地云端地址带多个尾随斜杠时不会自动替换为当前站点 `/api` 的问题。
 - 补充云端 API 客户端单元测试，覆盖本地/部署地址推导、请求头、服务端错误和网络失败提示。
