@@ -28800,7 +28800,7 @@ ${content}`
     readImportFileText: readImportFileText2,
     buildUnsupportedFileMessage: buildUnsupportedFileMessage2,
     getFocusableElements: getFocusableElements2,
-    savePptStyleAsSkill: savePptStyleAsSkill2,
+    savePptStyleAsSkill,
     pptStyleOptions,
     escapeHtml: escapeHtml3
   }) {
@@ -28810,7 +28810,7 @@ ${content}`
       setupFileDrop2(els2.pptDropZone, importPptPromptFiles);
       els2.generatePptBtn?.addEventListener("click", generatePptDeck);
       els2.downloadPptBtn?.addEventListener("click", downloadPptDeck);
-      els2.savePptStyleBtn?.addEventListener("click", savePptStyleAsSkill2);
+      els2.savePptStyleBtn?.addEventListener("click", savePptStyleAsSkill);
       els2.pptStyleSelect?.addEventListener("change", updatePptStyleControls);
       els2.pptSlideCountSelect?.addEventListener("input", () => {
         if (ui2.pptDeckSpec) renderPptQualityReport(ui2.pptDeckSpec);
@@ -29156,6 +29156,134 @@ ${text}`);
       downloadPptDeck,
       openPptPreviewModal,
       closePptPreviewModal
+    };
+  }
+
+  // src/modules/ppt/pptSkillController.js
+  function createPptSkillController({
+    els: els2 = {},
+    windowRef = globalThis,
+    toast: toast2 = () => {
+    },
+    commitSkillToState: commitSkillToState2 = () => null,
+    getSkillLocation: getSkillLocation2 = () => ""
+  } = {}) {
+    function savePptStyleAsSkill() {
+      const styleDescription = els2.pptCustomStyleInput?.value?.trim() || "";
+      if (!styleDescription) {
+        toast2("\u8BF7\u5148\u586B\u5199\u81EA\u5B9A\u4E49\u98CE\u683C\u63CF\u8FF0\uFF0C\u518D\u4FDD\u5B58\u4E3A PPT \u6267\u7B14\u4EBA", "warn");
+        els2.pptCustomStyleInput?.focus?.();
+        return null;
+      }
+      const title = els2.pptTitleInput?.value?.trim() || "";
+      const defaultName = title ? `${title} PPT \u98CE\u683C` : "\u81EA\u5B9A\u4E49 PPT \u98CE\u683C";
+      const name = windowRef.prompt?.("PPT \u6267\u7B14\u4EBA\u540D\u79F0", defaultName);
+      if (!name || !name.trim()) return null;
+      const handle = normalizeHandle(name);
+      if (!handle) {
+        toast2("PPT \u6267\u7B14\u4EBA\u540D\u79F0\u9700\u8981\u5305\u542B\u4E2D\u6587\u3001\u82F1\u6587\u3001\u6570\u5B57\u3001\u4E0B\u5212\u7EBF\u6216\u8FDE\u5B57\u7B26", "warn");
+        return null;
+      }
+      try {
+        const saved = commitSkillToState2(buildPptStyleSkillDraft({
+          name: name.trim(),
+          handle,
+          styleDescription
+        }));
+        toast2(`\u5DF2\u4FDD\u5B58 PPT \u6267\u7B14\u4EBA @${saved.handle} \u5230\uFF1A${getSkillLocation2(saved)}`);
+        return saved;
+      } catch (error) {
+        toast2(error.message || "\u4FDD\u5B58 PPT \u6267\u7B14\u4EBA\u5931\u8D25", "error");
+        return null;
+      }
+    }
+    return {
+      savePptStyleAsSkill
+    };
+  }
+  function buildPptStyleSkillDraft({ name, handle, styleDescription }) {
+    const timestamp = now();
+    const summary = [
+      `# ${name}`,
+      "",
+      "## \u9002\u7528\u8303\u56F4",
+      "\u7528\u4E8E\u751F\u6210\u53EF\u7F16\u8F91\u7684\u539F\u751F PPTX \u6F14\u793A\u7A3F\uFF0C\u63A7\u5236\u9875\u9762\u98CE\u683C\u3001\u7248\u5F0F\u8282\u594F\u3001\u5E38\u7528\u5E03\u5C40\u548C\u5BA1\u7A3F\u6807\u51C6\u3002",
+      "",
+      "## \u98CE\u683C\u63CF\u8FF0",
+      styleDescription,
+      "",
+      "## \u4F7F\u7528\u65B9\u5F0F",
+      `\u5728 PPT \u5185\u5BB9\u4E0E\u8981\u6C42\u4E2D\u8F93\u5165 @${handle}\uFF0C\u7CFB\u7EDF\u4F1A\u628A\u8BE5\u98CE\u683C\u4F5C\u4E3A\u989D\u5916\u6267\u7B14\u4EBA\u89C4\u5219\u4F20\u7ED9 AI\u3002`
+    ].join("\n");
+    const skillJson = {
+      name,
+      handle,
+      category: "PPT",
+      confidence: "manual",
+      applicable_scope: "\u539F\u751F PPTX \u6F14\u793A\u7A3F\u751F\u6210",
+      style_rules: {
+        must: [
+          "\u8F93\u51FA\u5FC5\u987B\u9002\u5408\u8F6C\u6362\u4E3A\u53EF\u7F16\u8F91\u7684\u539F\u751F PowerPoint \u9875\u9762",
+          "\u6BCF\u9875\u53EA\u8868\u8FBE\u4E00\u4E2A\u6838\u5FC3\u89C2\u70B9",
+          "\u6807\u9898\u3001\u6B63\u6587\u3001\u8981\u70B9\u3001\u8868\u683C\u548C\u5907\u6CE8\u5FC5\u987B\u4FDD\u7559\u4E3A\u53EF\u7F16\u8F91\u6587\u672C\u6216\u8868\u683C\u6570\u636E\uFF0C\u4E0D\u5F97\u6574\u9875\u622A\u56FE\u5316",
+          "\u6807\u9898\u3001\u6B63\u6587\u548C\u8981\u70B9\u9700\u8981\u63A7\u5236\u5B57\u6570\uFF0C\u5185\u5BB9\u8FC7\u5BC6\u65F6\u62C6\u6210\u591A\u9875",
+          "\u6BCF\u9875\u90FD\u8981\u8865\u5145\u6F14\u8BB2\u8005\u5907\u6CE8\uFF0C\u5907\u6CE8\u53EA\u670D\u52A1\u8BB2\u8FF0\uFF0C\u4E0D\u8981\u6324\u8FDB\u9875\u9762\u6B63\u6587",
+          "\u6839\u636E\u5185\u5BB9\u9009\u62E9 cover\u3001section\u3001content\u3001data\u3001roadmap\u3001orgchart\u3001imageText\u3001appendix\u3001closing \u7B49\u5E03\u5C40"
+        ],
+        recommended: [
+          styleDescription,
+          "\u6B63\u5F0F\u6C47\u62A5\u5EFA\u8BAE\u4EE5 cover \u5F00\u573A\uFF0C\u4EE5 closing \u6216 appendix \u6536\u675F\uFF0C\u5E76\u5728\u4E2D\u95F4\u7A7F\u63D2\u6570\u636E\u9875\u3001\u8DEF\u7EBF\u56FE\u6216\u5BF9\u6BD4\u9875\u5F62\u6210\u8282\u594F\u3002"
+        ],
+        optional: []
+      },
+      forbidden: [
+        "\u4E0D\u5F97\u4F9D\u8D56\u7F51\u9875\u811A\u672C\u3001CSS \u52A8\u753B\u3001\u672C\u673A\u8DEF\u5F84\u3001\u5916\u90E8\u56FE\u7247 URL \u6216\u622A\u56FE\u5F0F\u8F93\u51FA",
+        "\u4E0D\u5F97\u7F16\u9020\u7528\u6237\u672A\u63D0\u4F9B\u7684\u4E8B\u5B9E\u3001\u6570\u5B57\u3001\u65F6\u95F4\u548C\u8D23\u4EFB\u4EBA"
+      ],
+      generation_steps: ["\u5224\u65AD\u6F14\u793A\u76EE\u6807", "\u62C6\u5206\u9875\u7ED3\u6784", "\u9009\u62E9\u9875\u9762\u7C7B\u578B", "\u63A7\u5236\u6587\u5B57\u5BC6\u5EA6", "\u8865\u5145\u6F14\u8BB2\u8005\u5907\u6CE8", "\u6267\u884C\u7ED3\u6784\u81EA\u68C0"],
+      self_checklist: [
+        "\u9875\u6570\u662F\u5426\u7B26\u5408\u8981\u6C42",
+        "\u6BCF\u9875\u6807\u9898\u662F\u5426\u660E\u786E",
+        "\u6587\u5B57\u5BC6\u5EA6\u662F\u5426\u9002\u5408\u6F14\u793A\u9875",
+        "\u8868\u683C\u662F\u5426\u9002\u5408\u6F14\u793A\u9875",
+        "\u5907\u6CE8\u662F\u5426\u5B8C\u6574",
+        "\u662F\u5426\u5B58\u5728\u5916\u90E8\u8D44\u6E90\u6216\u7F51\u9875\u6548\u679C\u4F9D\u8D56",
+        "\u5E03\u5C40\u662F\u5426\u6709\u8282\u594F\u53D8\u5316"
+      ],
+      ppt_generation: {
+        style: "custom",
+        styleDescription,
+        supported_layouts: [
+          "cover",
+          "section",
+          "content",
+          "bullets",
+          "timeline",
+          "comparison",
+          "quote",
+          "data",
+          "roadmap",
+          "orgchart",
+          "imageText",
+          "appendix",
+          "closing"
+        ]
+      }
+    };
+    return {
+      id: null,
+      name,
+      handle,
+      category: "PPT",
+      description: "PPT \u751F\u6210\u4E13\u7528\u6267\u7B14\u4EBA",
+      enabled: true,
+      summary,
+      skillJson: JSON.stringify(skillJson, null, 2),
+      examples: [],
+      versions: [],
+      feedbacks: [],
+      createdAt: timestamp,
+      updatedAt: timestamp
     };
   }
 
@@ -39418,6 +39546,13 @@ ${mention} ` : `${mention} `;
     recordEditorUndoPoint,
     saveEditor
   });
+  var pptSkillController = createPptSkillController({
+    els,
+    windowRef: window,
+    toast,
+    commitSkillToState,
+    getSkillLocation
+  });
   var pptController = createPptController({
     els,
     ui,
@@ -39450,7 +39585,7 @@ ${mention} ` : `${mention} `;
     readImportFileText,
     buildUnsupportedFileMessage,
     getFocusableElements,
-    savePptStyleAsSkill,
+    savePptStyleAsSkill: () => pptSkillController.savePptStyleAsSkill(),
     pptStyleOptions: PPT_STYLE_OPTIONS,
     escapeHtml
   });
@@ -40066,79 +40201,6 @@ ${mention} ` : `${mention} `;
       const style = window.getComputedStyle(element);
       return style.display !== "none" && style.visibility !== "hidden";
     });
-  }
-  function savePptStyleAsSkill() {
-    const styleDescription = els.pptCustomStyleInput.value.trim();
-    if (!styleDescription) {
-      toast("\u8BF7\u5148\u586B\u5199\u81EA\u5B9A\u4E49\u98CE\u683C\u63CF\u8FF0\uFF0C\u518D\u4FDD\u5B58\u4E3A PPT \u6267\u7B14\u4EBA", "warn");
-      els.pptCustomStyleInput.focus();
-      return null;
-    }
-    const defaultName = els.pptTitleInput.value.trim() ? `${els.pptTitleInput.value.trim()} PPT \u98CE\u683C` : "\u81EA\u5B9A\u4E49 PPT \u98CE\u683C";
-    const name = window.prompt("PPT \u6267\u7B14\u4EBA\u540D\u79F0", defaultName);
-    if (!name || !name.trim()) return null;
-    const handle = normalizeHandle(name);
-    const summary = [
-      `# ${name}`,
-      "",
-      "## \u9002\u7528\u8303\u56F4",
-      "\u7528\u4E8E\u751F\u6210\u53EF\u7F16\u8F91\u7684\u539F\u751F PPTX \u6F14\u793A\u7A3F\uFF0C\u63A7\u5236\u9875\u9762\u98CE\u683C\u3001\u7248\u5F0F\u8282\u594F\u3001\u5E38\u7528\u5E03\u5C40\u548C\u5BA1\u7A3F\u6807\u51C6\u3002",
-      "",
-      "## \u98CE\u683C\u63CF\u8FF0",
-      styleDescription,
-      "",
-      "## \u4F7F\u7528\u65B9\u5F0F",
-      `\u5728 PPT \u5185\u5BB9\u4E0E\u8981\u6C42\u4E2D\u8F93\u5165 @${handle}\uFF0C\u7CFB\u7EDF\u4F1A\u628A\u8BE5\u98CE\u683C\u4F5C\u4E3A\u989D\u5916\u6267\u7B14\u4EBA\u89C4\u5219\u4F20\u7ED9 AI\u3002`
-    ].join("\n");
-    const skillJson = {
-      name,
-      handle,
-      category: "PPT",
-      confidence: "manual",
-      applicable_scope: "\u539F\u751F PPTX \u6F14\u793A\u7A3F\u751F\u6210",
-      style_rules: {
-        must: [
-          "\u8F93\u51FA\u5FC5\u987B\u9002\u5408\u8F6C\u6362\u4E3A\u53EF\u7F16\u8F91\u7684\u539F\u751F PowerPoint \u9875\u9762",
-          "\u6BCF\u9875\u53EA\u8868\u8FBE\u4E00\u4E2A\u6838\u5FC3\u89C2\u70B9",
-          "\u6807\u9898\u3001\u6B63\u6587\u3001\u8981\u70B9\u3001\u8868\u683C\u548C\u5907\u6CE8\u5FC5\u987B\u4FDD\u7559\u4E3A\u53EF\u7F16\u8F91\u6587\u672C\u6216\u8868\u683C\u6570\u636E\uFF0C\u4E0D\u5F97\u6574\u9875\u622A\u56FE\u5316",
-          "\u6807\u9898\u3001\u6B63\u6587\u548C\u8981\u70B9\u9700\u8981\u63A7\u5236\u5B57\u6570\uFF0C\u5185\u5BB9\u8FC7\u5BC6\u65F6\u62C6\u6210\u591A\u9875",
-          "\u6BCF\u9875\u90FD\u8981\u8865\u5145\u6F14\u8BB2\u8005\u5907\u6CE8\uFF0C\u5907\u6CE8\u53EA\u670D\u52A1\u8BB2\u8FF0\uFF0C\u4E0D\u8981\u6324\u8FDB\u9875\u9762\u6B63\u6587",
-          "\u6839\u636E\u5185\u5BB9\u9009\u62E9 cover\u3001section\u3001content\u3001data\u3001roadmap\u3001orgchart\u3001imageText\u3001appendix\u3001closing \u7B49\u5E03\u5C40"
-        ],
-        recommended: [styleDescription, "\u6B63\u5F0F\u6C47\u62A5\u5EFA\u8BAE\u4EE5 cover \u5F00\u573A\uFF0C\u4EE5 closing \u6216 appendix \u6536\u675F\uFF0C\u5E76\u5728\u4E2D\u95F4\u7A7F\u63D2\u6570\u636E\u9875\u3001\u8DEF\u7EBF\u56FE\u6216\u5BF9\u6BD4\u9875\u5F62\u6210\u8282\u594F\u3002"],
-        optional: []
-      },
-      forbidden: ["\u4E0D\u5F97\u4F9D\u8D56\u7F51\u9875\u811A\u672C\u3001CSS \u52A8\u753B\u3001\u672C\u673A\u8DEF\u5F84\u3001\u5916\u90E8\u56FE\u7247 URL \u6216\u622A\u56FE\u5F0F\u8F93\u51FA", "\u4E0D\u5F97\u7F16\u9020\u7528\u6237\u672A\u63D0\u4F9B\u7684\u4E8B\u5B9E\u3001\u6570\u5B57\u3001\u65F6\u95F4\u548C\u8D23\u4EFB\u4EBA"],
-      generation_steps: ["\u5224\u65AD\u6F14\u793A\u76EE\u6807", "\u62C6\u5206\u9875\u9762\u7ED3\u6784", "\u9009\u62E9\u9875\u9762\u7C7B\u578B", "\u63A7\u5236\u6587\u5B57\u5BC6\u5EA6", "\u8865\u5145\u6F14\u8BB2\u8005\u5907\u6CE8", "\u6267\u884C\u7ED3\u6784\u81EA\u68C0"],
-      self_checklist: ["\u9875\u6570\u662F\u5426\u7B26\u5408\u8981\u6C42", "\u6BCF\u9875\u6807\u9898\u662F\u5426\u660E\u786E", "\u6587\u5B57\u5BC6\u5EA6\u662F\u5426\u9002\u5408\u6F14\u793A\u9875", "\u8868\u683C\u662F\u5426\u9002\u5408\u6F14\u793A\u9875", "\u5907\u6CE8\u662F\u5426\u5B8C\u6574", "\u662F\u5426\u5B58\u5728\u5916\u90E8\u8D44\u6E90\u6216\u7F51\u9875\u6548\u679C\u4F9D\u8D56", "\u5E03\u5C40\u662F\u5426\u6709\u8282\u594F\u53D8\u5316"],
-      ppt_generation: {
-        style: "custom",
-        styleDescription,
-        supported_layouts: ["cover", "section", "content", "bullets", "timeline", "comparison", "quote", "data", "roadmap", "orgchart", "imageText", "appendix", "closing"]
-      }
-    };
-    try {
-      const saved = commitSkillToState({
-        id: null,
-        name: name.trim(),
-        handle,
-        category: "PPT",
-        description: "PPT \u751F\u6210\u4E13\u7528\u6267\u7B14\u4EBA",
-        enabled: true,
-        summary,
-        skillJson: JSON.stringify(skillJson, null, 2),
-        examples: [],
-        versions: [],
-        feedbacks: [],
-        createdAt: now(),
-        updatedAt: now()
-      });
-      toast(`\u5DF2\u4FDD\u5B58 PPT \u6267\u7B14\u4EBA @${saved.handle} \u5230\uFF1A${getSkillLocation(saved)}`);
-      return saved;
-    } catch (error) {
-      toast(error.message || "\u4FDD\u5B58 PPT \u6267\u7B14\u4EBA\u5931\u8D25", "error");
-      return null;
-    }
   }
   async function importStyleExamples(event) {
     return skillTrainingController.importStyleExamples(event);
