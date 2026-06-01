@@ -24393,6 +24393,204 @@ ${formatListItems(items)}`;
     return features.find((feature) => feature.action === action) || null;
   }
 
+  // src/modules/cloud/cloudPanelRenderer.js
+  function roleLabel(role) {
+    const value = String(role || "member");
+    if (value === "owner") return "\u6240\u6709\u8005";
+    if (value === "admin") return "\u7BA1\u7406\u5458";
+    if (value === "member") return "\u6210\u5458";
+    return value;
+  }
+  function formatCurrencyCny(value) {
+    const amount = Number(value || 0);
+    return `\xA5${(Number.isFinite(amount) ? amount : 0).toFixed(4)}`;
+  }
+  function createCloudPanelRenderer(deps = {}) {
+    const {
+      state: state2 = {},
+      els: els2 = {},
+      defaultCloudApiBaseUrl = "",
+      featureGroups = getFeatureGroups
+    } = deps;
+    function renderCloudPanel2() {
+      if (!els2.cloudBaseUrlInput) return;
+      const cloud = state2.cloud || {};
+      const authenticated = Boolean(cloud.authenticated && cloud.user);
+      const emailVerified = Boolean(cloud.user?.email_verified_at);
+      const orgName = cloud.activeOrganization?.name || "\u672A\u9009\u62E9\u7EC4\u7EC7";
+      els2.cloudBaseUrlInput.value = cloud.apiBaseUrl || defaultCloudApiBaseUrl;
+      els2.cloudStatusLabel.textContent = authenticated ? "\u5DF2\u767B\u5F55" : "\u672C\u5730\u6A21\u5F0F";
+      els2.cloudStatusLabel.className = `status-pill ${authenticated ? "ready" : ""}`;
+      els2.cloudLogoutBtn.disabled = !authenticated;
+      els2.cloudAccountCard.innerHTML = authenticated ? `<strong>${escapeHtml(cloud.user.email || "")}</strong><span>${escapeHtml(orgName)} \xB7 ${escapeHtml(roleLabel(cloud.membership?.role || "owner"))} \xB7 ${emailVerified ? "\u90AE\u7BB1\u5DF2\u9A8C\u8BC1" : "\u90AE\u7BB1\u672A\u9A8C\u8BC1"}</span>` : "<strong>\u672A\u8FDE\u63A5\u4E91\u7AEF</strong><span>\u672C\u5730\u6570\u636E\u4ECD\u53EF\u6B63\u5E38\u4F7F\u7528\uFF0C\u767B\u5F55\u540E\u53EF\u67E5\u770B\u5957\u9910\u3001\u989D\u5EA6\u3001\u8D39\u7528\u660E\u7EC6\u5E76\u540C\u6B65\u4E2A\u4EBA\u6570\u636E\u3002</span>";
+      renderFeatureMap();
+      syncAuthenticatedControls(authenticated);
+      renderUsage(authenticated, cloud);
+      renderCloudBilling(authenticated);
+    }
+    function renderFeatureMap() {
+      if (!els2.featureMapGrid) return;
+      els2.featureMapGrid.innerHTML = featureGroups().map((group2) => `
+      <section class="feature-map-group" aria-label="${escapeHtml(group2.name)}">
+        <div class="feature-map-group-title">${escapeHtml(group2.name)}</div>
+        ${group2.features.map((feature) => `
+          <article class="feature-card" data-feature-id="${escapeHtml(feature.id)}">
+            <div class="feature-card-head">
+              <strong>${escapeHtml(feature.title)}</strong>
+              <span>${escapeHtml(feature.mode)}</span>
+            </div>
+            <p>${escapeHtml(feature.summary)}</p>
+            <div class="feature-card-meta">\u5165\u53E3\uFF1A${escapeHtml(feature.entry)}</div>
+            <div class="feature-card-tags">
+              ${feature.outputs.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+            </div>
+            <button type="button" data-feature-action="${escapeHtml(feature.action)}">\u8FDB\u5165</button>
+          </article>`).join("")}
+      </section>`).join("");
+    }
+    function syncAuthenticatedControls(authenticated) {
+      [
+        els2.cloudSaveDocBtn,
+        els2.cloudPullDocsBtn,
+        els2.cloudSaveWriterBtn,
+        els2.cloudPullWritersBtn,
+        els2.cloudRequestVerifyBtn,
+        els2.cloudVerifyEmailBtn,
+        els2.cloudLogoutAllBtn,
+        els2.cloudExportDataBtn,
+        els2.cloudDeleteAccountBtn,
+        els2.cloudSendFeedbackBtn,
+        els2.cloudManualOrderBtn
+      ].forEach((button) => {
+        if (button) button.disabled = !authenticated;
+      });
+      [
+        els2.cloudManualPackageSelect,
+        els2.cloudManualPaymentMethodSelect,
+        els2.cloudManualOrderNoteInput,
+        els2.cloudManualProofInput
+      ].forEach((field) => {
+        if (field) field.disabled = !authenticated;
+      });
+    }
+    function renderUsage(authenticated, cloud) {
+      const usage = cloud.usage;
+      if (usage) {
+        els2.cloudUsageLabel.textContent = `${usage.request_count || usage.requests || 0} \u6B21\u8BF7\u6C42`;
+        const limits = cloud.limits;
+        const taskRows = Object.entries(usage.by_task_type || {}).map(([task, item]) => `<div>${escapeHtml(task)}\uFF1A${item.request_count || 0} \u6B21 \xB7 ${Number(item.total_tokens || 0).toLocaleString("zh-CN")} \u5B57\u6570\u4F30\u7B97</div>`).join("");
+        els2.cloudUsageReport.innerHTML = [
+          limits ? `<div>\u5957\u9910\uFF1A${escapeHtml(limits.plan || "free")} \xB7 \u4E2A\u4EBA\u65E5\u9650 ${limits.user_daily} \xB7 \u7EC4\u7EC7\u65E5\u9650 ${limits.org_daily}</div>` : "",
+          `<div>\u603B\u5B57\u6570\uFF1A${Number(usage.total_tokens || 0).toLocaleString("zh-CN")}</div>`,
+          `<div>\u9884\u4F30\u8D39\u7528\uFF1A${formatCurrencyCny(usage.estimated_cost || usage.estimated_cost_cents || 0)}</div>`,
+          taskRows
+        ].join("");
+        return;
+      }
+      els2.cloudUsageLabel.textContent = authenticated ? "\u7B49\u5F85\u7EDF\u8BA1" : "\u672A\u767B\u5F55";
+      els2.cloudUsageReport.textContent = authenticated ? "\u6682\u65E0\u672C\u8D26\u53F7\u7528\u91CF\u8BB0\u5F55\u3002" : "\u767B\u5F55\u4E91\u7AEF\u540E\u663E\u793A\u672C\u8D26\u53F7 AI \u8C03\u7528\u7528\u91CF\u548C\u8D39\u7528\u4F30\u7B97\u3002";
+    }
+    function renderCloudBilling(authenticated) {
+      if (!els2.cloudBillingReport) return;
+      const billing = state2.cloud?.billing || null;
+      renderCloudManualRecharge(authenticated, billing);
+      if (!authenticated) {
+        els2.cloudBillingLabel.textContent = "\u672A\u767B\u5F55";
+        els2.cloudBillingReport.textContent = "\u767B\u5F55\u4E91\u7AEF\u540E\u663E\u793A\u5957\u9910\u3001\u53EF\u7528\u989D\u5EA6\u548C\u5145\u503C\u8BA2\u5355\u3002";
+        return;
+      }
+      if (!billing) {
+        els2.cloudBillingLabel.textContent = "\u7B49\u5F85\u7EDF\u8BA1";
+        els2.cloudBillingReport.textContent = "\u5237\u65B0\u4E91\u7AEF\u72B6\u6001\u540E\u663E\u793A\u5957\u9910\u3001\u989D\u5EA6\u548C\u5145\u503C\u8BA2\u5355\u3002";
+        return;
+      }
+      const plan = billing.organization?.plan || "free";
+      const manualOrderRows = Array.isArray(billing.manual_orders) && billing.manual_orders.length ? billing.manual_orders.slice(-5).reverse().map((item) => formatManualOrderSummary(item)).join("\n") : "\u6682\u65E0\u4EBA\u5DE5\u5145\u503C\u8BA2\u5355\u3002";
+      const creditLedgerRows = Array.isArray(billing.credit_ledger) && billing.credit_ledger.length ? billing.credit_ledger.slice(-8).reverse().map((item) => formatCreditLedgerSummary(item)).join("\n") : "\u6682\u65E0\u989D\u5EA6\u660E\u7EC6\u3002";
+      els2.cloudBillingLabel.textContent = `\u5957\u9910\uFF1A${plan}`;
+      els2.cloudBillingReport.textContent = [
+        `\u5F53\u524D\u5957\u9910\uFF1A${plan}`,
+        `\u4E2A\u4EBA\u65E5\u9650\uFF1A${billing.limits?.user_daily ?? "-"} \xB7 \u7EC4\u7EC7\u65E5\u9650\uFF1A${billing.limits?.org_daily ?? "-"}`,
+        `\u4ECA\u65E5\u8BF7\u6C42\uFF1A${billing.usage?.request_count || 0} \u6B21 \xB7 \u5931\u8D25\uFF1A${billing.usage?.failed_count || 0} \u6B21`,
+        `\u4ECA\u65E5\u9884\u4F30\u8D39\u7528\uFF1A${formatCurrencyCny(billing.usage?.estimated_cost || 0)}`,
+        `AI \u989D\u5EA6\uFF1A${Number(billing.credits?.balance || 0).toLocaleString("zh-CN")} \u70B9`,
+        "",
+        "\u6211\u7684\u5145\u503C\u8BA2\u5355\uFF1A",
+        manualOrderRows,
+        "",
+        "\u989D\u5EA6\u660E\u7EC6\uFF1A",
+        creditLedgerRows
+      ].join("\n");
+    }
+    function renderCloudManualRecharge(authenticated, billing) {
+      const manual = billing?.manual_payment || {};
+      const packages = getManualPackages(manual);
+      const currentPackage = els2.cloudManualPackageSelect?.value || packages[0]?.id || "";
+      if (els2.cloudManualPackageSelect) {
+        els2.cloudManualPackageSelect.innerHTML = packages.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(formatManualPaymentPackage(item))}</option>`).join("");
+        els2.cloudManualPackageSelect.value = packages.some((item) => item.id === currentPackage) ? currentPackage : packages[0]?.id || "";
+        els2.cloudManualPackageSelect.disabled = !authenticated;
+      }
+      const methods = getManualMethods(manual);
+      if (els2.cloudManualPaymentMethodSelect) {
+        const currentMethod = els2.cloudManualPaymentMethodSelect.value || "wechat";
+        els2.cloudManualPaymentMethodSelect.innerHTML = methods.map((item) => `<option value="${escapeHtml(item.channel)}">${escapeHtml(item.label || item.channel)}</option>`).join("");
+        els2.cloudManualPaymentMethodSelect.value = methods.some((item) => item.channel === currentMethod) ? currentMethod : methods[0]?.channel || "wechat";
+        els2.cloudManualPaymentMethodSelect.disabled = !authenticated;
+      }
+      if (els2.cloudCreditBalanceLabel) {
+        els2.cloudCreditBalanceLabel.textContent = `\u989D\u5EA6\uFF1A${Number(billing?.credits?.balance || 0).toLocaleString("zh-CN")} \u70B9`;
+      }
+      if (els2.cloudManualOrderBtn) els2.cloudManualOrderBtn.disabled = !authenticated;
+      if (els2.cloudManualOrderNoteInput) els2.cloudManualOrderNoteInput.disabled = !authenticated;
+      if (els2.cloudManualProofInput) els2.cloudManualProofInput.disabled = !authenticated;
+      renderCloudManualPaymentMethods2();
+    }
+    function renderCloudManualPaymentMethods2() {
+      if (!els2.cloudManualPaymentMethods) return;
+      const billing = state2.cloud?.billing || null;
+      const manual = billing?.manual_payment || {};
+      const packages = getManualPackages(manual);
+      const methods = getManualMethods(manual);
+      const selectedPackageId = els2.cloudManualPackageSelect?.value || packages[0]?.id || "";
+      const selectedPackage = packages.find((item) => item.id === selectedPackageId) || packages[0] || null;
+      const selected = els2.cloudManualPaymentMethodSelect?.value || methods[0]?.channel || "wechat";
+      const method = methods.find((item) => item.channel === selected) || methods[0] || { channel: selected, label: selected, qr_url: "" };
+      const receiver = manual.receiver_name ? `<span>\u6536\u6B3E\u65B9\uFF1A${escapeHtml(manual.receiver_name)}</span>` : "";
+      const packageHint = selectedPackage ? `<span>\u672C\u6B21\u5E94\u4ED8\uFF1A\xA5${escapeHtml(selectedPackage.amount_cny ?? 0)} \xB7 ${escapeHtml(formatManualPaymentPackage(selectedPackage))}</span>` : "";
+      const qr = method.qr_url ? `<img src="${escapeHtml(method.qr_url)}" alt="${escapeHtml(method.label || method.channel)} \u6536\u6B3E\u7801">` : `<div class="manual-payment-placeholder">\u672A\u914D\u7F6E\u6536\u6B3E\u7801\uFF0C\u8BF7\u5411\u7BA1\u7406\u5458\u7D22\u53D6\u3002</div>`;
+      els2.cloudManualPaymentMethods.innerHTML = `
+      <div class="manual-payment-method">
+        ${qr}
+        <div>
+          <strong>${escapeHtml(method.label || method.channel || "\u652F\u4ED8\u65B9\u5F0F")}</strong>
+          ${receiver}
+          ${packageHint}
+          <span>\u4ED8\u6B3E\u540E\u63D0\u4EA4\u8BA2\u5355\uFF0C\u7BA1\u7406\u5458\u6838\u5BF9\u540E\u751F\u6548\u3002</span>
+        </div>
+      </div>`;
+    }
+    return {
+      renderCloudPanel: renderCloudPanel2,
+      renderFeatureMap,
+      renderCloudBilling,
+      renderCloudManualRecharge,
+      renderCloudManualPaymentMethods: renderCloudManualPaymentMethods2
+    };
+  }
+  function getManualPackages(manual = {}) {
+    return Array.isArray(manual.packages) && manual.packages.length ? manual.packages : [
+      { id: "pro_month", title: "Pro \u6708\u5EA6\u4F1A\u5458", amount_cny: 29, plan: "pro", duration_days: 30, credits: 0 },
+      { id: "credits_1000", title: "1000 \u70B9 AI \u989D\u5EA6", amount_cny: 50, plan: "", duration_days: 0, credits: 1e3 }
+    ];
+  }
+  function getManualMethods(manual = {}) {
+    return Array.isArray(manual.methods) && manual.methods.length ? manual.methods : [
+      { channel: "wechat", label: "\u5FAE\u4FE1", qr_url: "" },
+      { channel: "alipay", label: "\u652F\u4ED8\u5B9D", qr_url: "" }
+    ];
+  }
+
   // src/modules/documents/documentEditor.js
   function createDocumentEditor(deps) {
     const {
@@ -36686,6 +36884,11 @@ ${mention} ` : `${mention} `;
       ui.progressElement = element;
     }
   });
+  var cloudPanelRenderer = createCloudPanelRenderer({
+    state,
+    els,
+    defaultCloudApiBaseUrl: DEFAULT_CLOUD_API_BASE_URL
+  });
   var layoutController = createLayoutController({ els, ui });
   var folderManager = createFolderManager({
     state,
@@ -37572,76 +37775,7 @@ ${mention} ` : `${mention} `;
     documentTypeController.updateTypeControlState();
   }
   function renderCloudPanel() {
-    if (!els.cloudBaseUrlInput) return;
-    const cloud = state.cloud || {};
-    const authenticated = Boolean(cloud.authenticated && cloud.user);
-    const emailVerified = Boolean(cloud.user?.email_verified_at);
-    const orgName = cloud.activeOrganization?.name || "\u672A\u9009\u62E9\u7EC4\u7EC7";
-    els.cloudBaseUrlInput.value = cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL;
-    els.cloudStatusLabel.textContent = authenticated ? "\u5DF2\u767B\u5F55" : "\u672C\u5730\u6A21\u5F0F";
-    els.cloudStatusLabel.className = `status-pill ${authenticated ? "ready" : ""}`;
-    els.cloudLogoutBtn.disabled = !authenticated;
-    els.cloudAccountCard.innerHTML = authenticated ? `<strong>${escapeHtml(cloud.user.email || "")}</strong><span>${escapeHtml(orgName)} \xB7 ${escapeHtml(roleLabel(cloud.membership?.role || "owner"))} \xB7 ${emailVerified ? "\u90AE\u7BB1\u5DF2\u9A8C\u8BC1" : "\u90AE\u7BB1\u672A\u9A8C\u8BC1"}</span>` : "<strong>\u672A\u8FDE\u63A5\u4E91\u7AEF</strong><span>\u672C\u5730\u6570\u636E\u4ECD\u53EF\u6B63\u5E38\u4F7F\u7528\uFF0C\u767B\u5F55\u540E\u53EF\u67E5\u770B\u5957\u9910\u3001\u989D\u5EA6\u3001\u8D39\u7528\u660E\u7EC6\u5E76\u540C\u6B65\u4E2A\u4EBA\u6570\u636E\u3002</span>";
-    renderFeatureMap();
-    [
-      els.cloudSaveDocBtn,
-      els.cloudPullDocsBtn,
-      els.cloudSaveWriterBtn,
-      els.cloudPullWritersBtn,
-      els.cloudRequestVerifyBtn,
-      els.cloudVerifyEmailBtn,
-      els.cloudLogoutAllBtn,
-      els.cloudExportDataBtn,
-      els.cloudDeleteAccountBtn,
-      els.cloudSendFeedbackBtn,
-      els.cloudManualOrderBtn
-    ].forEach((button) => {
-      if (button) button.disabled = !authenticated;
-    });
-    [
-      els.cloudManualPackageSelect,
-      els.cloudManualPaymentMethodSelect,
-      els.cloudManualOrderNoteInput,
-      els.cloudManualProofInput
-    ].forEach((field) => {
-      if (field) field.disabled = !authenticated;
-    });
-    const usage = cloud.usage;
-    if (usage) {
-      els.cloudUsageLabel.textContent = `${usage.request_count || usage.requests || 0} \u6B21\u8BF7\u6C42`;
-      const limits = cloud.limits;
-      const taskRows = Object.entries(usage.by_task_type || {}).map(([task, item]) => `<div>${escapeHtml(task)}\uFF1A${item.request_count || 0} \u6B21 \xB7 ${Number(item.total_tokens || 0).toLocaleString("zh-CN")} \u5B57\u6570\u4F30\u7B97</div>`).join("");
-      els.cloudUsageReport.innerHTML = [
-        limits ? `<div>\u5957\u9910\uFF1A${escapeHtml(limits.plan || "free")} \xB7 \u4E2A\u4EBA\u65E5\u9650 ${limits.user_daily} \xB7 \u7EC4\u7EC7\u65E5\u9650 ${limits.org_daily}</div>` : "",
-        `<div>\u603B\u5B57\u6570\uFF1A${Number(usage.total_tokens || 0).toLocaleString("zh-CN")}</div>`,
-        `<div>\u9884\u4F30\u8D39\u7528\uFF1A${formatCurrencyCny(usage.estimated_cost || usage.estimated_cost_cents || 0)}</div>`,
-        taskRows
-      ].join("");
-    } else {
-      els.cloudUsageLabel.textContent = authenticated ? "\u7B49\u5F85\u7EDF\u8BA1" : "\u672A\u767B\u5F55";
-      els.cloudUsageReport.textContent = authenticated ? "\u6682\u65E0\u672C\u8D26\u53F7\u7528\u91CF\u8BB0\u5F55\u3002" : "\u767B\u5F55\u4E91\u7AEF\u540E\u663E\u793A\u672C\u8D26\u53F7 AI \u8C03\u7528\u7528\u91CF\u548C\u8D39\u7528\u4F30\u7B97\u3002";
-    }
-    renderCloudBilling(authenticated);
-  }
-  function renderFeatureMap() {
-    if (!els.featureMapGrid) return;
-    els.featureMapGrid.innerHTML = getFeatureGroups().map((group2) => `
-    <section class="feature-map-group" aria-label="${escapeHtml(group2.name)}">
-      <div class="feature-map-group-title">${escapeHtml(group2.name)}</div>
-      ${group2.features.map((feature) => `
-        <article class="feature-card" data-feature-id="${escapeHtml(feature.id)}">
-          <div class="feature-card-head">
-            <strong>${escapeHtml(feature.title)}</strong>
-            <span>${escapeHtml(feature.mode)}</span>
-          </div>
-          <p>${escapeHtml(feature.summary)}</p>
-          <div class="feature-card-meta">\u5165\u53E3\uFF1A${escapeHtml(feature.entry)}</div>
-          <div class="feature-card-tags">
-            ${feature.outputs.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
-          </div>
-          <button type="button" data-feature-action="${escapeHtml(feature.action)}">\u8FDB\u5165</button>
-        </article>`).join("")}
-    </section>`).join("");
+    cloudPanelRenderer.renderCloudPanel();
   }
   function handleFeatureMapAction(event) {
     const button = event.target.closest("[data-feature-action]");
@@ -37699,102 +37833,8 @@ ${mention} ` : `${mention} `;
       openStandaloneAdminPage();
     }
   }
-  function renderCloudBilling(authenticated) {
-    if (!els.cloudBillingReport) return;
-    const billing = state.cloud?.billing || null;
-    renderCloudManualRecharge(authenticated, billing);
-    if (!authenticated) {
-      els.cloudBillingLabel.textContent = "\u672A\u767B\u5F55";
-      els.cloudBillingReport.textContent = "\u767B\u5F55\u4E91\u7AEF\u540E\u663E\u793A\u5957\u9910\u3001\u53EF\u7528\u989D\u5EA6\u548C\u5145\u503C\u8BA2\u5355\u3002";
-      return;
-    }
-    if (!billing) {
-      els.cloudBillingLabel.textContent = "\u7B49\u5F85\u7EDF\u8BA1";
-      els.cloudBillingReport.textContent = "\u5237\u65B0\u4E91\u7AEF\u72B6\u6001\u540E\u663E\u793A\u5957\u9910\u3001\u989D\u5EA6\u548C\u5145\u503C\u8BA2\u5355\u3002";
-      return;
-    }
-    const plan = billing.organization?.plan || "free";
-    const manualOrderRows = Array.isArray(billing.manual_orders) && billing.manual_orders.length ? billing.manual_orders.slice(-5).reverse().map((item) => formatManualOrderSummary(item)).join("\n") : "\u6682\u65E0\u4EBA\u5DE5\u5145\u503C\u8BA2\u5355\u3002";
-    const creditLedgerRows = Array.isArray(billing.credit_ledger) && billing.credit_ledger.length ? billing.credit_ledger.slice(-8).reverse().map((item) => formatCreditLedgerSummary(item)).join("\n") : "\u6682\u65E0\u989D\u5EA6\u660E\u7EC6\u3002";
-    els.cloudBillingLabel.textContent = `\u5957\u9910\uFF1A${plan}`;
-    els.cloudBillingReport.textContent = [
-      `\u5F53\u524D\u5957\u9910\uFF1A${plan}`,
-      `\u4E2A\u4EBA\u65E5\u9650\uFF1A${billing.limits?.user_daily ?? "-"} \xB7 \u7EC4\u7EC7\u65E5\u9650\uFF1A${billing.limits?.org_daily ?? "-"}`,
-      `\u4ECA\u65E5\u8BF7\u6C42\uFF1A${billing.usage?.request_count || 0} \u6B21 \xB7 \u5931\u8D25\uFF1A${billing.usage?.failed_count || 0} \u6B21`,
-      `\u4ECA\u65E5\u9884\u4F30\u8D39\u7528\uFF1A${formatCurrencyCny(billing.usage?.estimated_cost || 0)}`,
-      `AI \u989D\u5EA6\uFF1A${Number(billing.credits?.balance || 0).toLocaleString("zh-CN")} \u70B9`,
-      "",
-      "\u6211\u7684\u5145\u503C\u8BA2\u5355\uFF1A",
-      manualOrderRows,
-      "",
-      "\u989D\u5EA6\u660E\u7EC6\uFF1A",
-      creditLedgerRows
-    ].join("\n");
-  }
-  function renderCloudManualRecharge(authenticated, billing) {
-    const manual = billing?.manual_payment || {};
-    const packages = Array.isArray(manual.packages) && manual.packages.length ? manual.packages : [
-      { id: "pro_month", title: "Pro \u6708\u5EA6\u4F1A\u5458", amount_cny: 29, plan: "pro", duration_days: 30, credits: 0 },
-      { id: "credits_1000", title: "1000 \u70B9 AI \u989D\u5EA6", amount_cny: 50, plan: "", duration_days: 0, credits: 1e3 }
-    ];
-    const currentPackage = els.cloudManualPackageSelect?.value || packages[0]?.id || "";
-    if (els.cloudManualPackageSelect) {
-      els.cloudManualPackageSelect.innerHTML = packages.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(formatManualPaymentPackage(item))}</option>`).join("");
-      els.cloudManualPackageSelect.value = packages.some((item) => item.id === currentPackage) ? currentPackage : packages[0]?.id || "";
-      els.cloudManualPackageSelect.disabled = !authenticated;
-    }
-    if (els.cloudManualPaymentMethodSelect) {
-      const methods = Array.isArray(manual.methods) && manual.methods.length ? manual.methods : [
-        { channel: "wechat", label: "\u5FAE\u4FE1", qr_url: "" },
-        { channel: "alipay", label: "\u652F\u4ED8\u5B9D", qr_url: "" }
-      ];
-      const currentMethod = els.cloudManualPaymentMethodSelect.value || "wechat";
-      els.cloudManualPaymentMethodSelect.innerHTML = methods.map((item) => `<option value="${escapeHtml(item.channel)}">${escapeHtml(item.label || item.channel)}</option>`).join("");
-      els.cloudManualPaymentMethodSelect.value = methods.some((item) => item.channel === currentMethod) ? currentMethod : methods[0]?.channel || "wechat";
-      els.cloudManualPaymentMethodSelect.disabled = !authenticated;
-    }
-    if (els.cloudCreditBalanceLabel) {
-      els.cloudCreditBalanceLabel.textContent = `\u989D\u5EA6\uFF1A${Number(billing?.credits?.balance || 0).toLocaleString("zh-CN")} \u70B9`;
-    }
-    if (els.cloudManualOrderBtn) els.cloudManualOrderBtn.disabled = !authenticated;
-    if (els.cloudManualOrderNoteInput) els.cloudManualOrderNoteInput.disabled = !authenticated;
-    if (els.cloudManualProofInput) els.cloudManualProofInput.disabled = !authenticated;
-    renderCloudManualPaymentMethods();
-  }
   function renderCloudManualPaymentMethods() {
-    if (!els.cloudManualPaymentMethods) return;
-    const billing = state.cloud?.billing || null;
-    const manual = billing?.manual_payment || {};
-    const packages = Array.isArray(manual.packages) ? manual.packages : [];
-    const methods = Array.isArray(manual.methods) ? manual.methods : [];
-    const selectedPackageId = els.cloudManualPackageSelect?.value || packages[0]?.id || "";
-    const selectedPackage = packages.find((item) => item.id === selectedPackageId) || packages[0] || null;
-    const selected = els.cloudManualPaymentMethodSelect?.value || methods[0]?.channel || "wechat";
-    const method = methods.find((item) => item.channel === selected) || methods[0] || { channel: selected, label: selected, qr_url: "" };
-    const receiver = manual.receiver_name ? `<span>\u6536\u6B3E\u65B9\uFF1A${escapeHtml(manual.receiver_name)}</span>` : "";
-    const packageHint = selectedPackage ? `<span>\u672C\u6B21\u5E94\u4ED8\uFF1A\xA5${escapeHtml(selectedPackage.amount_cny ?? 0)} \xB7 ${escapeHtml(formatManualPaymentPackage(selectedPackage))}</span>` : "";
-    const qr = method.qr_url ? `<img src="${escapeHtml(method.qr_url)}" alt="${escapeHtml(method.label || method.channel)} \u6536\u6B3E\u7801">` : `<div class="manual-payment-placeholder">\u672A\u914D\u7F6E\u6536\u6B3E\u7801\uFF0C\u8BF7\u5411\u7BA1\u7406\u5458\u7D22\u53D6\u3002</div>`;
-    els.cloudManualPaymentMethods.innerHTML = `
-    <div class="manual-payment-method">
-      ${qr}
-      <div>
-        <strong>${escapeHtml(method.label || method.channel || "\u652F\u4ED8\u65B9\u5F0F")}</strong>
-        ${receiver}
-        ${packageHint}
-        <span>\u4ED8\u6B3E\u540E\u63D0\u4EA4\u8BA2\u5355\uFF0C\u7BA1\u7406\u5458\u6838\u5BF9\u540E\u751F\u6548\u3002</span>
-      </div>
-    </div>`;
-  }
-  function roleLabel(role) {
-    const value = String(role || "member");
-    if (value === "owner") return "\u6240\u6709\u8005";
-    if (value === "admin") return "\u7BA1\u7406\u5458";
-    if (value === "member") return "\u6210\u5458";
-    return value;
-  }
-  function formatCurrencyCny(value) {
-    const amount = Number(value || 0);
-    return `\xA5${(Number.isFinite(amount) ? amount : 0).toFixed(4)}`;
+    cloudPanelRenderer.renderCloudManualPaymentMethods();
   }
   function getDefaultCloudApiBaseUrl() {
     const location = window.location;
