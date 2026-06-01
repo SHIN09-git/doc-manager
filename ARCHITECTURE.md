@@ -290,10 +290,11 @@ P2 第五轮阶段 C 已补充：
 - `documents` 分页只读 repository，`GET /api/documents` 在 PostgreSQL Store 下优先走表级查询，并返回可选 `page_info`。
 - `admin_preferences` 表级 repository，后台偏好读取、保存和清空在 PostgreSQL Store 下走独立事务，并与旧快照写队列共享 advisory lock。
 - `ops_triage` 表级 repository，AI 失败记录的后台跟进映射在 PostgreSQL Store 下走独立 upsert，并在同一事务写审计日志。
+- `writer_profiles`/`writer_versions` 表级 repository，执笔人创建、更新、软删除、版本列表和版本恢复在 PostgreSQL Store 下走独立事务，并保持版本快照和审计日志同事务写入。
 - `ai_usage` 写入暂不切为 insert-only；在审计写入和快照事务边界拆清前，继续避免增量写被快照写覆盖。
 - Repository 测试覆盖组织隔离、limit、筛选、游标分页、JSON/日期归一和迁移版本跳过重复执行。
 
-仍需继续完成真实支付服务商 SDK、备份恢复演练、执笔人相关表的增量写 repository 和企业部署增强。
+仍需继续完成真实支付服务商 SDK、备份恢复演练、`recordUsage` insert-only 写入评估、真实 PostgreSQL 集成测试和企业部署增强。
 
 ## PPT 链路
 

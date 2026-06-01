@@ -357,12 +357,11 @@ Review 后修复：
 
 ### 3. PostgreSQL Store 生产级改造
 
-当前 PostgreSQL Store 已完成迁移版本表、`ai_usage` 历史查询、`audit_logs` 审计查询、`documents` 文档列表只读 repository，以及 `admin_preferences`、`ops_triage` 表级读写 repository 试点；但执笔人写入路径仍主要采用快照式兼容层，适合小团队灰度，不适合高并发多租户。
+当前 PostgreSQL Store 已完成迁移版本表、`ai_usage` 历史查询、`audit_logs` 审计查询、`documents` 文档列表只读 repository，以及 `admin_preferences`、`ops_triage`、`writer_profiles`、`writer_versions` 表级读写 repository；执笔人写入、版本恢复和后台轻量运营字段已不再依赖整库快照写回。
 
 需要完成：
 
-- 继续拆出 `writer_profiles`、`writer_versions` 表级 repository。
-- 用增量 SQL 替代整库快照写回。
+- 继续评估 `recordUsage`、系统事件跟进等剩余高频写入的增量 SQL 替代方案。
 - 给文档、执笔人、用量、审计等高频表增加分页查询。
 - 增加 PostgreSQL 集成测试。
 - 扩展多版本迁移脚本和回滚演练。

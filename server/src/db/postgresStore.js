@@ -8,6 +8,15 @@ import { insertAuditLog, listAuditByOrganization } from "./repositories/auditRep
 import { listDocumentsByOrganization } from "./repositories/documentRepository.js";
 import { getOpsTriage, upsertOpsTriage } from "./repositories/opsTriageRepository.js";
 import { listUsageByOrganization } from "./repositories/usageRepository.js";
+import {
+  createWriterProfile,
+  getWriterById,
+  listWritersByOrganization,
+  listWriterVersionsByWriter,
+  restoreWriterVersion as restoreWriterVersionRecord,
+  softDeleteWriterProfile,
+  updateWriterProfile,
+} from "./repositories/writerRepository.js";
 
 const TABLES = {
   users: ["id", "email", "name", "avatar_url", "password_hash", "email_verified_at", "created_at", "updated_at", "last_login_at", "disabled_at"],
@@ -193,6 +202,93 @@ export class PostgresStore {
         created_at: now,
       });
       return record;
+    });
+  }
+
+  async listWriterProfiles(options) {
+    await this.init();
+    return listWritersByOrganization(this.pool, options);
+  }
+
+  async getWriterProfile(options) {
+    await this.init();
+    return getWriterById(this.pool, options);
+  }
+
+  async createWriterProfile(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const writer = await createWriterProfile(client, { ...options, now });
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "writer.create",
+        target_type: "writer",
+        target_id: writer.id,
+        metadata: { handle: writer.handle },
+        created_at: now,
+      });
+      return writer;
+    });
+  }
+
+  async updateWriterProfile(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const writer = await updateWriterProfile(client, { ...options, now });
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "writer.update",
+        target_type: "writer",
+        target_id: writer.id,
+        metadata: { handle: writer.handle },
+        created_at: now,
+      });
+      return writer;
+    });
+  }
+
+  async deleteWriterProfile(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const writer = await softDeleteWriterProfile(client, { ...options, now });
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "writer.delete",
+        target_type: "writer",
+        target_id: writer.id,
+        metadata: { handle: writer.handle },
+        created_at: now,
+      });
+      return writer;
+    });
+  }
+
+  async listWriterVersions(options) {
+    await this.init();
+    return listWriterVersionsByWriter(this.pool, options);
+  }
+
+  async restoreWriterVersion(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const writer = await restoreWriterVersionRecord(client, { ...options, now });
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "writer.version.restore",
+        target_type: "writer",
+        target_id: options.writerId,
+        metadata: { version_id: options.versionId },
+        created_at: now,
+      });
+      return writer;
     });
   }
 

@@ -151,10 +151,16 @@
 
 下一阶段优先建议：
 
-- [ ] 继续拆 PostgreSQL 写入路径，优先处理 `writer_profiles`、`writer_versions` 的表级 repository。
+- [x] 继续拆 PostgreSQL 写入路径，已完成 `writer_profiles`、`writer_versions` 的表级 repository。
 - [x] 为管理后台补一个只读运营角色，避免 owner/admin 承担所有后台查看权限。
 - [ ] 建立真实支付渠道接入方案，选择 Stripe、Paddle、Creem 或国内支付渠道之一做签名与 webhook 适配。
 - [ ] 补充真实 Resend 域名、webhook 订阅与投递率验证记录。
+
+新增收口：
+
+- [x] 执笔人云端写入已接入 `writerRepository`，创建、更新、软删除、版本列表和版本恢复不再依赖整库快照写回。
+- [x] 执笔人调用名冲突统一返回 `handle_exists`，避免 PostgreSQL 唯一约束错误泄漏成 500。
+- [x] 补充执笔人 repository 单测和 API hook 测试，确认新路径不会调用兼容 `write()`。
 
 ## 2026-05-24 后台深水区完成记录
 

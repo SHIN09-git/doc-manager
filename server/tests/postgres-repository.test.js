@@ -9,6 +9,15 @@ import { buildAuditHistoryQuery, insertAuditLog, listAuditByOrganization } from 
 import { buildDocumentListQuery, listDocumentsByOrganization } from "../src/db/repositories/documentRepository.js";
 import { buildOpsTriageGetQuery, getOpsTriage, upsertOpsTriage } from "../src/db/repositories/opsTriageRepository.js";
 import { buildUsageHistoryQuery, listUsageByOrganization } from "../src/db/repositories/usageRepository.js";
+import {
+  createWriterProfile,
+  getWriterById,
+  listWritersByOrganization,
+  listWriterVersionsByWriter,
+  restoreWriterVersion,
+  softDeleteWriterProfile,
+  updateWriterProfile,
+} from "../src/db/repositories/writerRepository.js";
 
 test("migration runner records executed versions and skips repeats", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "mowen-migrations-"));
@@ -474,6 +483,343 @@ test("ops triage repository inserts a new scoped record", async () => {
   assert.equal(record.updated_by, "usr_ops");
 });
 
+test("writer repository lists organization writers and normalizes rows", async () => {
+  let captured = null;
+  const pool = {
+    async query(text, values) {
+      captured = { text, values };
+      return {
+        rows: [writerRow({
+          id: "wrt_001",
+          organization_id: values[0],
+          handle: "notice",
+          version: "3",
+          skill_json: "{\"style\":\"formal\"}",
+          quality_report: "{\"score\":88}",
+          updated_at: new Date("2026-05-24T02:00:00.000Z"),
+        })],
+      };
+    },
+  };
+
+  const writers = await listWritersByOrganization(pool, {
+    organizationId: "org_writer",
+  });
+
+  assert.match(captured.text, /from writer_profiles/);
+  assert.match(captured.text, /deleted_at is null/);
+  assert.deepEqual(captured.values, ["org_writer"]);
+  assert.equal(writers[0].organization_id, "org_writer");
+  assert.equal(writers[0].version, 3);
+  assert.deepEqual(writers[0].skill_json, { style: "formal" });
+  assert.deepEqual(writers[0].quality_report, { score: 88 });
+  assert.equal(writers[0].updated_at, "2026-05-24T02:00:00.000Z");
+});
+
+test("writer repository creates a writer and initial version", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/select id\s+from writer_profiles/.test(text)) return { rows: [] };
+      if (/insert into writer_profiles/.test(text)) {
+        return { rows: [writerRow({
+          id: values[0],
+          organization_id: values[1],
+          owner_id: values[2],
+          name: values[3],
+          handle: values[4],
+          category: values[5],
+          description: values[6],
+          enabled: values[7],
+          summary_md: values[8],
+          skill_json: values[9],
+          quality_report: values[10],
+          version: values[11],
+          created_at: values[12],
+          updated_at: values[13],
+          deleted_at: values[14],
+        })] };
+      }
+      if (/insert into writer_versions/.test(text)) {
+        return { rows: [writerVersionRow({
+          id: values[0],
+          writer_profile_id: values[1],
+          version: values[2],
+          summary_md: values[3],
+          skill_json: values[4],
+          quality_report: values[5],
+          created_by: values[6],
+          created_at: values[7],
+        })] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const writer = await createWriterProfile(pool, {
+    organizationId: "org_writer",
+    userId: "usr_writer",
+    draft: {
+      name: "通知执笔人",
+      handle: "notice",
+      category: "公文写作",
+      description: "生成通知",
+      enabled: true,
+      summary_md: "v1",
+      skill_json: { style: "formal" },
+      quality_report: { score: 90 },
+    },
+    now: "2026-05-24T03:00:00.000Z",
+  });
+
+  assert.match(writer.id, /^wrt_/);
+  assert.equal(writer.version, 1);
+  assert.equal(writer.handle, "notice");
+  assert.match(calls[1].text, /insert into writer_profiles/);
+  assert.match(calls[2].text, /insert into writer_versions/);
+  assert.equal(calls[2].values[1], writer.id);
+  assert.equal(calls[2].values[2], 1);
+  assert.deepEqual(calls[2].values[4], { style: "formal" });
+});
+
+test("writer repository maps database handle conflicts to domain errors", async () => {
+  const pool = {
+    async query(text) {
+      if (/select id\s+from writer_profiles/.test(text)) return { rows: [] };
+      if (/insert into writer_profiles/.test(text)) {
+        const error = new Error("duplicate key value violates unique constraint");
+        error.code = "23505";
+        throw error;
+      }
+      throw new Error("version insert should not run");
+    },
+  };
+
+  await assert.rejects(
+    () => createWriterProfile(pool, {
+      organizationId: "org_writer",
+      userId: "usr_writer",
+      draft: {
+        name: "通知执笔人",
+        handle: "notice",
+        category: "公文写作",
+        description: "",
+        enabled: true,
+        summary_md: "",
+        skill_json: {},
+        quality_report: {},
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "handle_exists");
+      assert.equal(error.details.handle, "notice");
+      return true;
+    },
+  );
+});
+
+test("writer repository updates a writer and creates a new version", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/select id\s+from writer_profiles/.test(text)) return { rows: [] };
+      if (/from writer_profiles/.test(text) && /limit 1/.test(text)) {
+        return { rows: [writerRow({
+          id: values[1],
+          organization_id: values[0],
+          handle: "notice",
+          version: 2,
+        })] };
+      }
+      if (/update writer_profiles/.test(text)) {
+        return { rows: [writerRow({
+          id: values[10],
+          organization_id: values[11],
+          name: values[0],
+          handle: values[1],
+          category: values[2],
+          description: values[3],
+          enabled: values[4],
+          summary_md: values[5],
+          skill_json: values[6],
+          quality_report: values[7],
+          version: values[8],
+          updated_at: values[9],
+        })] };
+      }
+      if (/insert into writer_versions/.test(text)) {
+        return { rows: [writerVersionRow({
+          id: values[0],
+          writer_profile_id: values[1],
+          version: values[2],
+          summary_md: values[3],
+          skill_json: values[4],
+          quality_report: values[5],
+          created_by: values[6],
+          created_at: values[7],
+        })] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const writer = await updateWriterProfile(pool, {
+    organizationId: "org_writer",
+    writerId: "wrt_001",
+    userId: "usr_writer",
+    expectedVersion: 2,
+    draft: {
+      name: "通知执笔人新版",
+      handle: "notice-new",
+      category: "公文写作",
+      description: "生成正式通知",
+      enabled: false,
+      summary_md: "v3",
+      skill_json: { style: "strict" },
+      quality_report: { score: 96 },
+    },
+    now: "2026-05-24T04:00:00.000Z",
+  });
+
+  assert.equal(writer.version, 3);
+  assert.equal(writer.enabled, false);
+  assert.match(calls[2].text, /update writer_profiles/);
+  assert.match(calls[3].text, /insert into writer_versions/);
+  assert.equal(calls[3].values[2], 3);
+});
+
+test("writer repository reports version conflicts before updating", async () => {
+  const pool = {
+    async query(text, values) {
+      if (/from writer_profiles/.test(text)) {
+        return { rows: [writerRow({
+          id: values[1],
+          organization_id: values[0],
+          version: 4,
+        })] };
+      }
+      throw new Error("update should not run");
+    },
+  };
+
+  await assert.rejects(
+    () => updateWriterProfile(pool, {
+      organizationId: "org_writer",
+      writerId: "wrt_conflict",
+      userId: "usr_writer",
+      expectedVersion: 3,
+      draft: {
+        name: "冲突执笔人",
+        handle: "conflict",
+        category: "公文写作",
+        description: "",
+        enabled: true,
+        summary_md: "",
+        skill_json: {},
+        quality_report: {},
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "version_conflict");
+      assert.equal(error.details.current_version, 4);
+      return true;
+    },
+  );
+});
+
+test("writer repository restores a version and snapshots the restore", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/from writer_profiles/.test(text)) {
+        return { rows: [writerRow({
+          id: values[1],
+          organization_id: values[0],
+          handle: "notice",
+          version: 3,
+        })] };
+      }
+      if (/from writer_versions/.test(text)) {
+        return { rows: [writerVersionRow({
+          id: values[1],
+          writer_profile_id: values[0],
+          version: 1,
+          summary_md: "restored",
+          skill_json: { style: "old" },
+          quality_report: { score: 80 },
+        })] };
+      }
+      if (/update writer_profiles/.test(text)) {
+        return { rows: [writerRow({
+          id: values[5],
+          organization_id: values[6],
+          handle: "notice",
+          summary_md: values[0],
+          skill_json: values[1],
+          quality_report: values[2],
+          version: values[3],
+          updated_at: values[4],
+        })] };
+      }
+      if (/insert into writer_versions/.test(text)) {
+        return { rows: [writerVersionRow({
+          id: values[0],
+          writer_profile_id: values[1],
+          version: values[2],
+          summary_md: values[3],
+          skill_json: values[4],
+          quality_report: values[5],
+          created_by: values[6],
+          created_at: values[7],
+        })] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const writer = await restoreWriterVersion(pool, {
+    organizationId: "org_writer",
+    writerId: "wrt_001",
+    versionId: "ver_001",
+    userId: "usr_writer",
+    now: "2026-05-24T05:00:00.000Z",
+  });
+
+  assert.equal(writer.version, 4);
+  assert.equal(writer.summary_md, "restored");
+  assert.deepEqual(writer.skill_json, { style: "old" });
+  assert.match(calls[3].text, /insert into writer_versions/);
+  assert.equal(calls[3].values[2], 4);
+});
+
+test("writer repository soft deletes one active writer", async () => {
+  let captured = null;
+  const pool = {
+    async query(text, values) {
+      captured = { text, values };
+      return { rows: [writerRow({
+        id: values[1],
+        organization_id: values[0],
+        deleted_at: new Date(values[2]),
+        updated_at: new Date(values[2]),
+      })] };
+    },
+  };
+
+  const writer = await softDeleteWriterProfile(pool, {
+    organizationId: "org_writer",
+    writerId: "wrt_delete",
+    now: "2026-05-24T06:00:00.000Z",
+  });
+
+  assert.match(captured.text, /update writer_profiles/);
+  assert.deepEqual(captured.values, ["org_writer", "wrt_delete", "2026-05-24T06:00:00.000Z"]);
+  assert.equal(writer.deleted_at, "2026-05-24T06:00:00.000Z");
+});
+
 test("document repository query supports pagination without deleted documents by default", async () => {
   const query = buildDocumentListQuery({
     organizationId: "org_docs",
@@ -566,6 +912,41 @@ test("document repository can include deleted documents and returns page info", 
     },
   });
 });
+
+function writerRow(overrides = {}) {
+  return {
+    id: "wrt_default",
+    organization_id: "org_default",
+    owner_id: "usr_default",
+    name: "默认执笔人",
+    handle: "default",
+    category: "自定义",
+    description: "",
+    enabled: true,
+    summary_md: "",
+    skill_json: {},
+    quality_report: {},
+    version: 1,
+    created_at: "2026-05-24T00:00:00.000Z",
+    updated_at: "2026-05-24T00:00:00.000Z",
+    deleted_at: null,
+    ...overrides,
+  };
+}
+
+function writerVersionRow(overrides = {}) {
+  return {
+    id: "ver_default",
+    writer_profile_id: "wrt_default",
+    version: 1,
+    summary_md: "",
+    skill_json: {},
+    quality_report: {},
+    created_by: "usr_default",
+    created_at: "2026-05-24T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
 function createMigrationPool() {
   const pool = {

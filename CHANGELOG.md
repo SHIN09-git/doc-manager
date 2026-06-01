@@ -11,6 +11,9 @@
 - 补充 PostgreSQL repository 测试，覆盖后台偏好读取、插入、更新、删除和审计日志插入。
 - PostgreSQL Store 新增 `opsTriageRepository`，AI 失败记录的后台跟进状态、负责人、备注和 SLA 在 PostgreSQL 下可走表级 upsert，并保持同事务审计。
 - 补充 AI 失败跟进回归测试，确认 Store 提供 repository hook 时不会落回整库 `write()`。
+- PostgreSQL Store 新增 `writerRepository`，执笔人档案创建、更新、软删除、版本列表和版本恢复在 PostgreSQL 下可走 `writer_profiles`/`writer_versions` 表级事务。
+- 执笔人写入 repository 会把数据库唯一约束冲突统一映射为 `handle_exists`，避免软删除同名或并发同名写入变成 500。
+- 补充执笔人 repository 与 API hook 回归测试，确认 Store 提供表级方法时 `/api/writers` 不再回退整库 `write()`。
 
 ## 2026-06-01
 

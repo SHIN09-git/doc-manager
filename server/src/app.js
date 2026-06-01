@@ -886,6 +886,11 @@ async function deleteDocument(ctx, id) {
 async function listWriters(ctx) {
   const { data, organization } = await loadOrg(ctx);
   const includeDeleted = ctx.url.searchParams.get("include_deleted") === "true";
+  if (typeof ctx.store.listWriterProfiles === "function") {
+    const writers = await ctx.store.listWriterProfiles({ organizationId: organization.id, includeDeleted });
+    sendJson(ctx.response, 200, { writers });
+    return;
+  }
   const writers = data.writer_profiles.filter((writer) => writer.organization_id === organization.id && (includeDeleted || !writer.deleted_at));
   sendJson(ctx.response, 200, { writers });
 }
@@ -893,9 +898,22 @@ async function listWriters(ctx) {
 async function createWriter(ctx) {
   const body = await readJsonBody(ctx.request, ctx.env.maxJsonBodyBytes);
   const { organization } = await loadOrg(ctx);
+  const draft = normalizeWriterInput(body);
+  if (typeof ctx.store.createWriterProfile === "function") {
+    try {
+      const writer = await ctx.store.createWriterProfile({
+        organizationId: organization.id,
+        userId: ctx.auth.user.id,
+        draft,
+      });
+      sendJson(ctx.response, 201, { writer });
+      return;
+    } catch (error) {
+      throw mapWriterRepositoryError(error);
+    }
+  }
   const writer = await ctx.store.write((data) => {
     const now = new Date().toISOString();
-    const draft = normalizeWriterInput(body);
     ensureUniqueWriterHandle(data, organization.id, draft.handle);
     const next = {
       id: createId("wrt"),
@@ -924,6 +942,12 @@ async function createWriter(ctx) {
 
 async function getWriter(ctx, id) {
   const { data, organization } = await loadOrg(ctx);
+  if (typeof ctx.store.getWriterProfile === "function") {
+    const writer = await ctx.store.getWriterProfile({ organizationId: organization.id, writerId: id });
+    if (!writer || writer.deleted_at) throw new HttpError(404, "执笔人不存在", "not_found");
+    sendJson(ctx.response, 200, { writer });
+    return;
+  }
   const writer = data.writer_profiles.find((item) => item.id === id && item.organization_id === organization.id);
   if (!writer || writer.deleted_at) throw new HttpError(404, "执笔人不存在", "not_found");
   sendJson(ctx.response, 200, { writer });
@@ -932,6 +956,25 @@ async function getWriter(ctx, id) {
 async function updateWriter(ctx, id) {
   const body = await readJsonBody(ctx.request, ctx.env.maxJsonBodyBytes);
   const { organization } = await loadOrg(ctx);
+  if (typeof ctx.store.updateWriterProfile === "function" && typeof ctx.store.getWriterProfile === "function") {
+    const existing = await ctx.store.getWriterProfile({ organizationId: organization.id, writerId: id });
+    if (!existing || existing.deleted_at) throw new HttpError(404, "执笔人不存在", "not_found");
+    const draft = normalizeWriterInput({ ...existing, ...body });
+    try {
+      const writer = await ctx.store.updateWriterProfile({
+        organizationId: organization.id,
+        writerId: id,
+        userId: ctx.auth.user.id,
+        draft,
+        expectedVersion: body.expected_version ?? body.expectedVersion,
+        force: body.force === true,
+      });
+      sendJson(ctx.response, 200, { writer });
+      return;
+    } catch (error) {
+      throw mapWriterRepositoryError(error);
+    }
+  }
   const writer = await ctx.store.write((data) => {
     const existing = data.writer_profiles.find((item) => item.id === id && item.organization_id === organization.id);
     if (!existing || existing.deleted_at) throw new HttpError(404, "执笔人不存在", "not_found");
@@ -959,6 +1002,19 @@ async function updateWriter(ctx, id) {
 
 async function deleteWriter(ctx, id) {
   const { organization } = await loadOrg(ctx);
+  if (typeof ctx.store.deleteWriterProfile === "function") {
+    try {
+      const writer = await ctx.store.deleteWriterProfile({
+        organizationId: organization.id,
+        writerId: id,
+        userId: ctx.auth.user.id,
+      });
+      sendJson(ctx.response, 200, { writer });
+      return;
+    } catch (error) {
+      throw mapWriterRepositoryError(error);
+    }
+  }
   const writer = await ctx.store.write((data) => {
     const existing = data.writer_profiles.find((item) => item.id === id && item.organization_id === organization.id);
     if (!existing || existing.deleted_at) throw new HttpError(404, "执笔人不存在", "not_found");
@@ -972,6 +1028,15 @@ async function deleteWriter(ctx, id) {
 
 async function listWriterVersions(ctx, writerId) {
   const { data, organization } = await loadOrg(ctx);
+  if (typeof ctx.store.listWriterVersions === "function") {
+    try {
+      const versions = await ctx.store.listWriterVersions({ organizationId: organization.id, writerId });
+      sendJson(ctx.response, 200, { versions });
+      return;
+    } catch (error) {
+      throw mapWriterRepositoryError(error);
+    }
+  }
   const writer = data.writer_profiles.find((item) => item.id === writerId && item.organization_id === organization.id);
   if (!writer || writer.deleted_at) throw new HttpError(404, "执笔人不存在", "not_found");
   const versions = data.writer_versions.filter((version) => version.writer_profile_id === writerId);
@@ -980,6 +1045,20 @@ async function listWriterVersions(ctx, writerId) {
 
 async function restoreWriterVersion(ctx, writerId, versionId) {
   const { organization } = await loadOrg(ctx);
+  if (typeof ctx.store.restoreWriterVersion === "function") {
+    try {
+      const writer = await ctx.store.restoreWriterVersion({
+        organizationId: organization.id,
+        writerId,
+        versionId,
+        userId: ctx.auth.user.id,
+      });
+      sendJson(ctx.response, 200, { writer });
+      return;
+    } catch (error) {
+      throw mapWriterRepositoryError(error);
+    }
+  }
   const writer = await ctx.store.write((data) => {
     const existing = data.writer_profiles.find((item) => item.id === writerId && item.organization_id === organization.id);
     if (!existing || existing.deleted_at) throw new HttpError(404, "执笔人不存在", "not_found");
@@ -997,6 +1076,19 @@ async function restoreWriterVersion(ctx, writerId, versionId) {
     return existing;
   });
   sendJson(ctx.response, 200, { writer });
+}
+
+function mapWriterRepositoryError(error) {
+  if (error?.code === "not_found") return new HttpError(404, "执笔人不存在", "not_found");
+  if (error?.code === "version_not_found") return new HttpError(404, "版本不存在", "not_found");
+  if (error?.code === "handle_exists") {
+    const handle = String(error.details?.handle || "").trim();
+    return new HttpError(409, `@${handle || "该调用名"} 已存在`, "handle_exists");
+  }
+  if (error?.code === "version_conflict") {
+    return new HttpError(409, "云端版本已更新，请先处理同步冲突", "version_conflict", error.details || {});
+  }
+  return error;
 }
 
 async function listApiKeys(ctx) {

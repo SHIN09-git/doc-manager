@@ -1421,6 +1421,174 @@ test("ops triage uses repository hook for AI usage when available", async () => 
   }
 });
 
+test("writer APIs use repository hooks when available", async () => {
+  const now = new Date().toISOString();
+  const token = `writer-repo-${crypto.randomUUID()}`;
+  const data = normalizeData({
+    users: [{
+      id: "usr_writer_repo",
+      email: "writer-repo@example.com",
+      name: "Writer Repo",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_writer_repo",
+      name: "Writer Repo Org",
+      slug: "writer-repo-org",
+      plan: "free",
+      created_by: "usr_writer_repo",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_writer_repo",
+      organization_id: "org_writer_repo",
+      user_id: "usr_writer_repo",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_writer_repo",
+      user_id: "usr_writer_repo",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+  });
+  let writeCalled = false;
+  const calls = [];
+  let writer = {
+    id: "wrt_repo",
+    organization_id: "org_writer_repo",
+    owner_id: "usr_writer_repo",
+    name: "仓储执笔人",
+    handle: "repo_writer",
+    category: "公文写作",
+    description: "",
+    enabled: true,
+    summary_md: "v1",
+    skill_json: {},
+    quality_report: {},
+    version: 1,
+    created_at: now,
+    updated_at: now,
+    deleted_at: null,
+  };
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      writeCalled = true;
+      return mutator(data);
+    },
+    async listWriterProfiles(options) {
+      calls.push(["list", options]);
+      return [writer];
+    },
+    async getWriterProfile(options) {
+      calls.push(["get", options]);
+      return writer;
+    },
+    async createWriterProfile(options) {
+      calls.push(["create", options]);
+      writer = { ...writer, ...options.draft, organization_id: options.organizationId, owner_id: options.userId };
+      return writer;
+    },
+    async updateWriterProfile(options) {
+      calls.push(["update", options]);
+      writer = { ...writer, ...options.draft, version: 2, updated_at: now };
+      return writer;
+    },
+    async deleteWriterProfile(options) {
+      calls.push(["delete", options]);
+      writer = { ...writer, deleted_at: now };
+      return writer;
+    },
+    async listWriterVersions(options) {
+      calls.push(["versions", options]);
+      return [{ id: "ver_repo_1", writer_profile_id: options.writerId, version: 1, summary_md: "v1", skill_json: {}, quality_report: {}, created_by: "usr_writer_repo", created_at: now }];
+    },
+    async restoreWriterVersion(options) {
+      calls.push(["restore", options]);
+      writer = { ...writer, summary_md: "restored", version: 3, deleted_at: null };
+      return writer;
+    },
+  };
+  const writerServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+    },
+    store,
+  });
+  await new Promise((resolve) => writerServer.listen(0, "127.0.0.1", resolve));
+  const address = writerServer.address();
+  const writerBaseUrl = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    "Content-Type": "application/json",
+    Cookie: `mowen_session=${encodeURIComponent(token)}`,
+  };
+  try {
+    const created = await fetch(`${writerBaseUrl}/api/writers`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: "新执笔人", handle: "new_writer", summary_md: "v1" }),
+    });
+    const createdBody = await created.json();
+    assert.equal(created.status, 201, JSON.stringify(createdBody));
+    assert.equal(createdBody.writer.handle, "new_writer");
+
+    const listed = await fetch(`${writerBaseUrl}/api/writers`, { headers });
+    const listedBody = await listed.json();
+    assert.equal(listed.status, 200, JSON.stringify(listedBody));
+    assert.equal(listedBody.writers.length, 1);
+
+    const updated = await fetch(`${writerBaseUrl}/api/writers/${writer.id}`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ summary_md: "v2", expected_version: 1 }),
+    });
+    const updatedBody = await updated.json();
+    assert.equal(updated.status, 200, JSON.stringify(updatedBody));
+    assert.equal(updatedBody.writer.version, 2);
+
+    const versions = await fetch(`${writerBaseUrl}/api/writers/${writer.id}/versions`, { headers });
+    const versionsBody = await versions.json();
+    assert.equal(versions.status, 200, JSON.stringify(versionsBody));
+    assert.equal(versionsBody.versions[0].id, "ver_repo_1");
+
+    const restored = await fetch(`${writerBaseUrl}/api/writers/${writer.id}/versions/ver_repo_1/restore`, {
+      method: "POST",
+      headers,
+    });
+    const restoredBody = await restored.json();
+    assert.equal(restored.status, 200, JSON.stringify(restoredBody));
+    assert.equal(restoredBody.writer.summary_md, "restored");
+
+    const deleted = await fetch(`${writerBaseUrl}/api/writers/${writer.id}`, {
+      method: "DELETE",
+      headers,
+    });
+    const deletedBody = await deleted.json();
+    assert.equal(deleted.status, 200, JSON.stringify(deletedBody));
+    assert.ok(deletedBody.writer.deleted_at);
+
+    assert.equal(writeCalled, false);
+    assert.deepEqual(calls.map((item) => item[0]), ["create", "list", "get", "update", "versions", "restore", "delete"]);
+    assert.equal(calls[0][1].organizationId, "org_writer_repo");
+    assert.equal(calls[2][1].writerId, "wrt_repo");
+    assert.equal(calls[3][1].expectedVersion, 1);
+  } finally {
+    await new Promise((resolve) => writerServer.close(resolve));
+  }
+});
+
 async function register(email, options = {}) {
   const response = await api("/api/auth/register", {
     method: "POST",

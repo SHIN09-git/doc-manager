@@ -1,5 +1,35 @@
 # 代码评审记录
 
+## 2026-06-02 执笔人 PostgreSQL Repository Review
+
+范围：`server/src/db/repositories/writerRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
+
+结论：本轮没有发现阻断问题。执笔人云端写入已从整库快照写回拆为 `writer_profiles`/`writer_versions` 表级 repository，创建、更新、软删除、版本列表和版本恢复都在 PostgreSQL Store 下走独立事务；版本快照与审计日志保持同事务写入，JSON Store 兼容路径不变。
+
+已确认：
+
+- `/api/writers` 在 Store 提供 repository hook 时不会再调用整库 `write()`。
+- 更新执笔人会检查 `expected_version`，冲突时继续返回 `version_conflict`，便于前端保留原有同步冲突处理。
+- 调用名唯一约束冲突会统一映射为 `handle_exists`，包括数据库 `23505` 并发或软删除同名边界。
+- 版本恢复会基于历史 `writer_versions` 生成新版本快照，不直接覆盖历史记录。
+- Repository 测试覆盖列表读取、创建、调用名冲突、更新、版本冲突、版本恢复和软删除；API 回归测试覆盖 repository hook 路径。
+
+残余风险：
+
+- 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
+- `writer_profiles` 当前数据库唯一约束包含软删除记录；本轮已保证返回友好冲突，但如果未来需要“删除后释放调用名”，需要改为部分唯一索引并提供迁移脚本。
+- `recordUsage` 和部分系统事件写入仍保留兼容路径，正式多实例上线前还应继续评估 insert-only 或表级 update repository。
+
+验证命令：
+
+```bash
+npm run build
+npm run check
+npm test
+npm run test:e2e
+git diff --check
+```
+
 ## 2026-06-02 错误跟进 PostgreSQL Repository Review
 
 范围：`server/src/db/repositories/opsTriageRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
@@ -16,7 +46,7 @@
 残余风险：
 
 - `system_events` 的跟进仍走快照写回，因为它修改事件本体；如后续要彻底增量化，需要单独设计 `system_events` update repository。
-- `writer_profiles`、`writer_versions` 仍未拆成表级写入 repository。
+- 执笔人表级写入已在后一轮完成；本节保留当时的 `system_events` 增量化风险记录。
 - 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
 
 ## 2026-06-02 后台偏好 PostgreSQL Repository Review
@@ -34,7 +64,7 @@
 
 残余风险：
 
-- `ops_triage`、`writer_profiles`、`writer_versions` 仍未拆成表级写入 repository，正式多实例上线前应继续收口。
+- `ops_triage` 和执笔人表级写入已在后一轮完成；正式多实例上线前仍需继续评估剩余高频写入路径。
 - 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
 
 ## 2026-06-02 运营只读角色 Review
@@ -273,8 +303,8 @@ npm run test:e2e
 剩余风险：
 
 - 当前 repository 测试使用轻量假 pool 验证 SQL 与归一逻辑，尚未接真实 PostgreSQL 实例跑集成测试。
-- `writer_profiles` 仍未拆成表级只读 repository。
-- 文档、执笔人、用量、审计的写入路径仍主要依赖快照兼容层，不适合高并发多实例生产。
+- 执笔人表级 repository 已在后一轮完成；本节保留当时的阶段性风险记录。
+- 用量写入和部分系统事件写入仍主要依赖快照兼容层，不适合高并发多实例生产。
 
 验证命令：
 
