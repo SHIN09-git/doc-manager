@@ -37752,6 +37752,128 @@ ${mention} ` : `${mention} `;
     });
   }
 
+  // src/ui/viewController.js
+  function createViewController(deps = {}) {
+    const {
+      els: els2 = {},
+      ui: ui2 = {},
+      layoutController: layoutController2 = {},
+      renderCloudPanel: renderCloudPanel2 = () => {
+      },
+      documentRef = globalThis.document,
+      windowRef = globalThis.window
+    } = deps;
+    let eventsBound = false;
+    function bindEvents2() {
+      if (eventsBound) return;
+      eventsBound = true;
+      els2.apiTopBtn?.addEventListener("click", () => {
+        switchMainView2("editor");
+        switchTab2("api");
+        layoutController2.openResponsiveTools?.();
+      });
+      els2.cloudTopBtn?.addEventListener("click", () => {
+        switchMainView2(ui2.mainView === "cloud" ? "editor" : "cloud");
+        renderCloudPanel2();
+      });
+      els2.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView2("editor"));
+      els2.pptBackToEditorBtn?.addEventListener("click", () => switchMainView2("editor"));
+      documentRef?.querySelector?.(".tabs")?.addEventListener("click", handleTabClick);
+    }
+    function handleTabClick(event) {
+      const button = event.target?.closest?.(".tab");
+      if (!button) return false;
+      switchTab2(button.dataset?.tab);
+      if (layoutController2.isMobileWorkspace?.()) {
+        layoutController2.setMobileView?.(button.dataset?.tab === "ppt" ? "editor" : "tools");
+      }
+      return true;
+    }
+    function switchTab2(tabName) {
+      if (tabName === "cloud") {
+        switchMainView2("cloud");
+        return;
+      }
+      if (tabName === "ppt") {
+        switchMainView2("ppt");
+        return;
+      }
+      switchMainView2("editor");
+      const targetPanelId = `${tabName}Panel`;
+      if (documentRef?.getElementById && !documentRef.getElementById(targetPanelId)) return;
+      documentRef?.querySelectorAll?.(".tab").forEach((button) => {
+        const active = button.dataset?.tab === tabName;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+      });
+      documentRef?.querySelectorAll?.(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === targetPanelId);
+      });
+      if (els2.apiTopBtn) {
+        const apiActive = tabName === "api";
+        els2.apiTopBtn.classList.toggle("active", apiActive);
+        els2.apiTopBtn.setAttribute("aria-pressed", String(apiActive));
+      }
+      if (els2.cloudTopBtn) {
+        els2.cloudTopBtn.classList.toggle("active", ui2.mainView === "cloud");
+        els2.cloudTopBtn.setAttribute("aria-pressed", String(ui2.mainView === "cloud"));
+      }
+      windowRef?.lucide?.createIcons?.();
+    }
+    function switchMainView2(view = "editor") {
+      const cloudActive = view === "cloud";
+      const pptActive = view === "ppt";
+      ui2.mainView = cloudActive ? "cloud" : pptActive ? "ppt" : "editor";
+      if (els2.editorPanel) {
+        els2.editorPanel.dataset.mainView = ui2.mainView;
+        els2.editorPanel.setAttribute("aria-label", cloudActive ? "\u6211\u7684\u4E91\u7AEF" : pptActive ? "PPT \u751F\u6210" : "\u6587\u6863\u7F16\u8F91");
+      }
+      if (els2.cloudPanel) {
+        els2.cloudPanel.hidden = !cloudActive;
+      }
+      if (els2.pptPanel) {
+        els2.pptPanel.hidden = !pptActive;
+        els2.pptPanel.classList.toggle("active", pptActive);
+      }
+      if (pptActive) {
+        setActiveTabAndPanel("ppt", "pptPanel");
+      } else if (!cloudActive && !documentRef?.querySelector?.(".tab-panel.active:not(#pptPanel)")) {
+        setActiveTabAndPanel("style", "stylePanel");
+      }
+      if (els2.cloudTopBtn) {
+        els2.cloudTopBtn.classList.toggle("active", cloudActive);
+        els2.cloudTopBtn.setAttribute("aria-pressed", String(cloudActive));
+      }
+      if ((cloudActive || pptActive) && els2.apiTopBtn) {
+        els2.apiTopBtn.classList.remove("active");
+        els2.apiTopBtn.setAttribute("aria-pressed", "false");
+      }
+      if (cloudActive || pptActive) {
+        if (layoutController2.isMobileWorkspace?.()) layoutController2.setMobileView?.("editor");
+        if (cloudActive) renderCloudPanel2();
+        windowRef?.requestAnimationFrame?.(() => {
+          (cloudActive ? els2.cloudPanel : els2.pptPanel)?.focus?.({ preventScroll: true });
+        });
+      }
+    }
+    function setActiveTabAndPanel(tabName, panelId) {
+      documentRef?.querySelectorAll?.(".tab").forEach((button) => {
+        const active = button.dataset?.tab === tabName;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+      });
+      documentRef?.querySelectorAll?.(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === panelId);
+      });
+    }
+    return {
+      bindEvents: bindEvents2,
+      handleTabClick,
+      switchTab: switchTab2,
+      switchMainView: switchMainView2
+    };
+  }
+
   // src/utils/dragDrop.js
   function isFileDragData(dataTransfer) {
     const types = Array.from(dataTransfer?.types || []);
@@ -37842,6 +37964,13 @@ ${mention} ` : `${mention} `;
     els,
     defaultCloudApiBaseUrl: DEFAULT_CLOUD_API_BASE_URL
   });
+  var layoutController = createLayoutController({ els, ui });
+  var viewController = createViewController({
+    els,
+    ui,
+    layoutController,
+    renderCloudPanel
+  });
   var cloudActionsController = createCloudActionsController({
     state,
     els,
@@ -37892,7 +38021,6 @@ ${mention} ` : `${mention} `;
     switchTab,
     openStandaloneAdminPage: () => cloudActionsController.openStandaloneAdminPage()
   });
-  var layoutController = createLayoutController({ els, ui });
   var folderManager = createFolderManager({
     state,
     ui,
@@ -38522,15 +38650,7 @@ ${mention} ` : `${mention} `;
   }
   function bindEvents() {
     documentPanelController.bindEvents();
-    els.apiTopBtn.addEventListener("click", () => {
-      switchMainView("editor");
-      switchTab("api");
-      layoutController.openResponsiveTools();
-    });
-    els.cloudTopBtn.addEventListener("click", () => {
-      switchMainView(ui.mainView === "cloud" ? "editor" : "cloud");
-      renderCloudPanel();
-    });
+    viewController.bindEvents();
     layoutController.bindEvents();
     preventWindowFileNavigation();
     els.linkFolderBtn.addEventListener("click", linkRealFolder);
@@ -38577,16 +38697,6 @@ ${mention} ` : `${mention} `;
       event.preventDefault();
       insertSkillMention(button.dataset.insertSkill);
     });
-    const tabs = document.querySelector(".tabs");
-    tabs.addEventListener("click", (event) => {
-      const button = event.target.closest(".tab");
-      if (button) {
-        switchTab(button.dataset.tab);
-        if (layoutController.isMobileWorkspace()) {
-          layoutController.setMobileView(button.dataset.tab === "ppt" ? "editor" : "tools");
-        }
-      }
-    });
     generationController.bindEvents();
     setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
     setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
@@ -38627,8 +38737,6 @@ ${mention} ` : `${mention} `;
     cloudSessionController.bindEvents();
     cloudSyncController.bindEvents();
     featureActionController.bindEvents();
-    els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
-    els.pptBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
   }
   function setupFileDrop(target, handler) {
     if (!target) return;
@@ -39632,85 +39740,10 @@ ${mention} ` : `${mention} `;
     return { start: lineStart, end: lineEnd, text: content.slice(lineStart, lineEnd) };
   }
   function switchTab(tabName) {
-    if (tabName === "cloud") {
-      switchMainView("cloud");
-      return;
-    }
-    if (tabName === "ppt") {
-      switchMainView("ppt");
-      return;
-    }
-    switchMainView("editor");
-    const targetPanelId = `${tabName}Panel`;
-    if (!document.getElementById(targetPanelId)) return;
-    document.querySelectorAll(".tab").forEach((button) => {
-      const active = button.dataset.tab === tabName;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-selected", String(active));
-    });
-    document.querySelectorAll(".tab-panel").forEach((panel) => {
-      panel.classList.toggle("active", panel.id === targetPanelId);
-    });
-    if (els.apiTopBtn) {
-      const apiActive = tabName === "api";
-      els.apiTopBtn.classList.toggle("active", apiActive);
-      els.apiTopBtn.setAttribute("aria-pressed", String(apiActive));
-    }
-    if (els.cloudTopBtn) {
-      els.cloudTopBtn.classList.toggle("active", ui.mainView === "cloud");
-      els.cloudTopBtn.setAttribute("aria-pressed", String(ui.mainView === "cloud"));
-    }
-    if (window.lucide) window.lucide.createIcons();
+    viewController.switchTab(tabName);
   }
   function switchMainView(view = "editor") {
-    const cloudActive = view === "cloud";
-    const pptActive = view === "ppt";
-    ui.mainView = cloudActive ? "cloud" : pptActive ? "ppt" : "editor";
-    if (els.editorPanel) {
-      els.editorPanel.dataset.mainView = ui.mainView;
-      els.editorPanel.setAttribute("aria-label", cloudActive ? "\u6211\u7684\u4E91\u7AEF" : pptActive ? "PPT \u751F\u6210" : "\u6587\u6863\u7F16\u8F91");
-    }
-    if (els.cloudPanel) {
-      els.cloudPanel.hidden = !cloudActive;
-    }
-    if (els.pptPanel) {
-      els.pptPanel.hidden = !pptActive;
-      els.pptPanel.classList.toggle("active", pptActive);
-    }
-    if (pptActive) {
-      document.querySelectorAll(".tab").forEach((button) => {
-        const active = button.dataset.tab === "ppt";
-        button.classList.toggle("active", active);
-        button.setAttribute("aria-selected", String(active));
-      });
-      document.querySelectorAll(".tab-panel").forEach((panel) => {
-        panel.classList.toggle("active", panel.id === "pptPanel");
-      });
-    } else if (!cloudActive && !document.querySelector(".tab-panel.active:not(#pptPanel)")) {
-      document.querySelectorAll(".tab").forEach((button) => {
-        const active = button.dataset.tab === "style";
-        button.classList.toggle("active", active);
-        button.setAttribute("aria-selected", String(active));
-      });
-      document.querySelectorAll(".tab-panel").forEach((panel) => {
-        panel.classList.toggle("active", panel.id === "stylePanel");
-      });
-    }
-    if (els.cloudTopBtn) {
-      els.cloudTopBtn.classList.toggle("active", cloudActive);
-      els.cloudTopBtn.setAttribute("aria-pressed", String(cloudActive));
-    }
-    if ((cloudActive || pptActive) && els.apiTopBtn) {
-      els.apiTopBtn.classList.remove("active");
-      els.apiTopBtn.setAttribute("aria-pressed", "false");
-    }
-    if (cloudActive || pptActive) {
-      if (layoutController.isMobileWorkspace()) layoutController.setMobileView("editor");
-      if (cloudActive) renderCloudPanel();
-      window.requestAnimationFrame(() => {
-        (cloudActive ? els.cloudPanel : els.pptPanel)?.focus({ preventScroll: true });
-      });
-    }
+    viewController.switchMainView(view);
   }
   function createEmptyStyle() {
     return skillManager.createEmptyStyle();
