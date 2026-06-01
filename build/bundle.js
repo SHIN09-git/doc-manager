@@ -23646,6 +23646,187 @@
   var DEFAULT_STYLE_SKILL = "\u9002\u7528\u573A\u666F\uFF1A\u7EC4\u7EC7\u5185\u90E8\u901A\u77E5\u3001\u5DE5\u4F5C\u5B89\u6392\u3001\u4E8B\u9879\u544A\u77E5\u7B49\u6B63\u5F0F\u6587\u672C\u3002\n\u7ED3\u6784\u8981\u6C42\uFF1A\u6807\u9898\u660E\u786E\uFF1B\u6B63\u6587\u5148\u8BF4\u660E\u4E8B\u9879\u80CC\u666F\uFF0C\u518D\u5217\u51FA\u65F6\u95F4\u3001\u5730\u70B9\u3001\u5BF9\u8C61\u3001\u5B89\u6392\u548C\u8981\u6C42\uFF1B\u672B\u5C3E\u4FDD\u7559\u843D\u6B3E\u4E0E\u65E5\u671F\u3002\n\u8BED\u8A00\u98CE\u683C\uFF1A\u5E84\u91CD\u3001\u7B80\u6D01\u3001\u53EF\u6267\u884C\uFF1B\u591A\u7528\u201C\u8BF7\u201D\u201C\u73B0\u5C06\u6709\u5173\u4E8B\u9879\u901A\u77E5\u5982\u4E0B\u201D\u201C\u8BF7\u5404\u90E8\u95E8\u7ED3\u5408\u5B9E\u9645\u843D\u5B9E\u201D\u7B49\u8868\u8FBE\u3002\n\u683C\u5F0F\u8981\u6C42\uFF1A\u5C42\u7EA7\u7F16\u53F7\u6E05\u6670\uFF0C\u91CD\u8981\u4E8B\u9879\u5206\u6761\u5217\u793A\uFF0C\u907F\u514D\u53E3\u8BED\u5316\u548C\u5938\u5F20\u5F62\u5BB9\u3002";
   var folderColors = ["#0f766e", "#b65a00", "#7a4d9f", "#b42318", "#3f6f87"];
 
+  // src/core/workspaceInitializer.js
+  function initializeWorkspaceState(options = {}) {
+    const {
+      state: state2,
+      ui: ui2 = {},
+      defaultCloudApiBaseUrl = "",
+      createId: createId2 = defaultCreateId,
+      now: now2 = () => (/* @__PURE__ */ new Date()).toISOString(),
+      clone: clone3 = (value) => structuredClone(value),
+      normalizeFolder = (folder) => folder,
+      normalizeSkill: normalizeSkill2 = (skill) => skill,
+      normalizeCustomTypes: normalizeCustomTypes2 = (types) => Array.isArray(types) ? types : [],
+      normalizeCloudBaseUrl: normalizeCloudBaseUrl3 = (value) => value,
+      persist: persist2 = () => {
+      }
+    } = options;
+    if (!state2 || typeof state2 !== "object") {
+      throw new TypeError("initializeWorkspaceState requires a mutable state object.");
+    }
+    if (!Array.isArray(state2.folders) || state2.folders.length === 0) {
+      state2.folders = createDefaultFolders({ createId: createId2, now: now2 });
+    }
+    state2.folders = state2.folders.map((folder) => normalizeFolder(folder));
+    state2.customTypes = normalizeCustomTypes2(state2.customTypes);
+    if (!Array.isArray(state2.styles) || state2.styles.length === 0) {
+      state2.styles = [createDefaultNoticeWriter({ createId: createId2, now: now2 })];
+    }
+    state2.styles = state2.styles.map((style) => normalizeSkill2(style));
+    migrateLegacyBranding(state2, { now: now2 });
+    if (!Array.isArray(state2.docs) || state2.docs.length === 0) {
+      state2.docs = [createDefaultNoticeDocument({
+        createId: createId2,
+        now: now2,
+        folderId: state2.folders[0]?.id || "",
+        styleId: state2.styles[0]?.id || ""
+      })];
+    }
+    state2.docs = state2.docs.map((doc) => ({
+      ...doc,
+      deletedAt: doc.deletedAt || "",
+      deletedFromFolderId: doc.deletedFromFolderId || ""
+    }));
+    state2.settings = normalizeSettings(state2.settings);
+    state2.cloud = normalizeCloudState(state2.cloud, {
+      defaultCloudApiBaseUrl,
+      normalizeCloudBaseUrl: normalizeCloudBaseUrl3
+    });
+    ui2.editingStyle = clone3(state2.styles[0]);
+    persist2();
+    return state2;
+  }
+  function createDefaultFolders({ createId: createId2 = defaultCreateId, now: now2 = () => (/* @__PURE__ */ new Date()).toISOString() } = {}) {
+    const officeId = createId2();
+    return [
+      { id: officeId, name: "\u65E5\u5E38\u901A\u77E5", kind: "tag", color: folderColors[0], createdAt: now2() },
+      { id: createId2(), name: "\u4F1A\u8BAE\u6750\u6599", kind: "tag", color: folderColors[1], createdAt: now2() },
+      { id: createId2(), name: "\u8BF7\u793A\u62A5\u544A", kind: "tag", color: folderColors[2], createdAt: now2() }
+    ];
+  }
+  function createDefaultNoticeWriter({ createId: createId2 = defaultCreateId, now: now2 = () => (/* @__PURE__ */ new Date()).toISOString() } = {}) {
+    const timestamp = now2();
+    return {
+      id: createId2(),
+      name: "\u901A\u77E5\u5199\u4F5C",
+      handle: "\u901A\u77E5\u5199\u4F5C",
+      category: "\u516C\u6587\u5199\u4F5C",
+      description: "\u751F\u6210\u6B63\u5F0F\u3001\u6E05\u695A\u3001\u9002\u5408\u7EC4\u7EC7\u5185\u90E8\u53D1\u5E03\u7684\u901A\u77E5\u3002",
+      summary: DEFAULT_STYLE_SKILL,
+      skillJson: createDefaultNoticeWriterJson(),
+      examples: [],
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+  }
+  function createDefaultNoticeWriterJson() {
+    return JSON.stringify(
+      {
+        name: "\u901A\u77E5\u5199\u4F5C",
+        handle: "\u901A\u77E5\u5199\u4F5C",
+        applicable_scope: "\u7EC4\u7EC7\u5185\u90E8\u901A\u77E5\u3001\u5DE5\u4F5C\u5B89\u6392\u3001\u4E8B\u9879\u544A\u77E5\u7B49\u6B63\u5F0F\u6587\u6863",
+        required_user_inputs: ["\u4E3B\u9898", "\u5BF9\u8C61", "\u65F6\u95F4", "\u5730\u70B9", "\u4E8B\u9879\u5B89\u6392", "\u5DE5\u4F5C\u8981\u6C42", "\u843D\u6B3E\u4FE1\u606F"],
+        document_structure_template: ["\u6807\u9898", "\u53D1\u5E03\u5BF9\u8C61", "\u4E8B\u9879\u80CC\u666F", "\u5177\u4F53\u5B89\u6392", "\u5DE5\u4F5C\u8981\u6C42", "\u843D\u6B3E\u65E5\u671F"],
+        style_rules: ["\u8868\u8FBE\u6B63\u5F0F\u3001\u6E05\u695A\u3001\u4FBF\u4E8E\u6267\u884C", "\u4E8B\u5B9E\u4E0D\u660E\u5904\u4F7F\u7528\u5360\u4F4D\u7B26", "\u907F\u514D\u53E3\u8BED\u5316\u548C\u5938\u5F20\u8868\u8FBE"],
+        reusable_expressions: ["\u73B0\u5C06\u6709\u5173\u4E8B\u9879\u901A\u77E5\u5982\u4E0B", "\u8BF7\u5404\u90E8\u95E8\u7ED3\u5408\u5B9E\u9645\u8BA4\u771F\u843D\u5B9E", "\u8BF7\u6309\u65F6\u5B8C\u6210\u76F8\u5173\u5DE5\u4F5C"],
+        forbidden: ["\u4E0D\u5F97\u7F16\u9020\u672A\u63D0\u4F9B\u7684\u65F6\u95F4\u3001\u5730\u70B9\u3001\u6570\u636E\u6216\u8D23\u4EFB\u4EBA", "\u4E0D\u5F97\u6CC4\u9732\u6837\u672C\u6587\u6863\u4E2D\u7684\u4E2A\u4EBA\u9690\u79C1\u6216\u654F\u611F\u4FE1\u606F"],
+        generation_steps: ["\u786E\u8BA4\u4E3B\u9898\u548C\u5BF9\u8C61", "\u63D0\u53D6\u5FC5\u8981\u4E8B\u9879", "\u5957\u7528\u901A\u77E5\u7ED3\u6784", "\u68C0\u67E5\u843D\u6B3E\u548C\u65E5\u671F"],
+        self_checklist: ["\u6807\u9898\u662F\u5426\u660E\u786E", "\u4E8B\u9879\u662F\u5426\u5B8C\u6574", "\u8981\u6C42\u662F\u5426\u53EF\u6267\u884C", "\u662F\u5426\u5B58\u5728\u672A\u6838\u5B9E\u4FE1\u606F"]
+      },
+      null,
+      2
+    );
+  }
+  function createDefaultNoticeDocument({
+    createId: createId2 = defaultCreateId,
+    now: now2 = () => (/* @__PURE__ */ new Date()).toISOString(),
+    folderId = "",
+    styleId = ""
+  } = {}) {
+    const timestamp = now2();
+    return {
+      id: createId2(),
+      title: "\u4E13\u9879\u57F9\u8BAD\u5B89\u6392\u901A\u77E5",
+      type: "notice",
+      folderId,
+      styleId,
+      content: DEFAULT_NOTICE_DOCUMENT_CONTENT,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+  }
+  function normalizeSettings(settings = {}) {
+    const next = {
+      provider: "openai-compatible",
+      baseUrl: "",
+      endpointPath: "/chat/completions",
+      model: "",
+      apiKey: "",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      ...settings || {}
+    };
+    if (next.systemPrompt === LEGACY_SCHOOL_SYSTEM_PROMPT) {
+      next.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    }
+    return next;
+  }
+  function normalizeCloudState(cloud = {}, options = {}) {
+    const {
+      defaultCloudApiBaseUrl = "",
+      normalizeCloudBaseUrl: normalizeCloudBaseUrl3 = (value) => value
+    } = options;
+    const next = {
+      apiBaseUrl: defaultCloudApiBaseUrl,
+      authenticated: false,
+      user: null,
+      organizations: [],
+      activeOrganization: null,
+      membership: null,
+      members: [],
+      invitations: [],
+      usage: null,
+      billing: null,
+      model: "",
+      ...cloud || {}
+    };
+    next.apiBaseUrl = normalizeCloudBaseUrl3(next.apiBaseUrl || defaultCloudApiBaseUrl);
+    next.organizations = Array.isArray(next.organizations) ? next.organizations : [];
+    next.members = Array.isArray(next.members) ? next.members : [];
+    next.invitations = Array.isArray(next.invitations) ? next.invitations : [];
+    next.authenticated = Boolean(next.authenticated && next.user);
+    return next;
+  }
+  function migrateLegacyBranding(state2, { now: now2 = () => (/* @__PURE__ */ new Date()).toISOString() } = {}) {
+    if (Array.isArray(state2.styles)) {
+      state2.styles.forEach((style) => {
+        const isLegacyDefault = style.name === "\u5B66\u6821\u901A\u77E5" && style.handle === "\u5B66\u6821\u901A\u77E5" && (!style.examples || style.examples.length === 0) && (!style.versions || style.versions.length === 0);
+        if (!isLegacyDefault) return;
+        style.name = "\u901A\u77E5\u5199\u4F5C";
+        style.handle = "\u901A\u77E5\u5199\u4F5C";
+        style.description = "\u751F\u6210\u6B63\u5F0F\u3001\u6E05\u695A\u3001\u9002\u5408\u7EC4\u7EC7\u5185\u90E8\u53D1\u5E03\u7684\u901A\u77E5\u3002";
+        style.summary = DEFAULT_STYLE_SKILL;
+        style.skillJson = createDefaultNoticeWriterJson();
+        style.updatedAt = now2();
+      });
+    }
+    if (!Array.isArray(state2.docs)) return state2;
+    state2.docs.forEach((doc) => {
+      const content = String(doc.content || "");
+      const isLegacyDefaultDoc = doc.title === "\u65B0\u5B66\u671F\u5DE5\u4F5C\u5B89\u6392\u901A\u77E5" && content.includes("\u5B66\u6821\u529E\u516C\u5BA4");
+      if (!isLegacyDefaultDoc) return;
+      doc.title = "\u4E13\u9879\u57F9\u8BAD\u5B89\u6392\u901A\u77E5";
+      doc.content = DEFAULT_NOTICE_DOCUMENT_CONTENT;
+      doc.updatedAt = now2();
+    });
+    return state2;
+  }
+  var LEGACY_SCHOOL_SYSTEM_PROMPT = "\u4F60\u662F\u5B66\u6821\u529E\u516C\u5BA4\u6587\u4E66\u52A9\u624B\uFF0C\u64C5\u957F\u64B0\u5199\u4E2D\u6587\u6821\u52A1\u3001\u516C\u6587\u3001\u901A\u77E5\u3001\u603B\u7ED3\u3001\u4F1A\u8BAE\u7EAA\u8981\u548C\u8BF7\u793A\u6750\u6599\u3002\u8F93\u51FA\u8981\u51C6\u786E\u3001\u7A33\u59A5\u3001\u6761\u7406\u6E05\u6670\uFF0C\u907F\u514D\u7F16\u9020\u4E8B\u5B9E\uFF1B\u7F3A\u5C11\u4FE1\u606F\u65F6\u7528\u53EF\u66FF\u6362\u5360\u4F4D\u8868\u8FBE\u3002";
+  var DEFAULT_NOTICE_DOCUMENT_CONTENT = "\u5173\u4E8E\u5F00\u5C55\u4E13\u9879\u57F9\u8BAD\u5DE5\u4F5C\u7684\u901A\u77E5\n\n\u5404\u76F8\u5173\u90E8\u95E8\uFF1A\n\n\u4E3A\u63D0\u5347\u5DE5\u4F5C\u534F\u540C\u6548\u7387\uFF0C\u89C4\u8303\u4E1A\u52A1\u529E\u7406\u6D41\u7A0B\uFF0C\u73B0\u5C06\u4E13\u9879\u57F9\u8BAD\u6709\u5173\u4E8B\u9879\u901A\u77E5\u5982\u4E0B\uFF1A\n\n\u4E00\u3001\u57F9\u8BAD\u65F6\u95F4\u4E3A2026\u5E745\u670820\u65E5\uFF08\u661F\u671F\u4E09\uFF09\u4E0A\u53489:00\uFF0C\u5730\u70B9\u4E3A\u4F1A\u8BAE\u5BA4A\u3002\n\n\u4E8C\u3001\u8BF7\u5404\u90E8\u95E8\u5B89\u6392\u76F8\u5173\u4EBA\u5458\u51C6\u65F6\u53C2\u52A0\uFF0C\u5E76\u63D0\u524D\u68B3\u7406\u672C\u90E8\u95E8\u5728\u5B9E\u9645\u5DE5\u4F5C\u4E2D\u9047\u5230\u7684\u91CD\u70B9\u95EE\u9898\u3002\n\n\u4E09\u3001\u57F9\u8BAD\u7ED3\u675F\u540E\uFF0C\u8BF7\u5404\u90E8\u95E8\u4E8E\u4E24\u4E2A\u5DE5\u4F5C\u65E5\u5185\u63D0\u4EA4\u5B66\u4E60\u53CD\u9988\u548C\u540E\u7EED\u6539\u8FDB\u5EFA\u8BAE\u3002\n\n\u8BF7\u5404\u90E8\u95E8\u9AD8\u5EA6\u91CD\u89C6\uFF0C\u6309\u8981\u6C42\u505A\u597D\u53C2\u8BAD\u7EC4\u7EC7\u548C\u6750\u6599\u51C6\u5907\u5DE5\u4F5C\u3002\n\n\u7EFC\u5408\u529E\u516C\u5BA4\n2026\u5E745\u670814\u65E5";
+  function defaultCreateId() {
+    return `id-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
   // src/utils/helpers.js
   function createId() {
     if (crypto?.randomUUID) return crypto.randomUUID();
@@ -27550,7 +27731,7 @@ ${selection.text}`
       fileSystem = createBrowserFileSystemAdapter(),
       confirmLargeImport: confirmLargeImport2 = (message) => globalThis.window?.confirm?.(message) ?? true
     } = deps;
-    function normalizeFolder2(folder) {
+    function normalizeFolder(folder) {
       return {
         ...folder,
         kind: folder.kind === "real" ? "real" : "tag",
@@ -27728,7 +27909,7 @@ ${doc.content || ""}`);
       return true;
     }
     return {
-      normalizeFolder: normalizeFolder2,
+      normalizeFolder,
       getFolderById: getFolderById2,
       createDefaultFolder: createDefaultFolder2,
       linkRealFolder: linkRealFolder2,
@@ -38727,139 +38908,18 @@ ${mention} ` : `${mention} `;
     }
   }
   function initializeMissingData() {
-    if (!Array.isArray(state.folders) || state.folders.length === 0) {
-      const officeId = createId();
-      state.folders = [
-        { id: officeId, name: "\u65E5\u5E38\u901A\u77E5", kind: "tag", color: folderColors[0], createdAt: now() },
-        { id: createId(), name: "\u4F1A\u8BAE\u6750\u6599", kind: "tag", color: folderColors[1], createdAt: now() },
-        { id: createId(), name: "\u8BF7\u793A\u62A5\u544A", kind: "tag", color: folderColors[2], createdAt: now() }
-      ];
-    }
-    state.folders = state.folders.map((folder) => normalizeFolder(folder));
-    state.customTypes = documentTypeController.normalizeCustomTypes(state.customTypes);
-    if (!Array.isArray(state.styles) || state.styles.length === 0) {
-      state.styles = [
-        {
-          id: createId(),
-          name: "\u901A\u77E5\u5199\u4F5C",
-          handle: "\u901A\u77E5\u5199\u4F5C",
-          category: "\u516C\u6587\u5199\u4F5C",
-          description: "\u751F\u6210\u6B63\u5F0F\u3001\u6E05\u695A\u3001\u9002\u5408\u7EC4\u7EC7\u5185\u90E8\u53D1\u5E03\u7684\u901A\u77E5\u3002",
-          summary: DEFAULT_STYLE_SKILL,
-          skillJson: JSON.stringify(
-            {
-              name: "\u901A\u77E5\u5199\u4F5C",
-              handle: "\u901A\u77E5\u5199\u4F5C",
-              applicable_scope: "\u7EC4\u7EC7\u5185\u90E8\u901A\u77E5\u3001\u5DE5\u4F5C\u5B89\u6392\u3001\u4E8B\u9879\u544A\u77E5\u7B49\u6B63\u5F0F\u6587\u6863",
-              required_user_inputs: ["\u4E3B\u9898", "\u5BF9\u8C61", "\u65F6\u95F4", "\u5730\u70B9", "\u4E8B\u9879\u5B89\u6392", "\u5DE5\u4F5C\u8981\u6C42", "\u843D\u6B3E\u4FE1\u606F"],
-              document_structure_template: ["\u6807\u9898", "\u53D1\u5E03\u5BF9\u8C61", "\u4E8B\u9879\u80CC\u666F", "\u5177\u4F53\u5B89\u6392", "\u5DE5\u4F5C\u8981\u6C42", "\u843D\u6B3E\u65E5\u671F"],
-              style_rules: ["\u8868\u8FBE\u6B63\u5F0F\u3001\u6E05\u695A\u3001\u4FBF\u4E8E\u6267\u884C", "\u4E8B\u5B9E\u4E0D\u660E\u5904\u4F7F\u7528\u5360\u4F4D\u7B26", "\u907F\u514D\u53E3\u8BED\u5316\u548C\u5938\u5F20\u8868\u8FBE"],
-              reusable_expressions: ["\u73B0\u5C06\u6709\u5173\u4E8B\u9879\u901A\u77E5\u5982\u4E0B", "\u8BF7\u5404\u90E8\u95E8\u7ED3\u5408\u5B9E\u9645\u8BA4\u771F\u843D\u5B9E", "\u8BF7\u6309\u65F6\u5B8C\u6210\u76F8\u5173\u5DE5\u4F5C"],
-              forbidden: ["\u4E0D\u5F97\u7F16\u9020\u672A\u63D0\u4F9B\u7684\u65F6\u95F4\u3001\u5730\u70B9\u3001\u6570\u636E\u6216\u8D23\u4EFB\u4EBA", "\u4E0D\u5F97\u6CC4\u9732\u6837\u672C\u6587\u6863\u4E2D\u7684\u4E2A\u4EBA\u9690\u79C1\u6216\u654F\u611F\u4FE1\u606F"],
-              generation_steps: ["\u786E\u8BA4\u4E3B\u9898\u548C\u5BF9\u8C61", "\u63D0\u53D6\u5FC5\u8981\u4E8B\u9879", "\u5957\u7528\u901A\u77E5\u7ED3\u6784", "\u68C0\u67E5\u843D\u6B3E\u548C\u65E5\u671F"],
-              self_checklist: ["\u6807\u9898\u662F\u5426\u660E\u786E", "\u4E8B\u9879\u662F\u5426\u5B8C\u6574", "\u8981\u6C42\u662F\u5426\u53EF\u6267\u884C", "\u662F\u5426\u5B58\u5728\u672A\u6838\u5B9E\u4FE1\u606F"]
-            },
-            null,
-            2
-          ),
-          examples: [],
-          createdAt: now(),
-          updatedAt: now()
-        }
-      ];
-    }
-    state.styles = state.styles.map((style) => normalizeSkill(style));
-    migrateLegacyBranding();
-    if (!Array.isArray(state.docs) || state.docs.length === 0) {
-      state.docs = [
-        {
-          id: createId(),
-          title: "\u4E13\u9879\u57F9\u8BAD\u5B89\u6392\u901A\u77E5",
-          type: "notice",
-          folderId: state.folders[0].id,
-          styleId: state.styles[0].id,
-          content: "\u5173\u4E8E\u5F00\u5C55\u4E13\u9879\u57F9\u8BAD\u5DE5\u4F5C\u7684\u901A\u77E5\n\n\u5404\u76F8\u5173\u90E8\u95E8\uFF1A\n\n\u4E3A\u63D0\u5347\u5DE5\u4F5C\u534F\u540C\u6548\u7387\uFF0C\u89C4\u8303\u4E1A\u52A1\u529E\u7406\u6D41\u7A0B\uFF0C\u73B0\u5C06\u4E13\u9879\u57F9\u8BAD\u6709\u5173\u4E8B\u9879\u901A\u77E5\u5982\u4E0B\uFF1A\n\n\u4E00\u3001\u57F9\u8BAD\u65F6\u95F4\u4E3A2026\u5E745\u670820\u65E5\uFF08\u661F\u671F\u4E09\uFF09\u4E0A\u53489:00\uFF0C\u5730\u70B9\u4E3A\u4F1A\u8BAE\u5BA4A\u3002\n\n\u4E8C\u3001\u8BF7\u5404\u90E8\u95E8\u5B89\u6392\u76F8\u5173\u4EBA\u5458\u51C6\u65F6\u53C2\u52A0\uFF0C\u5E76\u63D0\u524D\u68B3\u7406\u672C\u90E8\u95E8\u5728\u5B9E\u9645\u5DE5\u4F5C\u4E2D\u9047\u5230\u7684\u91CD\u70B9\u95EE\u9898\u3002\n\n\u4E09\u3001\u57F9\u8BAD\u7ED3\u675F\u540E\uFF0C\u8BF7\u5404\u90E8\u95E8\u4E8E\u4E24\u4E2A\u5DE5\u4F5C\u65E5\u5185\u63D0\u4EA4\u5B66\u4E60\u53CD\u9988\u548C\u540E\u7EED\u6539\u8FDB\u5EFA\u8BAE\u3002\n\n\u8BF7\u5404\u90E8\u95E8\u9AD8\u5EA6\u91CD\u89C6\uFF0C\u6309\u8981\u6C42\u505A\u597D\u53C2\u8BAD\u7EC4\u7EC7\u548C\u6750\u6599\u51C6\u5907\u5DE5\u4F5C\u3002\n\n\u7EFC\u5408\u529E\u516C\u5BA4\n2026\u5E745\u670814\u65E5",
-          createdAt: now(),
-          updatedAt: now()
-        }
-      ];
-    }
-    state.docs = state.docs.map((doc) => ({
-      ...doc,
-      deletedAt: doc.deletedAt || "",
-      deletedFromFolderId: doc.deletedFromFolderId || ""
-    }));
-    state.settings = {
-      provider: "openai-compatible",
-      baseUrl: "",
-      endpointPath: "/chat/completions",
-      model: "",
-      apiKey: "",
-      systemPrompt: DEFAULT_SYSTEM_PROMPT,
-      ...state.settings || {}
-    };
-    if (state.settings.systemPrompt === "\u4F60\u662F\u5B66\u6821\u529E\u516C\u5BA4\u6587\u4E66\u52A9\u624B\uFF0C\u64C5\u957F\u64B0\u5199\u4E2D\u6587\u6821\u52A1\u3001\u516C\u6587\u3001\u901A\u77E5\u3001\u603B\u7ED3\u3001\u4F1A\u8BAE\u7EAA\u8981\u548C\u8BF7\u793A\u6750\u6599\u3002\u8F93\u51FA\u8981\u51C6\u786E\u3001\u7A33\u59A5\u3001\u6761\u7406\u6E05\u6670\uFF0C\u907F\u514D\u7F16\u9020\u4E8B\u5B9E\uFF1B\u7F3A\u5C11\u4FE1\u606F\u65F6\u7528\u53EF\u66FF\u6362\u5360\u4F4D\u8868\u8FBE\u3002") {
-      state.settings.systemPrompt = DEFAULT_SYSTEM_PROMPT;
-    }
-    state.cloud = {
-      apiBaseUrl: DEFAULT_CLOUD_API_BASE_URL,
-      authenticated: false,
-      user: null,
-      organizations: [],
-      activeOrganization: null,
-      membership: null,
-      members: [],
-      invitations: [],
-      usage: null,
-      billing: null,
-      model: "",
-      ...state.cloud || {}
-    };
-    state.cloud.apiBaseUrl = normalizeCloudBaseUrl2(state.cloud.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL);
-    state.cloud.organizations = Array.isArray(state.cloud.organizations) ? state.cloud.organizations : [];
-    state.cloud.members = Array.isArray(state.cloud.members) ? state.cloud.members : [];
-    state.cloud.invitations = Array.isArray(state.cloud.invitations) ? state.cloud.invitations : [];
-    state.cloud.authenticated = Boolean(state.cloud.authenticated && state.cloud.user);
-    ui.editingStyle = clone(state.styles[0]);
-    persist();
-  }
-  function createDefaultNoticeWriterJson() {
-    return JSON.stringify(
-      {
-        name: "\u901A\u77E5\u5199\u4F5C",
-        handle: "\u901A\u77E5\u5199\u4F5C",
-        applicable_scope: "\u7EC4\u7EC7\u5185\u90E8\u901A\u77E5\u3001\u5DE5\u4F5C\u5B89\u6392\u3001\u4E8B\u9879\u544A\u77E5\u7B49\u6B63\u5F0F\u6587\u6863",
-        required_user_inputs: ["\u4E3B\u9898", "\u5BF9\u8C61", "\u65F6\u95F4", "\u5730\u70B9", "\u4E8B\u9879\u5B89\u6392", "\u5DE5\u4F5C\u8981\u6C42", "\u843D\u6B3E\u4FE1\u606F"],
-        document_structure_template: ["\u6807\u9898", "\u53D1\u5E03\u5BF9\u8C61", "\u4E8B\u9879\u80CC\u666F", "\u5177\u4F53\u5B89\u6392", "\u5DE5\u4F5C\u8981\u6C42", "\u843D\u6B3E\u65E5\u671F"],
-        style_rules: ["\u8868\u8FBE\u6B63\u5F0F\u3001\u6E05\u695A\u3001\u4FBF\u4E8E\u6267\u884C", "\u4E8B\u5B9E\u4E0D\u660E\u5904\u4F7F\u7528\u5360\u4F4D\u7B26", "\u907F\u514D\u53E3\u8BED\u5316\u548C\u5938\u5F20\u8868\u8FBE"],
-        reusable_expressions: ["\u73B0\u5C06\u6709\u5173\u4E8B\u9879\u901A\u77E5\u5982\u4E0B", "\u8BF7\u5404\u90E8\u95E8\u7ED3\u5408\u5B9E\u9645\u8BA4\u771F\u843D\u5B9E", "\u8BF7\u6309\u65F6\u5B8C\u6210\u76F8\u5173\u5DE5\u4F5C"],
-        forbidden: ["\u4E0D\u5F97\u7F16\u9020\u672A\u63D0\u4F9B\u7684\u65F6\u95F4\u3001\u5730\u70B9\u3001\u6570\u636E\u6216\u8D23\u4EFB\u4EBA", "\u4E0D\u5F97\u6CC4\u9732\u6837\u672C\u6587\u6863\u4E2D\u7684\u4E2A\u4EBA\u9690\u79C1\u6216\u654F\u611F\u4FE1\u606F"],
-        generation_steps: ["\u786E\u8BA4\u4E3B\u9898\u548C\u5BF9\u8C61", "\u63D0\u53D6\u5FC5\u8981\u4E8B\u9879", "\u5957\u7528\u901A\u77E5\u7ED3\u6784", "\u68C0\u67E5\u843D\u6B3E\u548C\u65E5\u671F"],
-        self_checklist: ["\u6807\u9898\u662F\u5426\u660E\u786E", "\u4E8B\u9879\u662F\u5426\u5B8C\u6574", "\u8981\u6C42\u662F\u5426\u53EF\u6267\u884C", "\u662F\u5426\u5B58\u5728\u672A\u6838\u5B9E\u4FE1\u606F"]
-      },
-      null,
-      2
-    );
-  }
-  function migrateLegacyBranding() {
-    state.styles.forEach((style) => {
-      const isLegacyDefault = style.name === "\u5B66\u6821\u901A\u77E5" && style.handle === "\u5B66\u6821\u901A\u77E5" && (!style.examples || style.examples.length === 0) && (!style.versions || style.versions.length === 0);
-      if (!isLegacyDefault) return;
-      style.name = "\u901A\u77E5\u5199\u4F5C";
-      style.handle = "\u901A\u77E5\u5199\u4F5C";
-      style.description = "\u751F\u6210\u6B63\u5F0F\u3001\u6E05\u695A\u3001\u9002\u5408\u7EC4\u7EC7\u5185\u90E8\u53D1\u5E03\u7684\u901A\u77E5\u3002";
-      style.summary = DEFAULT_STYLE_SKILL;
-      style.skillJson = createDefaultNoticeWriterJson();
-      style.updatedAt = now();
-    });
-    if (!Array.isArray(state.docs)) return;
-    state.docs.forEach((doc) => {
-      const content = String(doc.content || "");
-      const isLegacyDefaultDoc = doc.title === "\u65B0\u5B66\u671F\u5DE5\u4F5C\u5B89\u6392\u901A\u77E5" && content.includes("\u5B66\u6821\u529E\u516C\u5BA4");
-      if (!isLegacyDefaultDoc) return;
-      doc.title = "\u4E13\u9879\u57F9\u8BAD\u5B89\u6392\u901A\u77E5";
-      doc.content = "\u5173\u4E8E\u5F00\u5C55\u4E13\u9879\u57F9\u8BAD\u5DE5\u4F5C\u7684\u901A\u77E5\n\n\u5404\u76F8\u5173\u90E8\u95E8\uFF1A\n\n\u4E3A\u63D0\u5347\u5DE5\u4F5C\u534F\u540C\u6548\u7387\uFF0C\u89C4\u8303\u4E1A\u52A1\u529E\u7406\u6D41\u7A0B\uFF0C\u73B0\u5C06\u4E13\u9879\u57F9\u8BAD\u6709\u5173\u4E8B\u9879\u901A\u77E5\u5982\u4E0B\uFF1A\n\n\u4E00\u3001\u57F9\u8BAD\u65F6\u95F4\u4E3A2026\u5E745\u670820\u65E5\uFF08\u661F\u671F\u4E09\uFF09\u4E0A\u53489:00\uFF0C\u5730\u70B9\u4E3A\u4F1A\u8BAE\u5BA4A\u3002\n\n\u4E8C\u3001\u8BF7\u5404\u90E8\u95E8\u5B89\u6392\u76F8\u5173\u4EBA\u5458\u51C6\u65F6\u53C2\u52A0\uFF0C\u5E76\u63D0\u524D\u68B3\u7406\u672C\u90E8\u95E8\u5728\u5B9E\u9645\u5DE5\u4F5C\u4E2D\u9047\u5230\u7684\u91CD\u70B9\u95EE\u9898\u3002\n\n\u4E09\u3001\u57F9\u8BAD\u7ED3\u675F\u540E\uFF0C\u8BF7\u5404\u90E8\u95E8\u4E8E\u4E24\u4E2A\u5DE5\u4F5C\u65E5\u5185\u63D0\u4EA4\u5B66\u4E60\u53CD\u9988\u548C\u540E\u7EED\u6539\u8FDB\u5EFA\u8BAE\u3002\n\n\u8BF7\u5404\u90E8\u95E8\u9AD8\u5EA6\u91CD\u89C6\uFF0C\u6309\u8981\u6C42\u505A\u597D\u53C2\u8BAD\u7EC4\u7EC7\u548C\u6750\u6599\u51C6\u5907\u5DE5\u4F5C\u3002\n\n\u7EFC\u5408\u529E\u516C\u5BA4\n2026\u5E745\u670814\u65E5";
-      doc.updatedAt = now();
+    initializeWorkspaceState({
+      state,
+      ui,
+      defaultCloudApiBaseUrl: DEFAULT_CLOUD_API_BASE_URL,
+      createId,
+      now,
+      clone,
+      normalizeFolder: (folder) => folderManager.normalizeFolder(folder),
+      normalizeCustomTypes: (types) => documentTypeController.normalizeCustomTypes(types),
+      normalizeSkill,
+      normalizeCloudBaseUrl: normalizeCloudBaseUrl2,
+      persist
     });
   }
   function bindEvents() {
@@ -39891,9 +39951,6 @@ ${mention} ` : `${mention} `;
   }
   function getType(typeId) {
     return documentTypeController.getType(typeId);
-  }
-  function normalizeFolder(folder) {
-    return folderManager.normalizeFolder(folder);
   }
   function getFolderById(folderId) {
     return folderManager.getFolderById(folderId);
