@@ -1,6 +1,17 @@
 # 商业化施工总结报告
 
-更新时间：2026-05-24
+更新时间：2026-06-02
+
+## 2026-06-02 新增完成：人工确认充值 PostgreSQL 表级写入
+
+本轮继续收口商业化后端的高价值写入路径，把人工确认充值从 PostgreSQL Store 的兼容快照写回推进到表级事务：
+
+- 新增 `manualPaymentRepository`，覆盖人工充值订单创建、管理员审核、额度入账和会员套餐开通。
+- `manual_payment_orders`、`credit_accounts`、`credit_ledger` 与 `organizations` 的充值相关变更在 PostgreSQL Store 下走 repository hook，JSON Store 本地兼容路径不变。
+- 管理员确认充值时，额度账户、额度流水、套餐到期时间、审计日志和系统事件保持同事务写入，避免部分到账或审计缺失。
+- 补充 repository 与 API hook 回归测试，确认用户提交充值、管理员确认、额度到账和费用明细返回不会回退整库 `write()`。
+
+这一步让人工扫码收款的灰度充值链路更接近生产可用。后续剩余重点转为真实支付渠道接入、真实 PostgreSQL 集成验证、备份恢复演练和平台级运营后台。
 
 ## 2026-05-26 新增完成：人工确认版充值系统
 
@@ -27,9 +38,9 @@
 - 权限细分：新增 `operator` 运营只读角色，可查看独立后台运营数据并保存个人筛选偏好，但不能修改组织、成员、接口、账单、反馈或错误跟进。
 - 存储拆分：`admin_preferences` 已在 PostgreSQL Store 下改为表级 repository 读写，保存/清空后台偏好不再依赖整库快照写回。
 - 存储拆分：`ops_triage` 已在 PostgreSQL Store 下改为表级 repository upsert，AI 失败记录跟进不再依赖整库快照写回。
-- 存储拆分：`writer_profiles`、`writer_versions`、`ai_usage` 用量插入与 AI 超额额度扣减已在 PostgreSQL Store 下改为表级 repository，执笔人云端写入、版本恢复、AI 用量记录和已购额度扣减不再依赖整库快照写回。
+- 存储拆分：`writer_profiles`、`writer_versions`、`ai_usage` 用量插入、AI 超额额度扣减与人工确认充值已在 PostgreSQL Store 下改为表级 repository，执笔人云端写入、版本恢复、AI 用量记录、已购额度扣减和人工充值到账不再依赖整库快照写回。
 
-这意味着独立后台已经从“可看数据”进入“可跟进、可批量处理、可成本观察、可只读授权、部分高频运营写入表级化”的灰度运营状态。下一阶段建议继续处理真实支付渠道、真实邮件投递联调、剩余系统事件/人工充值审核写入拆分和真实 PostgreSQL 集成验证。
+这意味着独立后台已经从“可看数据”进入“可跟进、可批量处理、可成本观察、可只读授权、关键高频运营写入表级化”的灰度运营状态。下一阶段建议继续处理真实支付渠道、真实邮件投递联调、剩余系统事件写入拆分和真实 PostgreSQL 集成验证。
 
 本报告总结“摹文拟笔工作台”近期商业化补齐工作，并列出仍未完成的事项。当前已完成 P0 最小商业化底座、P1 三轮灰度试用能力补齐，以及 P2 前四轮邮件、支付、管理后台、备份、组织治理、外部服务实接准备、PostgreSQL repository 试点、备份加固和整轮收口施工；第五轮已完成阶段 A Resend 邮件服务商适配、阶段 C PostgreSQL 只读 repository 扩面，以及阶段 E 的独立后台深水区增强。阶段 B 真实支付渠道接入暂缓。
 
@@ -44,7 +55,7 @@
 - 商业化后端具备基础安全机制、额度限制、错误观测、灰度反馈和部署说明。
 - 独立后台已支持用量趋势、成本估算、审计保存筛选，以及反馈/错误的负责人、备注和 SLA 跟进。
 - 下一阶段已安排 `P2_ROUND6_COMMERCIALIZATION_BUILD_PLAN.md`，重点收口运营事件权限、统一错误跟进契约、后端化成本口径和云端化后台偏好。
-- 代码已通过构建、语法检查、单元测试、后端 API 测试、端到端测试和依赖审计。
+- 代码已通过构建、语法检查、单元测试、后端服务与 repository 测试、端到端测试和 diff 空白检查。
 
 最近验证结果：
 
@@ -53,15 +64,15 @@ npm run build
 npm run check
 npm test
 npm run test:e2e
-npm audit --omit=dev
+git diff --check
 ```
 
 结果：
 
-- 前端与核心单元测试：78 项通过
-- 后端商业化 API 测试：28 项通过
-- 端到端测试：29 项通过
-- 依赖审计：0 个漏洞
+- 前端与核心单元测试：238 项通过
+- 后端服务与 repository 测试：89 项通过
+- 端到端测试：30 项通过
+- diff 空白检查：通过
 
 ## 二、第一轮：商业化基础生产化
 
@@ -358,11 +369,11 @@ Review 后修复：
 
 ### 3. PostgreSQL Store 生产级改造
 
-当前 PostgreSQL Store 已完成迁移版本表、`ai_usage` 历史查询与表级插入、`audit_logs` 审计查询、`documents` 文档列表只读 repository，以及 `admin_preferences`、`ops_triage`、`writer_profiles`、`writer_versions`、AI 超额额度扣减表级读写 repository；执笔人写入、版本恢复、AI 用量记录、已购额度扣减和后台轻量运营字段已不再依赖整库快照写回。
+当前 PostgreSQL Store 已完成迁移版本表、`ai_usage` 历史查询与表级插入、`audit_logs` 审计查询、`documents` 文档列表只读 repository，以及 `admin_preferences`、`ops_triage`、`writer_profiles`、`writer_versions`、AI 超额额度扣减、人工确认充值表级读写 repository；执笔人写入、版本恢复、AI 用量记录、已购额度扣减、人工充值到账和后台轻量运营字段已不再依赖整库快照写回。
 
 需要完成：
 
-- 继续评估系统事件、人工充值订单创建/审核等剩余高频写入的增量 SQL 替代方案。
+- 继续评估系统事件、反馈状态流转等剩余高频写入的增量 SQL 替代方案。
 - 给文档、执笔人、用量、审计等高频表增加分页查询。
 - 增加 PostgreSQL 集成测试。
 - 扩展多版本迁移脚本和回滚演练。

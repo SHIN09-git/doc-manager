@@ -1,5 +1,35 @@
 # 代码评审记录
 
+## 2026-06-02 人工确认充值 PostgreSQL Repository Review
+
+范围：`server/src/db/repositories/manualPaymentRepository.js`、`server/src/db/repositories/creditRepository.js`、`server/src/db/postgresStore.js`、`server/src/billing/manualPaymentService.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
+
+结论：本轮没有发现阻断问题。人工确认充值链路已从 PostgreSQL Store 的整库快照写回拆为表级 repository：用户提交订单写入 `manual_payment_orders`，管理员确认或拒绝只更新对应 pending 订单；确认时额度入账走 `credit_accounts`/`credit_ledger`，会员套餐开通更新 `organizations`，审计和系统事件保持同事务写入。JSON Store 兼容路径不变。
+
+已确认：
+
+- `manualPaymentService` 在 Store 提供 `createManualPaymentOrder` / `reviewManualPaymentOrder` hook 时不再调用整库 `write()`，原有错误码、凭证可见性和额度流水响应保持不变。
+- `reviewManualPaymentOrder` 会先校验订单归属和 pending 状态，避免重复审核或跨组织审核。
+- `grantCreditsForOrder` 只在确认通过且套餐含额度时写入入账流水；`activatePlanForManualPaymentOrder` 会在同套餐未过期时从原到期日顺延。
+- Repository 测试覆盖订单创建、审核、重复审核拦截、会员到期顺延和额度入账；API 回归测试覆盖充值 hook 路径不会回退 `write()`。
+
+残余风险：
+
+- 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
+- 真实支付渠道、退款、对账和发票仍未接入；人工确认版适合灰度收款，但不能替代完整支付系统。
+- 失败 AI 调用、反馈状态等部分 `system_events` 写入仍有兼容路径，后续可继续拆为表级 insert/update repository。
+
+验证命令：
+
+```bash
+node --check server\src\db\repositories\manualPaymentRepository.js
+node --check server\src\db\repositories\creditRepository.js
+node --check server\src\db\postgresStore.js
+node --check server\src\billing\manualPaymentService.js
+node --test server\tests\postgres-repository.test.js
+node --test server\tests\commercial-api.test.js
+```
+
 ## 2026-06-02 额度扣减 PostgreSQL Repository Review
 
 范围：`server/src/db/repositories/creditRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
@@ -15,7 +45,7 @@
 
 残余风险：
 
-- 人工充值订单创建/审核、充值入账和套餐开通仍走兼容写入；真实运营并发升高前建议继续拆出 `manual_payment_orders` 和充值入账 repository。
+- 人工充值订单创建/审核、充值入账和套餐开通已在后一轮切到 `manual_payment_orders`、`credit_accounts`/`credit_ledger` 与 `organizations` repository；本节保留当时的阶段性风险记录。
 - 失败 AI 调用后的 `system_events` 追加仍走兼容写入；当前与 repository 写入共享队列和 advisory lock，不会覆盖新记录，但后续可继续拆为表级事件插入。
 - 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
 
@@ -945,7 +975,7 @@ npm run test:e2e
 结果：
 
 - 前端与核心单元测试：238 项通过
-- 后端服务与 repository 测试：83 项通过
+- 后端服务与 repository 测试：89 项通过
 - 端到端测试：30 项通过
 
 GitHub Actions 已配置基础 CI，自动运行：

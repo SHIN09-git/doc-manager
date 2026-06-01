@@ -6,6 +6,10 @@
 
 ### 工程
 
+- PostgreSQL Store 新增 `manualPaymentRepository`，人工充值订单创建、审核状态更新、额度入账和会员开通在 PostgreSQL 下可走表级事务。
+- `manual_payment_orders`、`credit_accounts`、`credit_ledger`、`organizations` 的人工确认充值变更会与对应审计和系统事件保持同事务写入，JSON Store 兼容路径不变。
+- `manualPaymentService` 在 Store 提供人工充值 repository hook 时不再调用整库 `write()`，并保持原有错误码、凭证公开字段和额度流水响应契约。
+- 补充人工充值 repository 与 API hook 回归测试，确认用户提交充值、管理员确认、额度到账和费用明细返回不会回退快照写入。
 - PostgreSQL Store 新增 `adminPreferenceRepository`，后台审计筛选、错误筛选和反馈筛选的读写/清空在 PostgreSQL 下可走表级事务，不再依赖整库快照写回。
 - `admin_preferences` 表级写入仍与旧快照写队列共享 advisory lock，并在同一事务内写入审计日志，降低灰度运营时个人偏好保存覆盖其他数据的风险。
 - 补充 PostgreSQL repository 测试，覆盖后台偏好读取、插入、更新、删除和审计日志插入。

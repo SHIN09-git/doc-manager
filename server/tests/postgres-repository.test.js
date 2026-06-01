@@ -6,8 +6,13 @@ import path from "node:path";
 import { runMigrations } from "../src/db/migrations/migrationRunner.js";
 import { buildAdminPreferencesGetQuery, deleteAdminPreferences, getAdminPreferences, upsertAdminPreferences } from "../src/db/repositories/adminPreferenceRepository.js";
 import { buildAuditHistoryQuery, insertAuditLog, listAuditByOrganization } from "../src/db/repositories/auditRepository.js";
-import { spendCreditsForUsage } from "../src/db/repositories/creditRepository.js";
+import { grantCreditsForOrder, spendCreditsForUsage } from "../src/db/repositories/creditRepository.js";
 import { buildDocumentListQuery, listDocumentsByOrganization } from "../src/db/repositories/documentRepository.js";
+import {
+  activatePlanForManualPaymentOrder,
+  createManualPaymentOrder,
+  reviewManualPaymentOrder,
+} from "../src/db/repositories/manualPaymentRepository.js";
 import { buildOpsTriageGetQuery, getOpsTriage, upsertOpsTriage } from "../src/db/repositories/opsTriageRepository.js";
 import { buildUsageHistoryQuery, insertUsageRecord, listUsageByOrganization } from "../src/db/repositories/usageRepository.js";
 import {
@@ -273,6 +278,273 @@ test("credit repository reports skipped spends without writing a ledger", async 
   assert.equal(result.account.balance, 0);
   assert.equal(result.ledger, null);
   assert.equal(calls.length, 2);
+});
+
+test("credit repository grants credits and records an in ledger", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/insert into credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_grant",
+            organization_id: values[1],
+            user_id: values[2],
+            balance: 5,
+            updated_at: values[4],
+          }],
+        };
+      }
+      if (/update credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_grant",
+            organization_id: values[0],
+            user_id: values[1],
+            balance: 25,
+            updated_at: values[3],
+          }],
+        };
+      }
+      if (/insert into credit_ledger/.test(text)) {
+        return {
+          rows: [{
+            id: values[0],
+            organization_id: values[1],
+            user_id: values[2],
+            order_id: values[3],
+            usage_id: values[4],
+            direction: values[5],
+            amount: values[6],
+            balance_after: values[7],
+            reason: values[8],
+            created_at: values[9],
+          }],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const result = await grantCreditsForOrder(pool, {
+    organizationId: "org_credit",
+    userId: "usr_credit",
+    orderId: "mop_credit",
+    amount: 20,
+    reason: "manual_payment_approved",
+    now: "2026-05-24T05:00:00.000Z",
+  });
+
+  assert.equal(result.amount, 20);
+  assert.equal(result.account.balance, 25);
+  assert.equal(result.ledger.order_id, "mop_credit");
+  assert.equal(result.ledger.usage_id, null);
+  assert.equal(result.ledger.direction, "in");
+  assert.equal(result.ledger.balance_after, 25);
+  assert.match(calls[1].text, /balance = balance \+ \$3/);
+});
+
+test("manual payment repository creates a pending order", async () => {
+  let captured = null;
+  const pool = {
+    async query(text, values) {
+      captured = { text, values };
+      return {
+        rows: [{
+          id: values[0],
+          organization_id: values[1],
+          user_id: values[2],
+          package_id: values[3],
+          package_type: values[4],
+          title: values[5],
+          amount_cny: values[6],
+          credits: values[7],
+          plan: values[8],
+          duration_days: values[9],
+          payment_channel: values[10],
+          payer_note: values[11],
+          proof_text: values[12],
+          status: values[13],
+          reviewed_by: values[14],
+          reviewed_at: values[15],
+          review_note: values[16],
+          created_at: values[17],
+          updated_at: values[18],
+        }],
+      };
+    },
+  };
+
+  const order = await createManualPaymentOrder(pool, {
+    organizationId: "org_manual",
+    userId: "usr_manual",
+    paymentPackage: {
+      id: "credits_1000",
+      type: "credits",
+      title: "1000 点 AI 额度",
+      amount_cny: 50,
+      credits: 1000,
+    },
+    paymentChannel: "wechat",
+    payerNote: "转账尾号 1234",
+    proofText: "已付款",
+    now: "2026-05-24T06:00:00.000Z",
+  });
+
+  assert.match(captured.text, /insert into manual_payment_orders/);
+  assert.equal(order.organization_id, "org_manual");
+  assert.equal(order.user_id, "usr_manual");
+  assert.equal(order.status, "pending");
+  assert.equal(order.credits, 1000);
+  assert.equal(order.amount_cny, 50);
+  assert.equal(order.created_at, "2026-05-24T06:00:00.000Z");
+});
+
+test("manual payment repository reviews only pending orders", async () => {
+  const calls = [];
+  const pending = {
+    id: "mop_review",
+    organization_id: "org_manual",
+    user_id: "usr_manual",
+    package_id: "credits_1000",
+    package_type: "credits",
+    title: "1000 点 AI 额度",
+    amount_cny: 50,
+    credits: 1000,
+    plan: "",
+    duration_days: 0,
+    payment_channel: "wechat",
+    payer_note: "尾号 1234",
+    proof_text: "已付款",
+    status: "pending",
+    reviewed_by: null,
+    reviewed_at: null,
+    review_note: "",
+    created_at: "2026-05-24T06:00:00.000Z",
+    updated_at: "2026-05-24T06:00:00.000Z",
+  };
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/select/.test(text)) return { rows: [pending] };
+      if (/update manual_payment_orders/.test(text)) {
+        return {
+          rows: [{
+            ...pending,
+            status: values[2],
+            reviewed_by: values[3],
+            reviewed_at: values[4],
+            review_note: values[5],
+            updated_at: values[4],
+          }],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const order = await reviewManualPaymentOrder(pool, {
+    organizationId: "org_manual",
+    orderId: "mop_review",
+    reviewerId: "usr_admin",
+    approved: true,
+    reviewNote: "已核对到账",
+    now: "2026-05-24T07:00:00.000Z",
+  });
+
+  assert.equal(order.status, "approved");
+  assert.equal(order.reviewed_by, "usr_admin");
+  assert.equal(order.review_note, "已核对到账");
+  assert.match(calls[1].text, /where organization_id = \$1 and id = \$2 and status = 'pending'/);
+});
+
+test("manual payment repository rejects missing or already reviewed orders", async () => {
+  const missingPool = { async query() { return { rows: [] }; } };
+  await assert.rejects(
+    () => reviewManualPaymentOrder(missingPool, {
+      organizationId: "org_manual",
+      orderId: "mop_missing",
+      reviewerId: "usr_admin",
+      approved: true,
+    }),
+    (error) => error.code === "manual_payment_order_not_found",
+  );
+
+  const reviewedPool = {
+    async query() {
+      return {
+        rows: [{
+          id: "mop_reviewed",
+          organization_id: "org_manual",
+          user_id: "usr_manual",
+          status: "approved",
+          amount_cny: 50,
+          credits: 1000,
+          duration_days: 0,
+          created_at: "2026-05-24T06:00:00.000Z",
+          updated_at: "2026-05-24T07:00:00.000Z",
+        }],
+      };
+    },
+  };
+  await assert.rejects(
+    () => reviewManualPaymentOrder(reviewedPool, {
+      organizationId: "org_manual",
+      orderId: "mop_reviewed",
+      reviewerId: "usr_admin",
+      approved: true,
+    }),
+    (error) => error.code === "manual_payment_order_reviewed",
+  );
+});
+
+test("manual payment repository activates plan from existing future expiry", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/select/.test(text)) {
+        return {
+          rows: [{
+            id: values[0],
+            name: "Team",
+            slug: "team",
+            plan: "pro",
+            plan_expires_at: "2026-06-01T00:00:00.000Z",
+            created_by: "usr_owner",
+            created_at: "2026-05-01T00:00:00.000Z",
+            updated_at: "2026-05-24T00:00:00.000Z",
+          }],
+        };
+      }
+      if (/update organizations/.test(text)) {
+        return {
+          rows: [{
+            id: values[0],
+            name: "Team",
+            slug: "team",
+            plan: values[1],
+            plan_expires_at: values[2],
+            created_by: "usr_owner",
+            created_at: "2026-05-01T00:00:00.000Z",
+            updated_at: values[3],
+          }],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const organization = await activatePlanForManualPaymentOrder(pool, {
+    organizationId: "org_plan",
+    order: { plan: "pro", duration_days: 30 },
+    now: "2026-05-24T00:00:00.000Z",
+  });
+
+  assert.equal(organization.plan, "pro");
+  assert.equal(organization.plan_expires_at, "2026-07-01T00:00:00.000Z");
+  assert.match(calls[1].text, /update organizations/);
 });
 
 test("audit repository query is organization-scoped and filterable", async () => {

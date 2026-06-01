@@ -33,6 +33,9 @@
 - [x] 新增工作台持久化控制器单元测试，覆盖 IndexedDB 写入、localStorage 兜底、旧数据迁移、存储标签和位置文案。
 - [x] 从 `server/src/app.js` 拆出 `manualPaymentService`，集中管理人工充值订单列表、用户提交、管理员审核、套餐解析和凭证公开字段。
 - [x] 新增人工充值服务单元测试，覆盖默认套餐、自定义套餐归一、支付方式校验、无效套餐剔除和凭证脱敏。
+- [x] 新增 PostgreSQL `manualPaymentRepository`，人工充值订单创建、审核、额度入账和会员开通在 PostgreSQL Store 下可走表级事务。
+- [x] 人工充值 repository 写入会同步写入对应审计和系统事件，JSON Store 兼容路径保持不变。
+- [x] 补充人工充值 repository 测试和 API hook 回归测试，确认用户提交充值与管理员确认不再依赖整库快照写回。
 - [x] 新增 `operator` 运营只读角色，可查看独立后台运营数据和保存个人后台偏好，但不能修改组织、成员、接口、账单、反馈或错误跟进。
 - [x] 补充运营只读角色回归测试，覆盖后台查看权限、组织级用量/审计/错误/账单读取，以及关键写操作 403 拦截。
 - [x] 新增 PostgreSQL `adminPreferenceRepository`，后台偏好读取、保存和清空在 PostgreSQL Store 下可走表级事务。
@@ -386,7 +389,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：238 项前端与核心单元测试通过，83 项后端服务与 repository 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：238 项前端与核心单元测试通过，89 项后端服务与 repository 测试通过，30 项端到端测试通过。
 
 ## 已完成
 

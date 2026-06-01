@@ -123,6 +123,7 @@ src/modules/*
 - 前端展示文案和状态格式化集中在 `src/modules/cloud/billingFormatters.js`，主工作台和独立后台共用，避免状态名、支付方式、额度流水文案分叉。
 - 后端额度流水公开字段集中在 `server/src/billing/creditLedger.js`，接口只返回按组织和权限过滤后的公开字段。
 - 后端人工充值订单列表、提交、审核、套餐解析和凭证公开字段集中在 `server/src/billing/manualPaymentService.js`，`server/src/app.js` 只负责路由装配和复用通用账号/审计依赖。
+- PostgreSQL Store 下人工充值创建、审核、额度入账和会员开通走 `server/src/db/repositories/manualPaymentRepository.js` 与 `creditRepository.js`，并在同事务写入审计和系统事件；JSON Store 兼容路径保持原有快照写入。
 - `server/src/app.js` 仍负责通用路由和事务依赖装配，但新增账单子能力时应优先放入 `server/src/billing/`，再由路由调用。
 
 ## 文档链路
@@ -292,9 +293,10 @@ P2 第五轮阶段 C 已补充：
 - `ops_triage` 表级 repository，AI 失败记录的后台跟进映射在 PostgreSQL Store 下走独立 upsert，并在同一事务写审计日志。
 - `writer_profiles`/`writer_versions` 表级 repository，执笔人创建、更新、软删除、版本列表和版本恢复在 PostgreSQL Store 下走独立事务，并保持版本快照和审计日志同事务写入。
 - `ai_usage` 表级写入 repository，AI 调用用量记录与 `ai.chat` 审计日志在 PostgreSQL Store 下同事务插入；AI 超额调用的额度扣减走 `credit_accounts`/`credit_ledger` repository，并在同事务写入扣减审计。
+- `manual_payment_orders` 表级 repository，人工充值订单创建、审核、额度入账和会员开通在 PostgreSQL Store 下走独立事务，并与审计、系统事件保持同事务写入。
 - Repository 测试覆盖组织隔离、limit、筛选、游标分页、JSON/日期归一和迁移版本跳过重复执行。
 
-仍需继续完成真实支付服务商 SDK、备份恢复演练、剩余系统事件和人工充值审核写入 repository 评估、真实 PostgreSQL 集成测试和企业部署增强。
+仍需继续完成真实支付服务商 SDK、备份恢复演练、剩余系统事件写入 repository 评估、真实 PostgreSQL 集成测试和企业部署增强。
 
 ## PPT 链路
 
@@ -333,7 +335,7 @@ npm run test:e2e
 当前覆盖：
 
 - 前端与核心单元测试：238 项
-- 后端商业化 API 测试：60 项
+- 后端服务与 repository 测试：89 项
 - 端到端测试：30 项
 
 重点测试对象：

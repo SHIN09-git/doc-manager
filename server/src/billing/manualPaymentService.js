@@ -54,6 +54,18 @@ export function createManualPaymentHandlers(options = {}) {
     if (!payerNote && !proofText) {
       throw new HttpError(400, "请填写付款备注或凭证说明，方便管理员核对", "manual_payment_proof_required");
     }
+    if (typeof ctx.store.createManualPaymentOrder === "function") {
+      const order = await ctx.store.createManualPaymentOrder({
+        organizationId: organization.id,
+        userId: ctx.auth.user.id,
+        paymentPackage,
+        paymentChannel,
+        payerNote,
+        proofText,
+      });
+      sendJson(ctx.response, 201, { order: publicManualPaymentOrder(order, { userId: ctx.auth.user.id }) });
+      return;
+    }
     const order = await ctx.store.write((data) => {
       const now = new Date().toISOString();
       const next = {
@@ -107,6 +119,32 @@ export function createManualPaymentHandlers(options = {}) {
     }
     const approved = action === "approve" || action === "approved";
     const reviewNote = String(body.review_note || body.reviewNote || body.note || "").trim().slice(0, 1000);
+    if (typeof ctx.store.reviewManualPaymentOrder === "function") {
+      let result;
+      try {
+        result = await ctx.store.reviewManualPaymentOrder({
+          organizationId: organization.id,
+          orderId,
+          userId: ctx.auth.user.id,
+          approved,
+          reviewNote,
+        });
+      } catch (error) {
+        throw mapManualPaymentRepositoryError(error);
+      }
+      const refreshedData = await ctx.store.read();
+      sendJson(ctx.response, 200, {
+        order: publicManualPaymentOrder(result.order, { admin: true }),
+        credits: result.creditAccount ? publicCreditAccount(result.creditAccount) : null,
+        credit_ledger: listPublicCreditLedger(refreshedData, {
+          organizationId: organization.id,
+          userId: result.order.user_id,
+          isAdmin: true,
+          limit: 20,
+        }),
+      });
+      return;
+    }
     const result = await ctx.store.write((data) => {
       const order = data.manual_payment_orders.find((item) => item.id === orderId && item.organization_id === organization.id);
       if (!order) throw new HttpError(404, "充值订单不存在", "manual_payment_order_not_found");
@@ -278,4 +316,14 @@ function normalizePlan(plan) {
 
 function assertDependency(fn, name) {
   if (typeof fn !== "function") throw new TypeError(`manualPaymentService requires ${name}`);
+}
+
+function mapManualPaymentRepositoryError(error) {
+  if (error?.code === "manual_payment_order_not_found") {
+    return new HttpError(404, "充值订单不存在", "manual_payment_order_not_found");
+  }
+  if (error?.code === "manual_payment_order_reviewed") {
+    return new HttpError(409, "充值订单已处理", "manual_payment_order_reviewed");
+  }
+  return error;
 }

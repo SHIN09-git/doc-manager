@@ -5,8 +5,13 @@ import { normalizeData } from "./jsonStore.js";
 import { runMigrations } from "./migrations/migrationRunner.js";
 import { getAdminPreferences, upsertAdminPreferences, deleteAdminPreferences } from "./repositories/adminPreferenceRepository.js";
 import { insertAuditLog, listAuditByOrganization } from "./repositories/auditRepository.js";
-import { spendCreditsForUsage as spendCreditsForUsageRecord } from "./repositories/creditRepository.js";
+import { grantCreditsForOrder, spendCreditsForUsage as spendCreditsForUsageRecord } from "./repositories/creditRepository.js";
 import { listDocumentsByOrganization } from "./repositories/documentRepository.js";
+import {
+  activatePlanForManualPaymentOrder,
+  createManualPaymentOrder as createManualPaymentOrderRecord,
+  reviewManualPaymentOrder as reviewManualPaymentOrderRecord,
+} from "./repositories/manualPaymentRepository.js";
 import { getOpsTriage, upsertOpsTriage } from "./repositories/opsTriageRepository.js";
 import { insertUsageRecord, listUsageByOrganization } from "./repositories/usageRepository.js";
 import {
@@ -174,6 +179,132 @@ export class PostgresStore {
         created_at: now,
       });
       return result.account;
+    });
+  }
+
+  async createManualPaymentOrder(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const order = await createManualPaymentOrderRecord(client, { ...options, now });
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "billing.manual_order.create",
+        target_type: "manual_payment_order",
+        target_id: order.id,
+        metadata: {
+          package_id: order.package_id,
+          package_type: order.package_type,
+          amount_cny: order.amount_cny,
+          credits: order.credits,
+          plan: order.plan || "",
+          duration_days: order.duration_days,
+          payment_channel: order.payment_channel,
+          proof_submitted: Boolean(order.proof_text || order.payer_note),
+        },
+        created_at: now,
+      });
+      await insertSystemEvent(client, {
+        id: createId("evt"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        level: "info",
+        type: "billing.manual_order.pending",
+        message: "收到人工充值订单，等待管理员确认",
+        metadata: { order_id: order.id, package_id: order.package_id },
+        created_at: now,
+      });
+      return order;
+    });
+  }
+
+  async reviewManualPaymentOrder(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const order = await reviewManualPaymentOrderRecord(client, { ...options, reviewerId: options.userId, now });
+      let creditAccount = null;
+      let planOrganization = null;
+      if (options.approved) {
+        if (Number(order.credits || 0) > 0) {
+          const grant = await grantCreditsForOrder(client, {
+            organizationId: options.organizationId,
+            userId: order.user_id,
+            orderId: order.id,
+            amount: Number(order.credits || 0),
+            reason: "manual_payment_approved",
+            now,
+          });
+          creditAccount = grant.account;
+          await insertAuditLog(client, {
+            id: createId("aud"),
+            organization_id: options.organizationId,
+            user_id: options.userId,
+            action: "billing.credit.grant",
+            target_type: "credit_account",
+            target_id: creditAccount.id,
+            metadata: {
+              order_id: order.id,
+              user_id: order.user_id,
+              amount: grant.amount,
+              balance_after: creditAccount.balance,
+              review_note: options.reviewNote || "",
+            },
+            created_at: now,
+          });
+        }
+        if (order.plan) {
+          planOrganization = await activatePlanForManualPaymentOrder(client, { organizationId: options.organizationId, order, now });
+          if (planOrganization) {
+            await insertAuditLog(client, {
+              id: createId("aud"),
+              organization_id: options.organizationId,
+              user_id: options.userId,
+              action: "billing.plan.manual_activate",
+              target_type: "organization",
+              target_id: options.organizationId,
+              metadata: {
+                order_id: order.id,
+                user_id: order.user_id,
+                plan: order.plan,
+                duration_days: order.duration_days,
+                plan_expires_at: planOrganization.plan_expires_at || null,
+                review_note: options.reviewNote || "",
+              },
+              created_at: now,
+            });
+          }
+        }
+      }
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: options.approved ? "billing.manual_order.approve" : "billing.manual_order.reject",
+        target_type: "manual_payment_order",
+        target_id: order.id,
+        metadata: {
+          package_id: order.package_id,
+          amount_cny: order.amount_cny,
+          credits: order.credits,
+          plan: order.plan || "",
+          duration_days: order.duration_days,
+          payment_channel: order.payment_channel,
+          review_note: options.reviewNote || "",
+        },
+        created_at: now,
+      });
+      await insertSystemEvent(client, {
+        id: createId("evt"),
+        organization_id: options.organizationId,
+        user_id: order.user_id,
+        level: options.approved ? "info" : "warn",
+        type: options.approved ? "billing.manual_order.approved" : "billing.manual_order.rejected",
+        message: options.approved ? "人工充值订单已确认" : "人工充值订单已拒绝",
+        metadata: { order_id: order.id, package_id: order.package_id, reviewed_by: options.userId },
+        created_at: now,
+      });
+      return { order, creditAccount, planOrganization };
     });
   }
 

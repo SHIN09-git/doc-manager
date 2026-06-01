@@ -55,7 +55,9 @@ export async function spendCreditsForUsage(pool, {
   const ledger = await insertCreditLedger(pool, {
     organizationId,
     userId,
+    orderId: null,
     usageId,
+    direction: "out",
     amount: creditAmount,
     balanceAfter: account.balance,
     reason: "ai_quota_overage",
@@ -67,6 +69,50 @@ export async function spendCreditsForUsage(pool, {
     skipped: false,
     amount: creditAmount,
   };
+}
+
+export async function grantCreditsForOrder(pool, {
+  organizationId,
+  userId,
+  orderId,
+  amount = 0,
+  reason = "manual_payment_approved",
+  now = new Date().toISOString(),
+} = {}) {
+  if (!organizationId) throw new Error("organizationId is required");
+  if (!userId) throw new Error("userId is required");
+  const creditAmount = Math.max(0, Math.floor(Number(amount || 0)));
+  if (creditAmount <= 0) {
+    return {
+      account: await ensureCreditAccount(pool, { organizationId, userId, now }),
+      ledger: null,
+      amount: 0,
+    };
+  }
+  await ensureCreditAccount(pool, { organizationId, userId, now });
+  const updated = await pool.query(
+    `
+      update credit_accounts
+      set balance = balance + $3,
+          updated_at = $4
+      where organization_id = $1 and user_id = $2
+      returning ${CREDIT_ACCOUNT_COLUMNS.join(", ")}
+    `,
+    [organizationId, userId, creditAmount, now],
+  );
+  const account = normalizeCreditAccountRow(updated.rows[0]);
+  const ledger = await insertCreditLedger(pool, {
+    organizationId,
+    userId,
+    orderId,
+    usageId: null,
+    direction: "in",
+    amount: creditAmount,
+    balanceAfter: account.balance,
+    reason,
+    now,
+  });
+  return { account, ledger, amount: creditAmount };
 }
 
 async function ensureCreditAccount(pool, { organizationId, userId, now }) {
@@ -86,7 +132,9 @@ async function ensureCreditAccount(pool, { organizationId, userId, now }) {
 async function insertCreditLedger(pool, {
   organizationId,
   userId,
+  orderId = null,
   usageId,
+  direction = "out",
   amount,
   balanceAfter,
   reason,
@@ -102,9 +150,9 @@ async function insertCreditLedger(pool, {
       createId("led"),
       organizationId,
       userId,
-      null,
+      orderId,
       usageId,
-      "out",
+      direction,
       amount,
       balanceAfter,
       reason,

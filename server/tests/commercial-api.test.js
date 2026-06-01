@@ -1860,6 +1860,204 @@ test("AI overage credit spend uses repository hook when available", async () => 
   }
 });
 
+test("manual payment APIs use repository hooks when available", async () => {
+  const now = new Date().toISOString();
+  const token = `manual-payment-repo-${crypto.randomUUID()}`;
+  const data = normalizeData({
+    users: [{
+      id: "usr_manual_repo",
+      email: "manual-repo@example.com",
+      name: "Manual Repo",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_manual_repo",
+      name: "Manual Repo Org",
+      slug: "manual-repo-org",
+      plan: "free",
+      created_by: "usr_manual_repo",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_manual_repo",
+      organization_id: "org_manual_repo",
+      user_id: "usr_manual_repo",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_manual_repo",
+      user_id: "usr_manual_repo",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+  });
+  let writeCount = 0;
+  const hookCalls = [];
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      writeCount += 1;
+      return mutator(data);
+    },
+    async createManualPaymentOrder(options) {
+      hookCalls.push(["create", options]);
+      const order = {
+        id: "mop_repo",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        package_id: options.paymentPackage.id,
+        package_type: options.paymentPackage.type,
+        title: options.paymentPackage.title,
+        amount_cny: options.paymentPackage.amount_cny,
+        credits: options.paymentPackage.credits,
+        plan: options.paymentPackage.plan,
+        duration_days: options.paymentPackage.duration_days,
+        payment_channel: options.paymentChannel,
+        payer_note: options.payerNote,
+        proof_text: options.proofText,
+        status: "pending",
+        reviewed_by: null,
+        reviewed_at: null,
+        review_note: "",
+        created_at: now,
+        updated_at: now,
+      };
+      data.manual_payment_orders.push(order);
+      data.audit_logs.push({
+        id: "aud_manual_create",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "billing.manual_order.create",
+        target_type: "manual_payment_order",
+        target_id: order.id,
+        metadata: { proof_submitted: true },
+        created_at: now,
+      });
+      data.system_events.push({
+        id: "evt_manual_pending",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        level: "info",
+        type: "billing.manual_order.pending",
+        message: "pending",
+        metadata: { order_id: order.id },
+        created_at: now,
+      });
+      return order;
+    },
+    async reviewManualPaymentOrder(options) {
+      hookCalls.push(["review", options]);
+      const order = data.manual_payment_orders.find((item) => item.id === options.orderId);
+      order.status = options.approved ? "approved" : "rejected";
+      order.reviewed_by = options.userId;
+      order.reviewed_at = now;
+      order.review_note = options.reviewNote;
+      order.updated_at = now;
+      const creditAccount = {
+        id: "crd_manual_repo",
+        organization_id: options.organizationId,
+        user_id: order.user_id,
+        balance: Number(order.credits || 0),
+        updated_at: now,
+      };
+      data.credit_accounts.push(creditAccount);
+      data.credit_ledger.push({
+        id: "led_manual_repo",
+        organization_id: options.organizationId,
+        user_id: order.user_id,
+        order_id: order.id,
+        usage_id: null,
+        direction: "in",
+        amount: Number(order.credits || 0),
+        balance_after: creditAccount.balance,
+        reason: "manual_payment_approved",
+        created_at: now,
+      });
+      data.audit_logs.push({
+        id: "aud_manual_review",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "billing.manual_order.approve",
+        target_type: "manual_payment_order",
+        target_id: order.id,
+        metadata: { review_note: options.reviewNote },
+        created_at: now,
+      });
+      data.system_events.push({
+        id: "evt_manual_approved",
+        organization_id: options.organizationId,
+        user_id: order.user_id,
+        level: "info",
+        type: "billing.manual_order.approved",
+        message: "approved",
+        metadata: { order_id: order.id },
+        created_at: now,
+      });
+      return { order, creditAccount, planOrganization: null };
+    },
+  };
+  const manualServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+    },
+    store,
+  });
+  await new Promise((resolve) => manualServer.listen(0, "127.0.0.1", resolve));
+  const address = manualServer.address();
+  const manualBaseUrl = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    "Content-Type": "application/json",
+    Cookie: `mowen_session=${encodeURIComponent(token)}`,
+  };
+  try {
+    const created = await fetch(`${manualBaseUrl}/api/billing/manual-orders`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        package_id: "credits_1000",
+        payment_channel: "wechat",
+        payer_note: "尾号 1234",
+        proof_text: "已付款",
+      }),
+    });
+    const createdBody = await created.json();
+    assert.equal(created.status, 201, JSON.stringify(createdBody));
+    assert.equal(createdBody.order.status, "pending");
+
+    const reviewed = await fetch(`${manualBaseUrl}/api/billing/manual-orders/${createdBody.order.id}/review`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action: "approve", review_note: "repository path" }),
+    });
+    const reviewedBody = await reviewed.json();
+    assert.equal(reviewed.status, 200, JSON.stringify(reviewedBody));
+    assert.equal(reviewedBody.order.status, "approved");
+    assert.equal(reviewedBody.credits.balance, 1000);
+    assert.ok(reviewedBody.credit_ledger.some((item) => item.order_id === createdBody.order.id && item.direction === "in"));
+
+    assert.equal(writeCount, 0);
+    assert.deepEqual(hookCalls.map((item) => item[0]), ["create", "review"]);
+    assert.equal(hookCalls[0][1].organizationId, "org_manual_repo");
+    assert.equal(hookCalls[0][1].userId, "usr_manual_repo");
+    assert.equal(hookCalls[1][1].approved, true);
+    assert.ok(data.audit_logs.some((item) => item.action === "billing.manual_order.approve"));
+    assert.ok(data.system_events.some((item) => item.type === "billing.manual_order.approved"));
+  } finally {
+    await new Promise((resolve) => manualServer.close(resolve));
+  }
+});
+
 async function register(email, options = {}) {
   const response = await api("/api/auth/register", {
     method: "POST",
