@@ -24946,7 +24946,7 @@ ${notes.join("\n")}`);
       focusTitleInput();
       return doc;
     }
-    function duplicateDocument2(docId) {
+    function duplicateDocument(docId) {
       const source = state2.docs.find((doc) => doc.id === docId);
       if (!source || isDeleted(source)) return null;
       const copy = {
@@ -24967,9 +24967,9 @@ ${notes.join("\n")}`);
     }
     function duplicateCurrentDocument() {
       const current = getCurrentDoc2();
-      return current ? duplicateDocument2(current.id) : null;
+      return current ? duplicateDocument(current.id) : null;
     }
-    function moveDocument2(sourceId, targetId, placement = "before") {
+    function moveDocument(sourceId, targetId, placement = "before") {
       if (!sourceId || !targetId || sourceId === targetId) return false;
       const source = state2.docs.find((doc) => doc.id === sourceId);
       const target = state2.docs.find((doc) => doc.id === targetId);
@@ -24985,22 +24985,22 @@ ${notes.join("\n")}`);
       toast2(`\u5DF2\u8C03\u6574\u6587\u6863\u987A\u5E8F\uFF1A${source.title || "\u672A\u547D\u540D\u6587\u6863"}`);
       return true;
     }
-    function moveDocumentToTop2(docId) {
+    function moveDocumentToTop(docId) {
       const doc = state2.docs.find((item) => item.id === docId);
       if (!doc || isDeleted(doc)) return false;
       const firstActive = state2.docs.find((item) => !isDeleted(item));
       if (!firstActive || firstActive.id === doc.id) return false;
-      return moveDocument2(doc.id, firstActive.id, "before");
+      return moveDocument(doc.id, firstActive.id, "before");
     }
-    function moveDocumentToBottom2(docId) {
+    function moveDocumentToBottom(docId) {
       const doc = state2.docs.find((item) => item.id === docId);
       if (!doc || isDeleted(doc)) return false;
       const activeDocs = state2.docs.filter((item) => !isDeleted(item));
       const lastActive = activeDocs.at(-1);
       if (!lastActive || lastActive.id === doc.id) return false;
-      return moveDocument2(doc.id, lastActive.id, "after");
+      return moveDocument(doc.id, lastActive.id, "after");
     }
-    function deleteCurrentDocument2(confirmDelete = (message) => window.confirm(message)) {
+    function deleteCurrentDocument(confirmDelete = (message) => window.confirm(message)) {
       const current = getCurrentDoc2();
       if (!current || isDeleted(current)) return false;
       const ok = confirmDelete(`\u5C06\u201C${current.title || "\u672A\u547D\u540D\u6587\u6863"}\u201D\u79FB\u5165\u5783\u573E\u7BB1\uFF1F`);
@@ -25015,7 +25015,7 @@ ${notes.join("\n")}`);
       toast2(`\u5DF2\u5C06\u6587\u6863\u79FB\u5165\u5783\u573E\u7BB1\uFF1A${oldLocation}`, "warn");
       return true;
     }
-    function restoreDocument2(docId) {
+    function restoreDocument(docId) {
       const doc = state2.docs.find((item) => item.id === docId);
       if (!doc || !isDeleted(doc)) return null;
       doc.deletedAt = "";
@@ -25041,7 +25041,7 @@ ${notes.join("\n")}`);
       toast2(`\u5DF2\u4ECE\u5783\u573E\u7BB1\u6062\u590D ${trashedDocs.length} \u4EFD\u6587\u6863`);
       return trashedDocs.length;
     }
-    function permanentlyDeleteDocument2(docId, confirmDelete = (message) => window.confirm(message)) {
+    function permanentlyDeleteDocument(docId, confirmDelete = (message) => window.confirm(message)) {
       const doc = state2.docs.find((item) => item.id === docId);
       if (!doc || !isDeleted(doc)) return false;
       const ok = confirmDelete(`\u6C38\u4E45\u5220\u9664\u201C${doc.title || "\u672A\u547D\u540D\u6587\u6863"}\u201D\uFF1F\u6B64\u64CD\u4F5C\u65E0\u6CD5\u6062\u590D\u3002`);
@@ -25119,7 +25119,7 @@ ${notes.join("\n")}`);
       toast2(`\u5DF2\u5BFC\u5165 ${importedCount} \u4EFD\u6587\u6863\u5230\uFF1A${getFolderLocation2(folder)}${skippedCount ? `\uFF0C\u5DF2\u8DF3\u8FC7 ${skippedCount} \u4E2A\u6682\u4E0D\u652F\u6301\u3001\u8FC7\u5927\u6216\u8BFB\u53D6\u5931\u8D25\u7684\u6587\u4EF6` : ""}`);
       return importedCount;
     }
-    async function exportCurrentDocument2() {
+    async function exportCurrentDocument() {
       saveEditor2(false);
       const doc = getCurrentDoc2();
       if (!doc) return null;
@@ -25131,7 +25131,7 @@ ${notes.join("\n")}`);
       toast2(`\u5DF2\u5BFC\u51FA ${type} Word \u6587\u6863\u5230\uFF1A${getDownloadLocation2(fileName)}`);
       return fileName;
     }
-    function exportWorkspaceBackup2() {
+    function exportWorkspaceBackup() {
       saveEditor2(false);
       const backup = {
         exportedAt: now(),
@@ -25147,20 +25147,142 @@ ${notes.join("\n")}`);
     return {
       createDocument: createDocument2,
       duplicateCurrentDocument,
-      duplicateDocument: duplicateDocument2,
-      moveDocument: moveDocument2,
-      moveDocumentToTop: moveDocumentToTop2,
-      moveDocumentToBottom: moveDocumentToBottom2,
-      deleteCurrentDocument: deleteCurrentDocument2,
-      restoreDocument: restoreDocument2,
+      duplicateDocument,
+      moveDocument,
+      moveDocumentToTop,
+      moveDocumentToBottom,
+      deleteCurrentDocument,
+      restoreDocument,
       restoreAllDocumentsFromTrash,
-      permanentlyDeleteDocument: permanentlyDeleteDocument2,
+      permanentlyDeleteDocument,
       clearTrashDocuments: clearTrashDocuments2,
       getCurrentDoc: getCurrentDoc2,
       selectFirstDocumentIfNeeded: selectFirstDocumentIfNeeded2,
       importDocumentFiles: importDocumentFiles2,
-      exportCurrentDocument: exportCurrentDocument2,
-      exportWorkspaceBackup: exportWorkspaceBackup2
+      exportCurrentDocument,
+      exportWorkspaceBackup
+    };
+  }
+
+  // src/modules/documents/documentPanelController.js
+  function createDocumentPanelController(deps = {}) {
+    const {
+      ui: ui2 = {},
+      els: els2 = {},
+      documentManager: documentManager2,
+      trashController: trashController2 = { bindEvents: () => {
+      } },
+      setupFileDrop: setupFileDrop2 = () => {
+      },
+      saveEditor: saveEditor2 = () => {
+      },
+      persist: persist2 = () => {
+      },
+      eventBus: eventBus2 = { emit: () => {
+      } },
+      switchMainView: switchMainView2 = () => {
+      },
+      isMobileWorkspace = () => false,
+      setMobileView = () => {
+      },
+      toast: toast2 = () => {
+      }
+    } = deps;
+    function bindEvents2() {
+      els2.newDocBtn?.addEventListener("click", createDocument2);
+      els2.importInput?.addEventListener("change", importDocuments);
+      setupFileDrop2(els2.docDropZone, importDocumentFiles2);
+      setupFileDrop2(els2.docList, importDocumentFiles2);
+      els2.exportDocBtn?.addEventListener("click", exportCurrentDocument);
+      els2.backupBtn?.addEventListener("click", exportWorkspaceBackup);
+      trashController2.bindEvents();
+    }
+    function selectDocument(docId) {
+      saveEditor2(false);
+      ui2.selectedDocId = docId;
+      switchMainView2("editor");
+      if (isMobileWorkspace()) setMobileView("editor");
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_DOC_LIST);
+      eventBus2.emit(EVENTS.RENDER_EDITOR);
+      return docId;
+    }
+    function createDocument2(seed = {}) {
+      switchMainView2("editor");
+      return documentManager2.createDocument(seed);
+    }
+    function duplicateCurrentDocument() {
+      return documentManager2.duplicateCurrentDocument();
+    }
+    function duplicateDocument(docId) {
+      return documentManager2.duplicateDocument(docId);
+    }
+    function moveDocument(sourceId, targetId, placement) {
+      return documentManager2.moveDocument(sourceId, targetId, placement);
+    }
+    function moveDocumentToTop(docId) {
+      return documentManager2.moveDocumentToTop(docId);
+    }
+    function moveDocumentToBottom(docId) {
+      return documentManager2.moveDocumentToBottom(docId);
+    }
+    function deleteDocument(docId) {
+      ui2.selectedDocId = docId;
+      return documentManager2.deleteCurrentDocument();
+    }
+    function deleteCurrentDocument() {
+      return documentManager2.deleteCurrentDocument();
+    }
+    function restoreDocument(docId) {
+      return documentManager2.restoreDocument(docId);
+    }
+    function restoreAllTrashDocuments2() {
+      return documentManager2.restoreAllDocumentsFromTrash();
+    }
+    function permanentlyDeleteDocument(docId) {
+      return documentManager2.permanentlyDeleteDocument(docId);
+    }
+    function clearTrashDocuments2() {
+      return documentManager2.clearTrashDocuments();
+    }
+    async function importDocuments(event) {
+      const files = Array.from(event?.target?.files || []);
+      await importDocumentFiles2(files);
+      if (event?.target) event.target.value = "";
+    }
+    async function importDocumentFiles2(files) {
+      return documentManager2.importDocumentFiles(files);
+    }
+    async function exportCurrentDocument() {
+      try {
+        return await documentManager2.exportCurrentDocument();
+      } catch (error) {
+        toast2(`\u5BFC\u51FA Word \u6587\u6863\u5931\u8D25\uFF1A${error.message || "\u8BF7\u7A0D\u540E\u91CD\u8BD5"}`, "error");
+        return null;
+      }
+    }
+    function exportWorkspaceBackup() {
+      return documentManager2.exportWorkspaceBackup();
+    }
+    return {
+      bindEvents: bindEvents2,
+      selectDocument,
+      createDocument: createDocument2,
+      duplicateCurrentDocument,
+      duplicateDocument,
+      moveDocument,
+      moveDocumentToTop,
+      moveDocumentToBottom,
+      deleteDocument,
+      deleteCurrentDocument,
+      restoreDocument,
+      restoreAllTrashDocuments: restoreAllTrashDocuments2,
+      permanentlyDeleteDocument,
+      clearTrashDocuments: clearTrashDocuments2,
+      importDocuments,
+      importDocumentFiles: importDocumentFiles2,
+      exportCurrentDocument,
+      exportWorkspaceBackup
     };
   }
 
@@ -36300,35 +36422,6 @@ ${mention} ` : `${mention} `;
     deleteStyle,
     getFocusableElements
   });
-  var documentRenderer = createDocumentRenderer({
-    state,
-    ui,
-    els,
-    getType,
-    getCurrentDoc,
-    getDocumentLocation,
-    onSelectDocument: (docId) => {
-      saveEditor(false);
-      ui.selectedDocId = docId;
-      switchMainView("editor");
-      if (layoutController.isMobileWorkspace()) layoutController.setMobileView("editor");
-      persist();
-      eventBus.emit(EVENTS.RENDER_DOC_LIST);
-      eventBus.emit(EVENTS.RENDER_EDITOR);
-    },
-    onCopyDocument: duplicateDocument,
-    onMoveDocument: moveDocument,
-    onMoveDocumentToTop: moveDocumentToTop,
-    onMoveDocumentToBottom: moveDocumentToBottom,
-    onDeleteDocument: (docId) => {
-      ui.selectedDocId = docId;
-      deleteCurrentDocument();
-    },
-    onRestoreDocument: restoreDocument,
-    onRestoreAllTrash: restoreAllTrashDocuments,
-    onPermanentlyDeleteDocument: permanentlyDeleteDocument,
-    onClearTrash: clearTrashDocuments
-  });
   var documentEditor = createDocumentEditor({
     state,
     ui,
@@ -36368,6 +36461,38 @@ ${mention} ` : `${mention} `;
     restoreAllTrashDocuments,
     clearTrashDocuments,
     getFocusableElements
+  });
+  var documentPanelController = createDocumentPanelController({
+    ui,
+    els,
+    documentManager,
+    trashController,
+    setupFileDrop,
+    saveEditor,
+    persist,
+    eventBus,
+    switchMainView,
+    isMobileWorkspace: () => layoutController.isMobileWorkspace(),
+    setMobileView: (view) => layoutController.setMobileView(view),
+    toast
+  });
+  var documentRenderer = createDocumentRenderer({
+    state,
+    ui,
+    els,
+    getType,
+    getCurrentDoc,
+    getDocumentLocation,
+    onSelectDocument: documentPanelController.selectDocument,
+    onCopyDocument: documentPanelController.duplicateDocument,
+    onMoveDocument: documentPanelController.moveDocument,
+    onMoveDocumentToTop: documentPanelController.moveDocumentToTop,
+    onMoveDocumentToBottom: documentPanelController.moveDocumentToBottom,
+    onDeleteDocument: documentPanelController.deleteDocument,
+    onRestoreDocument: documentPanelController.restoreDocument,
+    onRestoreAllTrash: documentPanelController.restoreAllTrashDocuments,
+    onPermanentlyDeleteDocument: documentPanelController.permanentlyDeleteDocument,
+    onClearTrash: documentPanelController.clearTrashDocuments
   });
   var generationController = createGenerationController({
     els,
@@ -36811,13 +36936,7 @@ ${mention} ` : `${mention} `;
     });
   }
   function bindEvents() {
-    els.newDocBtn.addEventListener("click", createDocument);
-    els.importInput.addEventListener("change", importDocuments);
-    setupFileDrop(els.docDropZone, importDocumentFiles);
-    setupFileDrop(els.docList, importDocumentFiles);
-    els.exportDocBtn.addEventListener("click", exportCurrentDocument);
-    els.backupBtn.addEventListener("click", exportWorkspaceBackup);
-    trashController.bindEvents();
+    documentPanelController.bindEvents();
     els.apiTopBtn.addEventListener("click", () => {
       switchMainView("editor");
       switchTab("api");
@@ -38028,35 +38147,13 @@ ${mention} ` : `${mention} `;
     skillRenderer.renderStyleList();
   }
   function createDocument(seed = {}) {
-    switchMainView("editor");
-    return documentManager.createDocument(seed);
-  }
-  function duplicateDocument(docId) {
-    return documentManager.duplicateDocument(docId);
-  }
-  function moveDocument(sourceId, targetId, placement) {
-    return documentManager.moveDocument(sourceId, targetId, placement);
-  }
-  function moveDocumentToTop(docId) {
-    return documentManager.moveDocumentToTop(docId);
-  }
-  function moveDocumentToBottom(docId) {
-    return documentManager.moveDocumentToBottom(docId);
-  }
-  function deleteCurrentDocument() {
-    return documentManager.deleteCurrentDocument();
-  }
-  function restoreDocument(docId) {
-    return documentManager.restoreDocument(docId);
+    return documentPanelController.createDocument(seed);
   }
   function restoreAllTrashDocuments() {
-    return documentManager.restoreAllDocumentsFromTrash();
-  }
-  function permanentlyDeleteDocument(docId) {
-    return documentManager.permanentlyDeleteDocument(docId);
+    return documentPanelController.restoreAllTrashDocuments();
   }
   function clearTrashDocuments() {
-    return documentManager.clearTrashDocuments();
+    return documentPanelController.clearTrashDocuments();
   }
   function queueEditorSave() {
     documentEditor.queueEditorSave();
@@ -38314,24 +38411,8 @@ ${mention} ` : `${mention} `;
     saveEditor(true);
     toast(`\u5DF2\u66FF\u6362 ${count} \u5904`);
   }
-  async function importDocuments(event) {
-    const files = Array.from(event.target.files || []);
-    await importDocumentFiles(files);
-    event.target.value = "";
-  }
   async function importDocumentFiles(files) {
-    return documentManager.importDocumentFiles(files);
-  }
-  async function exportCurrentDocument() {
-    try {
-      return await documentManager.exportCurrentDocument();
-    } catch (error) {
-      toast(`\u5BFC\u51FA Word \u6587\u6863\u5931\u8D25\uFF1A${error.message || "\u8BF7\u7A0D\u540E\u91CD\u8BD5"}`, "error");
-      return null;
-    }
-  }
-  function exportWorkspaceBackup() {
-    return documentManager.exportWorkspaceBackup();
+    return documentPanelController.importDocumentFiles(files);
   }
   function openSkillBuilderModal(skillId = null) {
     return skillBuilderModalController.open(skillId);

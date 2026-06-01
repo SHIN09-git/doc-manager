@@ -27,6 +27,7 @@ import {
 import { getFeatureByAction, getFeatureGroups } from "./src/modules/product/featureCatalog.js";
 import { createDocumentEditor } from "./src/modules/documents/documentEditor.js";
 import { createDocumentManager } from "./src/modules/documents/documentManager.js";
+import { createDocumentPanelController } from "./src/modules/documents/documentPanelController.js";
 import { createDocumentRenderer } from "./src/modules/documents/documentRenderer.js";
 import { createTrashController } from "./src/modules/documents/trashController.js";
 import { createEditorContextMenuController } from "./src/modules/editor/editorContextMenuController.js";
@@ -233,35 +234,6 @@ const skillBuilderModalController = createSkillBuilderModalController({
   deleteStyle,
   getFocusableElements,
 });
-const documentRenderer = createDocumentRenderer({
-  state,
-  ui,
-  els,
-  getType,
-  getCurrentDoc,
-  getDocumentLocation,
-  onSelectDocument: (docId) => {
-    saveEditor(false);
-    ui.selectedDocId = docId;
-    switchMainView("editor");
-    if (layoutController.isMobileWorkspace()) layoutController.setMobileView("editor");
-    persist();
-    eventBus.emit(EVENTS.RENDER_DOC_LIST);
-    eventBus.emit(EVENTS.RENDER_EDITOR);
-  },
-  onCopyDocument: duplicateDocument,
-  onMoveDocument: moveDocument,
-  onMoveDocumentToTop: moveDocumentToTop,
-  onMoveDocumentToBottom: moveDocumentToBottom,
-  onDeleteDocument: (docId) => {
-    ui.selectedDocId = docId;
-    deleteCurrentDocument();
-  },
-  onRestoreDocument: restoreDocument,
-  onRestoreAllTrash: restoreAllTrashDocuments,
-  onPermanentlyDeleteDocument: permanentlyDeleteDocument,
-  onClearTrash: clearTrashDocuments,
-});
 const documentEditor = createDocumentEditor({
   state,
   ui,
@@ -301,6 +273,38 @@ const trashController = createTrashController({
   restoreAllTrashDocuments,
   clearTrashDocuments,
   getFocusableElements,
+});
+const documentPanelController = createDocumentPanelController({
+  ui,
+  els,
+  documentManager,
+  trashController,
+  setupFileDrop,
+  saveEditor,
+  persist,
+  eventBus,
+  switchMainView,
+  isMobileWorkspace: () => layoutController.isMobileWorkspace(),
+  setMobileView: (view) => layoutController.setMobileView(view),
+  toast,
+});
+const documentRenderer = createDocumentRenderer({
+  state,
+  ui,
+  els,
+  getType,
+  getCurrentDoc,
+  getDocumentLocation,
+  onSelectDocument: documentPanelController.selectDocument,
+  onCopyDocument: documentPanelController.duplicateDocument,
+  onMoveDocument: documentPanelController.moveDocument,
+  onMoveDocumentToTop: documentPanelController.moveDocumentToTop,
+  onMoveDocumentToBottom: documentPanelController.moveDocumentToBottom,
+  onDeleteDocument: documentPanelController.deleteDocument,
+  onRestoreDocument: documentPanelController.restoreDocument,
+  onRestoreAllTrash: documentPanelController.restoreAllTrashDocuments,
+  onPermanentlyDeleteDocument: documentPanelController.permanentlyDeleteDocument,
+  onClearTrash: documentPanelController.clearTrashDocuments,
 });
 const generationController = createGenerationController({
   els,
@@ -770,13 +774,7 @@ function migrateLegacyBranding() {
 }
 
 function bindEvents() {
-  els.newDocBtn.addEventListener("click", createDocument);
-  els.importInput.addEventListener("change", importDocuments);
-  setupFileDrop(els.docDropZone, importDocumentFiles);
-  setupFileDrop(els.docList, importDocumentFiles);
-  els.exportDocBtn.addEventListener("click", exportCurrentDocument);
-  els.backupBtn.addEventListener("click", exportWorkspaceBackup);
-  trashController.bindEvents();
+  documentPanelController.bindEvents();
   els.apiTopBtn.addEventListener("click", () => {
     switchMainView("editor");
     switchTab("api");
@@ -2110,48 +2108,47 @@ function renderStyleList() {
 }
 
 function createDocument(seed = {}) {
-  switchMainView("editor");
-  return documentManager.createDocument(seed);
+  return documentPanelController.createDocument(seed);
 }
 
 function duplicateCurrentDocument() {
-  return documentManager.duplicateCurrentDocument();
+  return documentPanelController.duplicateCurrentDocument();
 }
 
 function duplicateDocument(docId) {
-  return documentManager.duplicateDocument(docId);
+  return documentPanelController.duplicateDocument(docId);
 }
 
 function moveDocument(sourceId, targetId, placement) {
-  return documentManager.moveDocument(sourceId, targetId, placement);
+  return documentPanelController.moveDocument(sourceId, targetId, placement);
 }
 
 function moveDocumentToTop(docId) {
-  return documentManager.moveDocumentToTop(docId);
+  return documentPanelController.moveDocumentToTop(docId);
 }
 
 function moveDocumentToBottom(docId) {
-  return documentManager.moveDocumentToBottom(docId);
+  return documentPanelController.moveDocumentToBottom(docId);
 }
 
 function deleteCurrentDocument() {
-  return documentManager.deleteCurrentDocument();
+  return documentPanelController.deleteCurrentDocument();
 }
 
 function restoreDocument(docId) {
-  return documentManager.restoreDocument(docId);
+  return documentPanelController.restoreDocument(docId);
 }
 
 function restoreAllTrashDocuments() {
-  return documentManager.restoreAllDocumentsFromTrash();
+  return documentPanelController.restoreAllTrashDocuments();
 }
 
 function permanentlyDeleteDocument(docId) {
-  return documentManager.permanentlyDeleteDocument(docId);
+  return documentPanelController.permanentlyDeleteDocument(docId);
 }
 
 function clearTrashDocuments() {
-  return documentManager.clearTrashDocuments();
+  return documentPanelController.clearTrashDocuments();
 }
 
 function queueEditorSave() {
@@ -2443,26 +2440,19 @@ function replaceAll() {
 }
 
 async function importDocuments(event) {
-  const files = Array.from(event.target.files || []);
-  await importDocumentFiles(files);
-  event.target.value = "";
+  return documentPanelController.importDocuments(event);
 }
 
 async function importDocumentFiles(files) {
-  return documentManager.importDocumentFiles(files);
+  return documentPanelController.importDocumentFiles(files);
 }
 
 async function exportCurrentDocument() {
-  try {
-    return await documentManager.exportCurrentDocument();
-  } catch (error) {
-    toast(`导出 Word 文档失败：${error.message || "请稍后重试"}`, "error");
-    return null;
-  }
+  return documentPanelController.exportCurrentDocument();
 }
 
 function exportWorkspaceBackup() {
-  return documentManager.exportWorkspaceBackup();
+  return documentPanelController.exportWorkspaceBackup();
 }
 
 function openSkillBuilderModal(skillId = null) {

@@ -4,6 +4,8 @@
 
 - [x] 从 `app.js` 拆出 `skillWorkbenchController`，集中管理执笔人卡片调用、复制、启停、测试入口、说明.md 编辑保存、构建进度状态和卡片级导出/删除/取消。
 - [x] 新增执笔人工作台控制器单元测试，覆盖构建状态回写、@调用插入、复制、说明.md 保存、测试/导出/删除/取消等卡片动作。
+- [x] 从 `app.js` 拆出 `documentPanelController`，集中管理文档侧栏新建、导入、拖拽、导出、备份、选择、复制、排序、删除和垃圾箱入口。
+- [x] 新增文档侧栏控制器单元测试，覆盖顶部按钮绑定、拖拽导入绑定、文档选择、卡片动作、导入重置和导出错误提示。
 
 ## 2026-05-31 全量审阅发现问题修复记录
 
@@ -329,7 +331,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：124 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：129 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
 
 ## 已完成
 
@@ -399,7 +401,7 @@
 
 - [x] 拆出 `skillWorkbenchController`
 - [x] 拆出 `skillBuilderModalController`
-- [ ] 拆出 `documentPanelController`
+- [x] 拆出 `documentPanelController`
 - [x] 拆出 `apiSettingsController`
 - [x] 拆出 `editorContextMenuController`
 
