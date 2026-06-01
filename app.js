@@ -51,6 +51,7 @@ import { createApiSettingsController } from "./src/modules/settings/apiSettingsC
 import { createSkillBuilder } from "./src/modules/skills/skillBuilder.js";
 import { createSkillBuilderModalController } from "./src/modules/skills/skillBuilderModalController.js";
 import { createSkillManager } from "./src/modules/skills/skillManager.js";
+import { createSkillMentionController } from "./src/modules/skills/skillMentionController.js";
 import { createSkillRenderer } from "./src/modules/skills/skillRenderer.js";
 import { createSkillWorkbenchController } from "./src/modules/skills/skillWorkbenchController.js";
 import { createProgressController } from "./src/ui/components/progress.js";
@@ -415,6 +416,15 @@ const editorContextMenuController = createEditorContextMenuController({
   recordEditorUndoPoint,
   saveEditor,
   getSelectionOrLine,
+});
+const skillMentionController = createSkillMentionController({
+  state,
+  ui,
+  els,
+  isSkillEnabled,
+  escapeHtml,
+  recordEditorUndoPoint,
+  saveEditor,
 });
 const findReplaceController = createFindReplaceController({
   els,
@@ -882,30 +892,16 @@ function bindEvents() {
   editorContextMenuController.bindEvents();
   document.addEventListener("click", (event) => {
     if (!event.target.closest("#editorMenu")) editorContextMenuController.hide();
-    if (!event.target.closest("#skillMentionPanel") && !event.target.matches("#generatePrompt, #contentEditor")) {
-      hideSkillMentionPanel();
-    }
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       editorContextMenuController.hide({ restoreFocus: true });
-      hideSkillMentionPanel();
+      skillMentionController.hide();
       if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
       layoutController.closeResponsiveInspector();
     }
   });
-  els.generatePrompt.addEventListener("input", () => showSkillMentionsFor(els.generatePrompt));
-  els.generatePrompt.addEventListener("keyup", () => showSkillMentionsFor(els.generatePrompt));
-  els.generatePrompt.addEventListener("click", () => showSkillMentionsFor(els.generatePrompt));
-  els.contentEditor.addEventListener("input", () => showSkillMentionsFor(els.contentEditor));
-  els.contentEditor.addEventListener("keyup", () => showSkillMentionsFor(els.contentEditor));
-  els.contentEditor.addEventListener("click", () => showSkillMentionsFor(els.contentEditor));
-  els.skillMentionPanel.addEventListener("mousedown", (event) => {
-    const button = event.target.closest("[data-insert-skill]");
-    if (!button) return;
-    event.preventDefault();
-    insertSkillMention(button.dataset.insertSkill);
-  });
+  skillMentionController.bindEvents();
 
   generationController.bindEvents();
   setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
@@ -1319,82 +1315,6 @@ function appendDocumentToGeneratePrompt(docId) {
   els.generatePrompt.focus();
   els.generatePrompt.dispatchEvent(new Event("input", { bubbles: true }));
   toast(`已把“${doc.title || "未命名文档"}”加入生成提示词`);
-}
-
-function showSkillMentionsFor(textarea) {
-  const mention = getCurrentMention(textarea);
-  if (!mention) {
-    hideSkillMentionPanel();
-    return;
-  }
-  const query = mention.query.toLowerCase();
-  const matches = state.styles
-    .filter(isSkillEnabled)
-    .filter((skill) => {
-      const haystack = `${skill.handle} ${skill.name} ${skill.category} ${skill.description || ""}`.toLowerCase();
-      return !query || haystack.includes(query);
-    })
-    .slice(0, 8);
-  if (matches.length === 0) {
-    hideSkillMentionPanel();
-    return;
-  }
-  ui.mentionTarget = textarea;
-  ui.mentionRange = mention;
-  els.skillMentionPanel.innerHTML = matches
-    .map(
-      (skill) => `<button type="button" data-insert-skill="${skill.id}">
-        <span class="mention-name">@${escapeHtml(skill.handle)}</span>
-        <span>${escapeHtml(skill.name)}</span>
-        <small>${escapeHtml(skill.description || skill.category || "自定义执笔人")}</small>
-      </button>`,
-    )
-    .join("");
-  positionMentionPanel(textarea);
-  els.skillMentionPanel.hidden = false;
-}
-
-function getCurrentMention(textarea) {
-  const cursor = textarea.selectionStart || 0;
-  const before = textarea.value.slice(0, cursor);
-  const match = before.match(/(?:^|[\s，。；：、(（])@([\u4e00-\u9fa5A-Za-z0-9_-]{0,30})$/);
-  if (!match) return null;
-  return {
-    start: cursor - match[1].length - 1,
-    end: cursor,
-    query: match[1],
-  };
-}
-
-function positionMentionPanel(textarea) {
-  const rect = textarea.getBoundingClientRect();
-  els.skillMentionPanel.style.left = `${Math.max(12, rect.left + 8)}px`;
-  els.skillMentionPanel.style.top = `${Math.min(window.innerHeight - 250, rect.top + 44)}px`;
-}
-
-function hideSkillMentionPanel() {
-  els.skillMentionPanel.hidden = true;
-  ui.mentionTarget = null;
-  ui.mentionRange = null;
-}
-
-function insertSkillMention(skillId) {
-  const skill = state.styles.find((item) => item.id === skillId);
-  if (!skill || !ui.mentionTarget || !ui.mentionRange) return;
-  const textarea = ui.mentionTarget;
-  const mentionText = `@${skill.handle} `;
-  if (textarea === els.contentEditor) {
-    recordEditorUndoPoint();
-  }
-  textarea.value =
-    textarea.value.slice(0, ui.mentionRange.start) + mentionText + textarea.value.slice(ui.mentionRange.end);
-  textarea.focus();
-  const cursor = ui.mentionRange.start + mentionText.length;
-  textarea.setSelectionRange(cursor, cursor);
-  if (textarea === els.contentEditor) {
-    saveEditor(false);
-  }
-  hideSkillMentionPanel();
 }
 
 async function importDocuments(event) {

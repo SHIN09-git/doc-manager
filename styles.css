@@ -2289,7 +2289,8 @@ body.modal-open {
   background: transparent;
 }
 
-.mention-panel button:hover {
+.mention-panel button:hover,
+.mention-panel button.is-active {
   border-color: var(--line);
   background: var(--accent-soft);
 }

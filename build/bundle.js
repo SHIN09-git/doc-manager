@@ -36570,6 +36570,211 @@ ${JSON.stringify(payload, null, 2)}`
     );
   }
 
+  // src/modules/skills/skillMentionController.js
+  function createSkillMentionController(deps = {}) {
+    const {
+      state: state2 = { styles: [] },
+      ui: ui2 = {},
+      els: els2 = {},
+      isSkillEnabled: isSkillEnabled2 = () => true,
+      escapeHtml: escapeHtml3 = defaultEscapeHtml,
+      recordEditorUndoPoint: recordEditorUndoPoint2 = () => {
+      },
+      saveEditor: saveEditor2 = () => {
+      },
+      documentRef = () => globalThis.document,
+      windowRef = () => globalThis.window
+    } = deps;
+    function bindEvents2() {
+      [els2.generatePrompt, els2.contentEditor].filter(Boolean).forEach((textarea) => {
+        textarea.addEventListener("input", () => showFor(textarea));
+        textarea.addEventListener("keyup", (event) => {
+          if (isNavigationKey(event.key)) return;
+          showFor(textarea);
+        });
+        textarea.addEventListener("click", () => showFor(textarea));
+        textarea.addEventListener("keydown", (event) => handleTargetKeydown(event, textarea));
+      });
+      els2.skillMentionPanel?.addEventListener("mousedown", handlePanelMouseDown);
+      documentRef()?.addEventListener?.("click", handleDocumentClick);
+      preparePanel();
+    }
+    function preparePanel() {
+      if (!els2.skillMentionPanel) return;
+      els2.skillMentionPanel.setAttribute?.("role", "listbox");
+      els2.skillMentionPanel.setAttribute?.("aria-label", "\u53EF\u8C03\u7528\u7684\u6267\u7B14\u4EBA");
+    }
+    function showFor(textarea) {
+      if (!textarea || !els2.skillMentionPanel) return [];
+      const mention = getCurrentMention(textarea);
+      if (!mention) {
+        hide();
+        return [];
+      }
+      const query = mention.query.toLowerCase();
+      const matches = getMatches(query);
+      if (matches.length === 0) {
+        hide();
+        return [];
+      }
+      ui2.mentionTarget = textarea;
+      ui2.mentionRange = mention;
+      ui2.mentionActiveIndex = 0;
+      renderMatches(matches);
+      positionPanel(textarea);
+      els2.skillMentionPanel.hidden = false;
+      updateActiveOption();
+      return matches;
+    }
+    function getMatches(query = "") {
+      return (state2.styles || []).filter(isSkillEnabled2).filter((skill) => {
+        const haystack = `${skill.handle || ""} ${skill.name || ""} ${skill.category || ""} ${skill.description || ""}`.toLowerCase();
+        return !query || haystack.includes(query);
+      }).slice(0, 8);
+    }
+    function renderMatches(matches) {
+      els2.skillMentionPanel.innerHTML = matches.map((skill, index) => {
+        const optionId = `skill-mention-option-${escapeAttribute(skill.id || index)}`;
+        return `<button type="button" id="${optionId}" role="option" aria-selected="false" data-insert-skill="${escapeAttribute(skill.id)}">
+          <span class="mention-name">@${escapeHtml3(skill.handle || skill.name || "")}</span>
+          <span>${escapeHtml3(skill.name || skill.handle || "\u672A\u547D\u540D\u6267\u7B14\u4EBA")}</span>
+          <small>${escapeHtml3(skill.description || skill.category || "\u81EA\u5B9A\u4E49\u6267\u7B14\u4EBA")}</small>
+        </button>`;
+      }).join("");
+    }
+    function getCurrentMention(textarea) {
+      const cursor = textarea.selectionStart || 0;
+      const before2 = String(textarea.value || "").slice(0, cursor);
+      const match = before2.match(/(?:^|[\s,.;:?!()[\]{}"'，。；：？！【】（）])@([\u4e00-\u9fa5A-Za-z0-9_-]{0,30})$/);
+      if (!match) return null;
+      return {
+        start: cursor - match[1].length - 1,
+        end: cursor,
+        query: match[1]
+      };
+    }
+    function positionPanel(textarea) {
+      if (!els2.skillMentionPanel) return;
+      const rect = textarea.getBoundingClientRect?.() || { left: 12, top: 12 };
+      const win = windowRef() || {};
+      els2.skillMentionPanel.style.left = `${Math.max(12, rect.left + 8)}px`;
+      els2.skillMentionPanel.style.top = `${Math.min((win.innerHeight || 720) - 250, rect.top + 44)}px`;
+    }
+    function hide() {
+      if (els2.skillMentionPanel) {
+        els2.skillMentionPanel.hidden = true;
+        els2.skillMentionPanel.removeAttribute?.("aria-activedescendant");
+      }
+      ui2.mentionTarget = null;
+      ui2.mentionRange = null;
+      ui2.mentionActiveIndex = -1;
+    }
+    function handleDocumentClick(event) {
+      const target = event.target;
+      if (matchesTarget(target, "#skillMentionPanel") || matchesTarget(target, "#generatePrompt, #contentEditor")) return;
+      if (closestTarget(target, "#skillMentionPanel")) return;
+      hide();
+    }
+    function handlePanelMouseDown(event) {
+      const button = closestTarget(event.target, "[data-insert-skill]");
+      if (!button) return;
+      event.preventDefault();
+      insert(button.dataset.insertSkill);
+    }
+    function handleTargetKeydown(event, textarea) {
+      if (textarea !== ui2.mentionTarget || els2.skillMentionPanel?.hidden) return;
+      const items = getOptionItems();
+      if (items.length === 0) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        hide();
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const delta = event.key === "ArrowDown" ? 1 : -1;
+        ui2.mentionActiveIndex = (getActiveIndex(items.length) + delta + items.length) % items.length;
+        updateActiveOption();
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const selected = items[getActiveIndex(items.length)];
+        insert(selected?.dataset?.insertSkill);
+      }
+    }
+    function insert(skillId) {
+      const skill = (state2.styles || []).find((item) => item.id === skillId);
+      if (!skill || !isSkillEnabled2(skill) || !ui2.mentionTarget || !ui2.mentionRange) return false;
+      const textarea = ui2.mentionTarget;
+      const mentionText = `@${skill.handle || skill.name} `;
+      if (textarea === els2.contentEditor) {
+        recordEditorUndoPoint2();
+      }
+      textarea.value = textarea.value.slice(0, ui2.mentionRange.start) + mentionText + textarea.value.slice(ui2.mentionRange.end);
+      textarea.focus?.();
+      const cursor = ui2.mentionRange.start + mentionText.length;
+      textarea.setSelectionRange?.(cursor, cursor);
+      if (textarea === els2.contentEditor) {
+        saveEditor2(false);
+      }
+      hide();
+      return true;
+    }
+    function updateActiveOption() {
+      const items = getOptionItems();
+      const activeIndex = getActiveIndex(items.length);
+      items.forEach((item, index) => {
+        const active = index === activeIndex;
+        item.classList?.toggle?.("is-active", active);
+        item.setAttribute?.("aria-selected", String(active));
+        if (active && item.id) {
+          els2.skillMentionPanel?.setAttribute?.("aria-activedescendant", item.id);
+          item.scrollIntoView?.({ block: "nearest" });
+        }
+      });
+    }
+    function getActiveIndex(length) {
+      if (length <= 0) return -1;
+      const index = Number.isInteger(ui2.mentionActiveIndex) ? ui2.mentionActiveIndex : 0;
+      return Math.min(Math.max(index, 0), length - 1);
+    }
+    function getOptionItems() {
+      return Array.from(els2.skillMentionPanel?.querySelectorAll?.("[data-insert-skill]") || []);
+    }
+    return {
+      bindEvents: bindEvents2,
+      showFor,
+      hide,
+      insert,
+      getCurrentMention,
+      handleDocumentClick,
+      handlePanelMouseDown,
+      handleTargetKeydown
+    };
+  }
+  function isNavigationKey(key) {
+    return key === "ArrowDown" || key === "ArrowUp" || key === "Enter" || key === "Escape";
+  }
+  function closestTarget(target, selector) {
+    return target?.closest?.(selector) || null;
+  }
+  function matchesTarget(target, selector) {
+    return Boolean(target?.matches?.(selector));
+  }
+  function escapeAttribute(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[char]);
+  }
+  function defaultEscapeHtml(value) {
+    return escapeAttribute(value);
+  }
+
   // src/modules/skills/skillVersionDiff.js
   function buildSkillVersionDiff(current = {}, previous = null) {
     const currentSnapshot = createVersionSnapshot(current);
@@ -38233,6 +38438,15 @@ ${mention} ` : `${mention} `;
     saveEditor,
     getSelectionOrLine
   });
+  var skillMentionController = createSkillMentionController({
+    state,
+    ui,
+    els,
+    isSkillEnabled,
+    escapeHtml,
+    recordEditorUndoPoint,
+    saveEditor
+  });
   var findReplaceController = createFindReplaceController({
     els,
     toast,
@@ -38673,30 +38887,16 @@ ${mention} ` : `${mention} `;
     editorContextMenuController.bindEvents();
     document.addEventListener("click", (event) => {
       if (!event.target.closest("#editorMenu")) editorContextMenuController.hide();
-      if (!event.target.closest("#skillMentionPanel") && !event.target.matches("#generatePrompt, #contentEditor")) {
-        hideSkillMentionPanel();
-      }
     });
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         editorContextMenuController.hide({ restoreFocus: true });
-        hideSkillMentionPanel();
+        skillMentionController.hide();
         if (els.skillBuilderModal && !els.skillBuilderModal.hidden) closeSkillBuilderModal();
         layoutController.closeResponsiveInspector();
       }
     });
-    els.generatePrompt.addEventListener("input", () => showSkillMentionsFor(els.generatePrompt));
-    els.generatePrompt.addEventListener("keyup", () => showSkillMentionsFor(els.generatePrompt));
-    els.generatePrompt.addEventListener("click", () => showSkillMentionsFor(els.generatePrompt));
-    els.contentEditor.addEventListener("input", () => showSkillMentionsFor(els.contentEditor));
-    els.contentEditor.addEventListener("keyup", () => showSkillMentionsFor(els.contentEditor));
-    els.contentEditor.addEventListener("click", () => showSkillMentionsFor(els.contentEditor));
-    els.skillMentionPanel.addEventListener("mousedown", (event) => {
-      const button = event.target.closest("[data-insert-skill]");
-      if (!button) return;
-      event.preventDefault();
-      insertSkillMention(button.dataset.insertSkill);
-    });
+    skillMentionController.bindEvents();
     generationController.bindEvents();
     setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
     setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
@@ -39011,71 +39211,6 @@ ${mention} ` : `${mention} `;
     els.generatePrompt.focus();
     els.generatePrompt.dispatchEvent(new Event("input", { bubbles: true }));
     toast(`\u5DF2\u628A\u201C${doc.title || "\u672A\u547D\u540D\u6587\u6863"}\u201D\u52A0\u5165\u751F\u6210\u63D0\u793A\u8BCD`);
-  }
-  function showSkillMentionsFor(textarea) {
-    const mention = getCurrentMention(textarea);
-    if (!mention) {
-      hideSkillMentionPanel();
-      return;
-    }
-    const query = mention.query.toLowerCase();
-    const matches = state.styles.filter(isSkillEnabled).filter((skill) => {
-      const haystack = `${skill.handle} ${skill.name} ${skill.category} ${skill.description || ""}`.toLowerCase();
-      return !query || haystack.includes(query);
-    }).slice(0, 8);
-    if (matches.length === 0) {
-      hideSkillMentionPanel();
-      return;
-    }
-    ui.mentionTarget = textarea;
-    ui.mentionRange = mention;
-    els.skillMentionPanel.innerHTML = matches.map(
-      (skill) => `<button type="button" data-insert-skill="${skill.id}">
-        <span class="mention-name">@${escapeHtml(skill.handle)}</span>
-        <span>${escapeHtml(skill.name)}</span>
-        <small>${escapeHtml(skill.description || skill.category || "\u81EA\u5B9A\u4E49\u6267\u7B14\u4EBA")}</small>
-      </button>`
-    ).join("");
-    positionMentionPanel(textarea);
-    els.skillMentionPanel.hidden = false;
-  }
-  function getCurrentMention(textarea) {
-    const cursor = textarea.selectionStart || 0;
-    const before2 = textarea.value.slice(0, cursor);
-    const match = before2.match(/(?:^|[\s，。；：、(（])@([\u4e00-\u9fa5A-Za-z0-9_-]{0,30})$/);
-    if (!match) return null;
-    return {
-      start: cursor - match[1].length - 1,
-      end: cursor,
-      query: match[1]
-    };
-  }
-  function positionMentionPanel(textarea) {
-    const rect = textarea.getBoundingClientRect();
-    els.skillMentionPanel.style.left = `${Math.max(12, rect.left + 8)}px`;
-    els.skillMentionPanel.style.top = `${Math.min(window.innerHeight - 250, rect.top + 44)}px`;
-  }
-  function hideSkillMentionPanel() {
-    els.skillMentionPanel.hidden = true;
-    ui.mentionTarget = null;
-    ui.mentionRange = null;
-  }
-  function insertSkillMention(skillId) {
-    const skill = state.styles.find((item) => item.id === skillId);
-    if (!skill || !ui.mentionTarget || !ui.mentionRange) return;
-    const textarea = ui.mentionTarget;
-    const mentionText = `@${skill.handle} `;
-    if (textarea === els.contentEditor) {
-      recordEditorUndoPoint();
-    }
-    textarea.value = textarea.value.slice(0, ui.mentionRange.start) + mentionText + textarea.value.slice(ui.mentionRange.end);
-    textarea.focus();
-    const cursor = ui.mentionRange.start + mentionText.length;
-    textarea.setSelectionRange(cursor, cursor);
-    if (textarea === els.contentEditor) {
-      saveEditor(false);
-    }
-    hideSkillMentionPanel();
   }
   async function importDocumentFiles(files) {
     return documentPanelController.importDocumentFiles(files);
