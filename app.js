@@ -51,6 +51,7 @@ import { createSkillBuilder } from "./src/modules/skills/skillBuilder.js";
 import { createSkillBuilderModalController } from "./src/modules/skills/skillBuilderModalController.js";
 import { createSkillManager } from "./src/modules/skills/skillManager.js";
 import { createSkillMentionController } from "./src/modules/skills/skillMentionController.js";
+import { createSkillPackageController } from "./src/modules/skills/skillPackageController.js";
 import { createSkillRenderer } from "./src/modules/skills/skillRenderer.js";
 import { createSkillWorkbenchController } from "./src/modules/skills/skillWorkbenchController.js";
 import { createProgressController } from "./src/ui/components/progress.js";
@@ -71,7 +72,7 @@ import { buildUnsupportedFileMessage, canImportFile, readImportFileText } from "
 import { isFileDragData } from "./src/utils/dragDrop.js";
 import { getDropImportTarget } from "./src/utils/dropRouting.js";
 import { filterImportableFilesBySize } from "./src/utils/importGuards.js";
-import { formatPrivacyRiskSummary, scanPrivacyRisksInObject } from "./src/utils/privacyScan.js";
+import { scanPrivacyRisksInObject } from "./src/utils/privacyScan.js";
 
 const state = {};
 const ui = {
@@ -275,6 +276,19 @@ const skillRenderer = createSkillRenderer({
   onDeleteSkill: deleteSkillById,
   onRetrySkill: (skillId) => openSkillBuilderModal(skillId),
   onCancelSkillBuild: cancelSkillBuild,
+});
+const skillPackageController = createSkillPackageController({
+  ui,
+  els,
+  skillManager,
+  toast,
+  withProgress,
+  switchTab,
+  syncEditingStyleFromInputs,
+  getSelectedSkillCategory,
+  normalizeSkillJsonText,
+  downloadBlob,
+  getDownloadLocation,
 });
 const skillWorkbenchController = createSkillWorkbenchController({
   state,
@@ -776,9 +790,7 @@ function bindEvents() {
   els.skillCategoryFilter.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
   els.skillEnabledOnlyInput.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
   els.skillSearchInput.addEventListener("input", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
-  els.importSkillPackageBtn.addEventListener("click", () => els.importSkillPackageInput.click());
-  els.exportSkillPackageBtn.addEventListener("click", exportSkillPackage);
-  els.importSkillPackageInput.addEventListener("change", importSkillPackages);
+  skillPackageController.bindEvents();
   els.styleSummaryInput.addEventListener("input", () => {
     if (!ui.editingStyle) return;
     ui.editingStyle.summary = els.styleSummaryInput.value;
@@ -795,8 +807,6 @@ function bindEvents() {
   els.skillJsonInput.addEventListener("input", () => {
     ui.editingStyle.skillJson = els.skillJsonInput.value;
   });
-  els.exportSkillMdBtn.addEventListener("click", exportSkillMarkdown);
-  els.exportSkillJsonBtn.addEventListener("click", exportSkillJson);
   els.runSkillTestBtn.addEventListener("click", runSkillGenerationTest);
   els.saveSkillFeedbackBtn.addEventListener("click", saveSkillFeedback);
   els.skillDetailCloseBtn.addEventListener("click", hideSkillDetailMenu);
@@ -895,7 +905,7 @@ async function importFilesFromGlobalDrop(files) {
 }
 
 function isSkillPackageFile(file) {
-  return /\.skill\.json$/i.test(file?.name || "");
+  return skillPackageController.isPackageFile(file);
 }
 
 function hydrateStaticSelects() {
@@ -1266,119 +1276,31 @@ function cancelSkillBuild(skillId) {
 }
 
 function exportSkillMarkdown() {
-  const skill = {
-    ...ui.editingStyle,
-    name: els.styleNameInput.value.trim() || ui.editingStyle.name || "未命名执笔人",
-    handle: normalizeHandle(els.skillHandleInput.value || ui.editingStyle.handle || ui.editingStyle.name),
-    summary: els.styleSummaryInput.value,
-  };
-  const content = skill.summary || `# ${skill.name}\n\n`;
-  const fileName = `${sanitizeFileName(skill.name)}-执笔人说明.md`;
-  downloadBlob(fileName, content, "text/markdown;charset=utf-8");
-  toast(`已导出执笔人说明.md 到：${getDownloadLocation(fileName)}`);
+  return skillPackageController.exportMarkdown();
 }
 
 function exportSkillJson() {
-  const skill = {
-    ...ui.editingStyle,
-    name: els.styleNameInput.value.trim() || ui.editingStyle.name || "未命名执笔人",
-    handle: normalizeHandle(els.skillHandleInput.value || ui.editingStyle.handle || ui.editingStyle.name),
-    category: getSelectedSkillCategory(),
-    description: els.skillDescriptionInput.value.trim() || ui.editingStyle.description || "",
-  };
-  const content = normalizeSkillJsonText(els.skillJsonInput.value, skill);
-  const fileName = `${sanitizeFileName(skill.name)}-执笔人规则.json`;
-  downloadBlob(fileName, content, "application/json;charset=utf-8");
-  toast(`已导出执笔人规则 JSON 到：${getDownloadLocation(fileName)}`);
+  return skillPackageController.exportJson();
 }
 
 function exportSkillPackage() {
-  const skill = syncEditingStyleFromInputs();
-  if (!skill.name.trim()) {
-    toast("请先填写执笔人名称", "warn");
-    return;
-  }
-  const packageData = skillManager.createSkillPackage(skill);
-  const findings = scanPrivacyRisksInObject(packageData.skill || packageData, { path: "执笔人包" });
-  if (!confirmPrivacyRiskNotice("导出的执笔人包可能包含敏感或个案信息。", findings)) {
-    toast("已取消导出执笔人包", "warn");
-    return;
-  }
-  const fileName = `${sanitizeFileName(skill.name)}.skill.json`;
-  downloadBlob(fileName, JSON.stringify(packageData, null, 2), "application/json;charset=utf-8");
-  toast(`已导出执笔人包到：${getDownloadLocation(fileName)}`);
+  return skillPackageController.exportPackage();
 }
 
 async function importSkillPackages(event) {
-  const files = Array.from(event.target.files || []);
-  await importSkillPackageFiles(files);
-  event.target.value = "";
+  return skillPackageController.importPackages(event);
 }
 
 async function importSkillPackageFiles(files) {
-  if (!files || files.length === 0) return;
-  let importedCount = 0;
-  let cancelledCount = 0;
-  const failed = [];
-  await withProgress(`正在导入 ${files.length} 个执笔人包`, async (progress) => {
-    for (const [index, file] of files.entries()) {
-      progress.update(`正在读取 ${file.name}`, Math.round((index / files.length) * 72) + 12);
-      try {
-        const payload = JSON.parse(await file.text());
-        const preview = skillManager.inspectSkillPackageImport(payload);
-        const conflictMode = confirmSkillPackageImport(file.name, preview);
-        if (conflictMode === "cancel") {
-          cancelledCount += 1;
-          continue;
-        }
-        skillManager.importSkillPackage(payload, { draft: preview.draft, conflictMode });
-        importedCount += 1;
-      } catch (error) {
-        failed.push(file.name);
-        console.warn("导入执笔人包失败", file.name, error);
-      }
-    }
-    progress.update("正在刷新执笔人列表", 92);
-  });
-  if (importedCount > 0) {
-    switchTab("style");
-    toast(`已导入 ${importedCount} 个执笔人${failed.length ? `，${failed.length} 个文件格式不正确` : ""}`);
-  } else if (cancelledCount > 0 && failed.length === 0) {
-    toast("已取消导入执笔人包", "warn");
-  } else {
-    toast("未导入执笔人，请检查 .skill.json 文件格式", "warn");
-  }
+  return skillPackageController.importPackageFiles(files);
 }
 
 function confirmSkillPackageImport(fileName, preview) {
-  const header = [
-    `即将导入执笔人包：${fileName}`,
-    "",
-    preview.previewText,
-    "",
-    preview.sensitiveFindings.length
-      ? "检测到疑似敏感字段，请确认来源可信并检查规则内容后再导入。"
-      : "请确认来源可信后再导入。",
-  ].join("\n");
-  if (preview.duplicate) {
-    const choice = window.prompt(`${header}\n\n输入 1 覆盖现有执笔人；输入 2 另存为新执笔人；输入 3 取消导入。`, "2");
-    if (choice === "1") return "replace";
-    if (choice === "2" || choice === "") return "rename";
-    return "cancel";
-  }
-  return window.confirm(`${header}\n\n确认导入？`) ? "rename" : "cancel";
+  return skillPackageController.confirmPackageImport(fileName, preview);
 }
 
 function confirmPrivacyRiskNotice(intro, findings = []) {
-  if (!findings.length) return true;
-  return window.confirm([
-    intro,
-    "",
-    "本地预检发现以下疑似敏感或个案信息：",
-    formatPrivacyRiskSummary(findings),
-    "",
-    "建议先脱敏或移除不应发送/分享的内容。是否继续？",
-  ].join("\n"));
+  return skillPackageController.confirmPrivacyRiskNotice(intro, findings);
 }
 
 async function linkRealFolder() {

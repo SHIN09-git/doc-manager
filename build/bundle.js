@@ -36956,6 +36956,178 @@ ${JSON.stringify(payload, null, 2)}`
     return escapeAttribute(value);
   }
 
+  // src/modules/skills/skillPackageController.js
+  function createSkillPackageController(deps = {}) {
+    const {
+      ui: ui2 = {},
+      els: els2 = {},
+      skillManager: skillManager2,
+      toast: toast2 = () => {
+      },
+      withProgress: withProgress2 = async (_message, task) => task({ update: () => {
+      } }),
+      switchTab: switchTab2 = () => {
+      },
+      syncEditingStyleFromInputs: syncEditingStyleFromInputs2 = () => ui2.editingStyle || {},
+      getSelectedSkillCategory: getSelectedSkillCategory2 = () => ui2.editingStyle?.category || "\u81EA\u5B9A\u4E49",
+      normalizeSkillJsonText: normalizeSkillJsonText2 = (value) => value || "{}",
+      downloadBlob: downloadBlob2 = () => {
+      },
+      getDownloadLocation: getDownloadLocation2 = (fileName) => fileName,
+      windowRef = () => globalThis.window,
+      logger = console
+    } = deps;
+    function bindEvents2() {
+      els2.importSkillPackageBtn?.addEventListener("click", () => els2.importSkillPackageInput?.click?.());
+      els2.exportSkillPackageBtn?.addEventListener("click", exportPackage);
+      els2.importSkillPackageInput?.addEventListener("change", importPackages);
+      els2.exportSkillMdBtn?.addEventListener("click", exportMarkdown);
+      els2.exportSkillJsonBtn?.addEventListener("click", exportJson);
+    }
+    function exportMarkdown() {
+      const skill = getEditingSkill({
+        summary: els2.styleSummaryInput?.value ?? ui2.editingStyle?.summary ?? ""
+      });
+      const content = skill.summary || `# ${skill.name}
+
+`;
+      const fileName = `${sanitizeFileName(skill.name)}-\u6267\u7B14\u4EBA\u8BF4\u660E.md`;
+      downloadBlob2(fileName, content, "text/markdown;charset=utf-8");
+      toast2(`\u5DF2\u5BFC\u51FA\u6267\u7B14\u4EBA\u8BF4\u660E.md \u5230\uFF1A${getDownloadLocation2(fileName)}`);
+      return { fileName, content };
+    }
+    function exportJson() {
+      const skill = getEditingSkill({
+        category: getSelectedSkillCategory2(),
+        description: els2.skillDescriptionInput?.value.trim() || ui2.editingStyle?.description || ""
+      });
+      const content = normalizeSkillJsonText2(els2.skillJsonInput?.value || "{}", skill);
+      const fileName = `${sanitizeFileName(skill.name)}-\u6267\u7B14\u4EBA\u89C4\u5219.json`;
+      downloadBlob2(fileName, content, "application/json;charset=utf-8");
+      toast2(`\u5DF2\u5BFC\u51FA\u6267\u7B14\u4EBA\u89C4\u5219 JSON \u5230\uFF1A${getDownloadLocation2(fileName)}`);
+      return { fileName, content };
+    }
+    function exportPackage() {
+      const skill = syncEditingStyleFromInputs2();
+      if (!String(skill?.name || "").trim()) {
+        toast2("\u8BF7\u5148\u586B\u5199\u6267\u7B14\u4EBA\u540D\u79F0", "warn");
+        return null;
+      }
+      const packageData = skillManager2.createSkillPackage(skill);
+      const findings = scanPrivacyRisksInObject(packageData.skill || packageData, { path: "\u6267\u7B14\u4EBA\u5305" });
+      if (!confirmPrivacyRiskNotice2("\u5BFC\u51FA\u7684\u6267\u7B14\u4EBA\u5305\u53EF\u80FD\u5305\u542B\u654F\u611F\u6216\u4E2A\u6848\u4FE1\u606F\u3002", findings)) {
+        toast2("\u5DF2\u53D6\u6D88\u5BFC\u51FA\u6267\u7B14\u4EBA\u5305", "warn");
+        return null;
+      }
+      const fileName = `${sanitizeFileName(skill.name)}.skill.json`;
+      const content = JSON.stringify(packageData, null, 2);
+      downloadBlob2(fileName, content, "application/json;charset=utf-8");
+      toast2(`\u5DF2\u5BFC\u51FA\u6267\u7B14\u4EBA\u5305\u5230\uFF1A${getDownloadLocation2(fileName)}`);
+      return { fileName, packageData };
+    }
+    async function importPackages(event) {
+      const files = Array.from(event?.target?.files || []);
+      const result2 = await importPackageFiles(files);
+      if (event?.target) event.target.value = "";
+      return result2;
+    }
+    async function importPackageFiles(files) {
+      if (!files || files.length === 0) return { importedCount: 0, cancelledCount: 0, failed: [] };
+      let importedCount = 0;
+      let cancelledCount = 0;
+      const failed = [];
+      await withProgress2(`\u6B63\u5728\u5BFC\u5165 ${files.length} \u4E2A\u6267\u7B14\u4EBA\u5305`, async (progress) => {
+        for (const [index, file] of files.entries()) {
+          progress.update(`\u6B63\u5728\u8BFB\u53D6 ${file.name}`, Math.round(index / files.length * 72) + 12);
+          try {
+            const payload = JSON.parse(await file.text());
+            const preview = skillManager2.inspectSkillPackageImport(payload);
+            const conflictMode = confirmPackageImport(file.name, preview);
+            if (conflictMode === "cancel") {
+              cancelledCount += 1;
+              continue;
+            }
+            skillManager2.importSkillPackage(payload, { draft: preview.draft, conflictMode });
+            importedCount += 1;
+          } catch (error) {
+            failed.push(file.name);
+            logger.warn?.("\u5BFC\u5165\u6267\u7B14\u4EBA\u5305\u5931\u8D25", file.name, error);
+          }
+        }
+        progress.update("\u6B63\u5728\u5237\u65B0\u6267\u7B14\u4EBA\u5217\u8868", 92);
+      });
+      reportImportResult({ importedCount, cancelledCount, failed });
+      return { importedCount, cancelledCount, failed };
+    }
+    function confirmPackageImport(fileName, preview) {
+      const header = [
+        `\u5373\u5C06\u5BFC\u5165\u6267\u7B14\u4EBA\u5305\uFF1A${fileName}`,
+        "",
+        preview.previewText,
+        "",
+        preview.sensitiveFindings.length ? "\u68C0\u6D4B\u5230\u7591\u4F3C\u654F\u611F\u5B57\u6BB5\uFF0C\u8BF7\u786E\u8BA4\u6765\u6E90\u53EF\u4FE1\u5E76\u68C0\u67E5\u89C4\u5219\u5185\u5BB9\u540E\u518D\u5BFC\u5165\u3002" : "\u8BF7\u786E\u8BA4\u6765\u6E90\u53EF\u4FE1\u540E\u518D\u5BFC\u5165\u3002"
+      ].join("\n");
+      const win = windowRef();
+      if (preview.duplicate) {
+        const choice = win?.prompt?.(`${header}
+
+\u8F93\u5165 1 \u8986\u76D6\u73B0\u6709\u6267\u7B14\u4EBA\uFF1B\u8F93\u5165 2 \u53E6\u5B58\u4E3A\u65B0\u6267\u7B14\u4EBA\uFF1B\u8F93\u5165 3 \u53D6\u6D88\u5BFC\u5165\u3002`, "2");
+        if (choice === "1") return "replace";
+        if (choice === "2" || choice === "") return "rename";
+        return "cancel";
+      }
+      return win?.confirm?.(`${header}
+
+\u786E\u8BA4\u5BFC\u5165\uFF1F`) ? "rename" : "cancel";
+    }
+    function confirmPrivacyRiskNotice2(intro, findings = []) {
+      if (!findings.length) return true;
+      return Boolean(windowRef()?.confirm?.([
+        intro,
+        "",
+        "\u672C\u5730\u9884\u68C0\u53D1\u73B0\u4EE5\u4E0B\u7591\u4F3C\u654F\u611F\u6216\u4E2A\u6848\u4FE1\u606F\uFF1A",
+        formatPrivacyRiskSummary(findings),
+        "",
+        "\u5EFA\u8BAE\u5148\u8131\u654F\u6216\u79FB\u9664\u4E0D\u5E94\u53D1\u9001/\u5206\u4EAB\u7684\u5185\u5BB9\u3002\u662F\u5426\u7EE7\u7EED\uFF1F"
+      ].join("\n")));
+    }
+    function isPackageFile(file) {
+      return /\.skill\.json$/i.test(file?.name || "");
+    }
+    function getEditingSkill(extra = {}) {
+      const base = ui2.editingStyle || {};
+      const name = els2.styleNameInput?.value.trim() || base.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA";
+      return {
+        ...base,
+        ...extra,
+        name,
+        handle: normalizeHandle(els2.skillHandleInput?.value || base.handle || base.name || name)
+      };
+    }
+    function reportImportResult(result2) {
+      const { importedCount, cancelledCount, failed } = result2;
+      if (importedCount > 0) {
+        switchTab2("style");
+        toast2(`\u5DF2\u5BFC\u5165 ${importedCount} \u4E2A\u6267\u7B14\u4EBA${failed.length ? `\uFF0C${failed.length} \u4E2A\u6587\u4EF6\u683C\u5F0F\u4E0D\u6B63\u786E` : ""}`);
+      } else if (cancelledCount > 0 && failed.length === 0) {
+        toast2("\u5DF2\u53D6\u6D88\u5BFC\u5165\u6267\u7B14\u4EBA\u5305", "warn");
+      } else {
+        toast2("\u672A\u5BFC\u5165\u6267\u7B14\u4EBA\uFF0C\u8BF7\u68C0\u67E5 .skill.json \u6587\u4EF6\u683C\u5F0F", "warn");
+      }
+    }
+    return {
+      bindEvents: bindEvents2,
+      exportMarkdown,
+      exportJson,
+      exportPackage,
+      importPackages,
+      importPackageFiles,
+      confirmPackageImport,
+      confirmPrivacyRiskNotice: confirmPrivacyRiskNotice2,
+      isPackageFile
+    };
+  }
+
   // src/modules/skills/skillVersionDiff.js
   function buildSkillVersionDiff(current = {}, previous = null) {
     const currentSnapshot = createVersionSnapshot(current);
@@ -38547,6 +38719,19 @@ ${mention} ` : `${mention} `;
     onRetrySkill: (skillId) => openSkillBuilderModal(skillId),
     onCancelSkillBuild: cancelSkillBuild
   });
+  var skillPackageController = createSkillPackageController({
+    ui,
+    els,
+    skillManager,
+    toast,
+    withProgress,
+    switchTab,
+    syncEditingStyleFromInputs,
+    getSelectedSkillCategory,
+    normalizeSkillJsonText,
+    downloadBlob,
+    getDownloadLocation
+  });
   var skillWorkbenchController = createSkillWorkbenchController({
     state,
     ui,
@@ -39036,9 +39221,7 @@ ${mention} ` : `${mention} `;
     els.skillCategoryFilter.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
     els.skillEnabledOnlyInput.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
     els.skillSearchInput.addEventListener("input", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
-    els.importSkillPackageBtn.addEventListener("click", () => els.importSkillPackageInput.click());
-    els.exportSkillPackageBtn.addEventListener("click", exportSkillPackage);
-    els.importSkillPackageInput.addEventListener("change", importSkillPackages);
+    skillPackageController.bindEvents();
     els.styleSummaryInput.addEventListener("input", () => {
       if (!ui.editingStyle) return;
       ui.editingStyle.summary = els.styleSummaryInput.value;
@@ -39055,8 +39238,6 @@ ${mention} ` : `${mention} `;
     els.skillJsonInput.addEventListener("input", () => {
       ui.editingStyle.skillJson = els.skillJsonInput.value;
     });
-    els.exportSkillMdBtn.addEventListener("click", exportSkillMarkdown);
-    els.exportSkillJsonBtn.addEventListener("click", exportSkillJson);
     els.runSkillTestBtn.addEventListener("click", runSkillGenerationTest);
     els.saveSkillFeedbackBtn.addEventListener("click", saveSkillFeedback);
     els.skillDetailCloseBtn.addEventListener("click", hideSkillDetailMenu);
@@ -39147,7 +39328,7 @@ ${mention} ` : `${mention} `;
     await importDocumentFiles(files);
   }
   function isSkillPackageFile(file) {
-    return /\.skill\.json$/i.test(file?.name || "");
+    return skillPackageController.isPackageFile(file);
   }
   function hydrateStaticSelects() {
     documentTypeController.renderTypeSelect();
@@ -39397,118 +39578,14 @@ ${mention} ` : `${mention} `;
   function cancelSkillBuild(skillId) {
     return skillWorkbenchController.cancelBuild(skillId);
   }
-  function exportSkillMarkdown() {
-    const skill = {
-      ...ui.editingStyle,
-      name: els.styleNameInput.value.trim() || ui.editingStyle.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
-      handle: normalizeHandle(els.skillHandleInput.value || ui.editingStyle.handle || ui.editingStyle.name),
-      summary: els.styleSummaryInput.value
-    };
-    const content = skill.summary || `# ${skill.name}
-
-`;
-    const fileName = `${sanitizeFileName(skill.name)}-\u6267\u7B14\u4EBA\u8BF4\u660E.md`;
-    downloadBlob(fileName, content, "text/markdown;charset=utf-8");
-    toast(`\u5DF2\u5BFC\u51FA\u6267\u7B14\u4EBA\u8BF4\u660E.md \u5230\uFF1A${getDownloadLocation(fileName)}`);
-  }
-  function exportSkillJson() {
-    const skill = {
-      ...ui.editingStyle,
-      name: els.styleNameInput.value.trim() || ui.editingStyle.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
-      handle: normalizeHandle(els.skillHandleInput.value || ui.editingStyle.handle || ui.editingStyle.name),
-      category: getSelectedSkillCategory(),
-      description: els.skillDescriptionInput.value.trim() || ui.editingStyle.description || ""
-    };
-    const content = normalizeSkillJsonText(els.skillJsonInput.value, skill);
-    const fileName = `${sanitizeFileName(skill.name)}-\u6267\u7B14\u4EBA\u89C4\u5219.json`;
-    downloadBlob(fileName, content, "application/json;charset=utf-8");
-    toast(`\u5DF2\u5BFC\u51FA\u6267\u7B14\u4EBA\u89C4\u5219 JSON \u5230\uFF1A${getDownloadLocation(fileName)}`);
-  }
   function exportSkillPackage() {
-    const skill = syncEditingStyleFromInputs();
-    if (!skill.name.trim()) {
-      toast("\u8BF7\u5148\u586B\u5199\u6267\u7B14\u4EBA\u540D\u79F0", "warn");
-      return;
-    }
-    const packageData = skillManager.createSkillPackage(skill);
-    const findings = scanPrivacyRisksInObject(packageData.skill || packageData, { path: "\u6267\u7B14\u4EBA\u5305" });
-    if (!confirmPrivacyRiskNotice("\u5BFC\u51FA\u7684\u6267\u7B14\u4EBA\u5305\u53EF\u80FD\u5305\u542B\u654F\u611F\u6216\u4E2A\u6848\u4FE1\u606F\u3002", findings)) {
-      toast("\u5DF2\u53D6\u6D88\u5BFC\u51FA\u6267\u7B14\u4EBA\u5305", "warn");
-      return;
-    }
-    const fileName = `${sanitizeFileName(skill.name)}.skill.json`;
-    downloadBlob(fileName, JSON.stringify(packageData, null, 2), "application/json;charset=utf-8");
-    toast(`\u5DF2\u5BFC\u51FA\u6267\u7B14\u4EBA\u5305\u5230\uFF1A${getDownloadLocation(fileName)}`);
-  }
-  async function importSkillPackages(event) {
-    const files = Array.from(event.target.files || []);
-    await importSkillPackageFiles(files);
-    event.target.value = "";
+    return skillPackageController.exportPackage();
   }
   async function importSkillPackageFiles(files) {
-    if (!files || files.length === 0) return;
-    let importedCount = 0;
-    let cancelledCount = 0;
-    const failed = [];
-    await withProgress(`\u6B63\u5728\u5BFC\u5165 ${files.length} \u4E2A\u6267\u7B14\u4EBA\u5305`, async (progress) => {
-      for (const [index, file] of files.entries()) {
-        progress.update(`\u6B63\u5728\u8BFB\u53D6 ${file.name}`, Math.round(index / files.length * 72) + 12);
-        try {
-          const payload = JSON.parse(await file.text());
-          const preview = skillManager.inspectSkillPackageImport(payload);
-          const conflictMode = confirmSkillPackageImport(file.name, preview);
-          if (conflictMode === "cancel") {
-            cancelledCount += 1;
-            continue;
-          }
-          skillManager.importSkillPackage(payload, { draft: preview.draft, conflictMode });
-          importedCount += 1;
-        } catch (error) {
-          failed.push(file.name);
-          console.warn("\u5BFC\u5165\u6267\u7B14\u4EBA\u5305\u5931\u8D25", file.name, error);
-        }
-      }
-      progress.update("\u6B63\u5728\u5237\u65B0\u6267\u7B14\u4EBA\u5217\u8868", 92);
-    });
-    if (importedCount > 0) {
-      switchTab("style");
-      toast(`\u5DF2\u5BFC\u5165 ${importedCount} \u4E2A\u6267\u7B14\u4EBA${failed.length ? `\uFF0C${failed.length} \u4E2A\u6587\u4EF6\u683C\u5F0F\u4E0D\u6B63\u786E` : ""}`);
-    } else if (cancelledCount > 0 && failed.length === 0) {
-      toast("\u5DF2\u53D6\u6D88\u5BFC\u5165\u6267\u7B14\u4EBA\u5305", "warn");
-    } else {
-      toast("\u672A\u5BFC\u5165\u6267\u7B14\u4EBA\uFF0C\u8BF7\u68C0\u67E5 .skill.json \u6587\u4EF6\u683C\u5F0F", "warn");
-    }
-  }
-  function confirmSkillPackageImport(fileName, preview) {
-    const header = [
-      `\u5373\u5C06\u5BFC\u5165\u6267\u7B14\u4EBA\u5305\uFF1A${fileName}`,
-      "",
-      preview.previewText,
-      "",
-      preview.sensitiveFindings.length ? "\u68C0\u6D4B\u5230\u7591\u4F3C\u654F\u611F\u5B57\u6BB5\uFF0C\u8BF7\u786E\u8BA4\u6765\u6E90\u53EF\u4FE1\u5E76\u68C0\u67E5\u89C4\u5219\u5185\u5BB9\u540E\u518D\u5BFC\u5165\u3002" : "\u8BF7\u786E\u8BA4\u6765\u6E90\u53EF\u4FE1\u540E\u518D\u5BFC\u5165\u3002"
-    ].join("\n");
-    if (preview.duplicate) {
-      const choice = window.prompt(`${header}
-
-\u8F93\u5165 1 \u8986\u76D6\u73B0\u6709\u6267\u7B14\u4EBA\uFF1B\u8F93\u5165 2 \u53E6\u5B58\u4E3A\u65B0\u6267\u7B14\u4EBA\uFF1B\u8F93\u5165 3 \u53D6\u6D88\u5BFC\u5165\u3002`, "2");
-      if (choice === "1") return "replace";
-      if (choice === "2" || choice === "") return "rename";
-      return "cancel";
-    }
-    return window.confirm(`${header}
-
-\u786E\u8BA4\u5BFC\u5165\uFF1F`) ? "rename" : "cancel";
+    return skillPackageController.importPackageFiles(files);
   }
   function confirmPrivacyRiskNotice(intro, findings = []) {
-    if (!findings.length) return true;
-    return window.confirm([
-      intro,
-      "",
-      "\u672C\u5730\u9884\u68C0\u53D1\u73B0\u4EE5\u4E0B\u7591\u4F3C\u654F\u611F\u6216\u4E2A\u6848\u4FE1\u606F\uFF1A",
-      formatPrivacyRiskSummary(findings),
-      "",
-      "\u5EFA\u8BAE\u5148\u8131\u654F\u6216\u79FB\u9664\u4E0D\u5E94\u53D1\u9001/\u5206\u4EAB\u7684\u5185\u5BB9\u3002\u662F\u5426\u7EE7\u7EED\uFF1F"
-    ].join("\n"));
+    return skillPackageController.confirmPrivacyRiskNotice(intro, findings);
   }
   async function linkRealFolder() {
     return folderManager.linkRealFolder();
