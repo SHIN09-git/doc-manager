@@ -1,7 +1,6 @@
 import {
   DEFAULT_STYLE_SKILL,
   DEFAULT_SYSTEM_PROMPT,
-  DOCUMENT_TYPES,
   SEARCH_RENDER_DEBOUNCE_MS,
   folderColors,
 } from "./src/config/constants.js";
@@ -30,6 +29,7 @@ import { createDocumentManager } from "./src/modules/documents/documentManager.j
 import { createDocumentPanelController } from "./src/modules/documents/documentPanelController.js";
 import { createDocumentRenderer } from "./src/modules/documents/documentRenderer.js";
 import { createTrashController } from "./src/modules/documents/trashController.js";
+import { createDocumentTypeController } from "./src/modules/documents/documentTypeController.js";
 import { createFindReplaceController } from "./src/modules/editor/findReplaceController.js";
 import { createEditorContextMenuController } from "./src/modules/editor/editorContextMenuController.js";
 import { createGenerationController } from "./src/modules/generation/generationController.js";
@@ -162,6 +162,16 @@ const folderRenderer = createFolderRenderer({
   onRenameFolder: renameFolder,
   onSyncFolder: syncRealFolder,
   onDeleteFolder: deleteFolder,
+});
+const documentTypeController = createDocumentTypeController({
+  state,
+  els,
+  toast,
+  saveEditor,
+  queueEditorSave,
+  persist,
+  eventBus,
+  getCurrentDoc,
 });
 const skillManager = createSkillManager({
   state,
@@ -635,9 +645,7 @@ function initializeMissingData() {
     ];
   }
   state.folders = state.folders.map((folder) => normalizeFolder(folder));
-  state.customTypes = Array.isArray(state.customTypes)
-    ? state.customTypes.map((type) => normalizeCustomType(type)).filter(Boolean)
-    : [];
+  state.customTypes = documentTypeController.normalizeCustomTypes(state.customTypes);
 
   if (!Array.isArray(state.styles) || state.styles.length === 0) {
     state.styles = [
@@ -807,13 +815,7 @@ function bindEvents() {
     els.contentEditor.addEventListener(eventName, queueEditorSave);
   });
   els.contentEditor.addEventListener("beforeinput", queueEditorUndoSnapshot);
-  els.typeSelect.addEventListener("change", () => {
-    updateTypeControlState();
-    queueEditorSave();
-  });
-  els.addTypeBtn.addEventListener("click", addCustomType);
-  els.renameTypeBtn.addEventListener("click", renameCustomType);
-  els.deleteTypeBtn.addEventListener("click", deleteCustomType);
+  documentTypeController.bindEvents();
   els.folderSelect.addEventListener("change", queueEditorSave);
   els.styleSelect.addEventListener("change", queueEditorSave);
   els.saveDocBtn.addEventListener("click", () => saveEditor(true));
@@ -1011,48 +1013,8 @@ function isSkillPackageFile(file) {
 }
 
 function hydrateStaticSelects() {
-  renderTypeSelect();
+  documentTypeController.renderTypeSelect();
   pptController.hydratePptStyleSelect();
-}
-
-function getDocumentTypes() {
-  return [...DOCUMENT_TYPES, ...(Array.isArray(state.customTypes) ? state.customTypes : [])];
-}
-
-function renderTypeSelect(selectedValue = els.typeSelect?.value || getCurrentDoc()?.type || "notice") {
-  if (!els.typeSelect) return;
-  const builtInOptions = DOCUMENT_TYPES.map(
-    (type) => `<option value="${escapeHtml(type.id)}">${escapeHtml(type.name)}</option>`,
-  ).join("");
-  const customTypes = Array.isArray(state.customTypes) ? state.customTypes : [];
-  const customOptions = customTypes
-    .map((type) => `<option value="${escapeHtml(type.id)}">${escapeHtml(type.name)}</option>`)
-    .join("");
-
-  els.typeSelect.innerHTML = [
-    `<optgroup label="内置类型">${builtInOptions}</optgroup>`,
-    customOptions ? `<optgroup label="自定义类型">${customOptions}</optgroup>` : "",
-  ].join("");
-
-  const nextValue = getDocumentTypes().some((type) => type.id === selectedValue) ? selectedValue : "custom";
-  els.typeSelect.value = nextValue;
-  updateTypeControlState();
-}
-
-function updateTypeControlState() {
-  if (!els.typeSelect || !els.customTypeActions) return;
-  const typeId = els.typeSelect.value;
-  const isActualCustomType = isCustomDocumentType(typeId);
-  const showCustomActions = typeId === "custom" || isActualCustomType;
-  els.customTypeActions.hidden = !showCustomActions;
-  if (els.renameTypeBtn) {
-    els.renameTypeBtn.disabled = !isActualCustomType;
-    els.renameTypeBtn.title = isActualCustomType ? "重命名自定义类型" : "先添加或选择一个自定义类型";
-  }
-  if (els.deleteTypeBtn) {
-    els.deleteTypeBtn.disabled = !isActualCustomType;
-    els.deleteTypeBtn.title = isActualCustomType ? "删除自定义类型" : "先添加或选择一个自定义类型";
-  }
 }
 
 function render() {
@@ -1060,7 +1022,7 @@ function render() {
   renderFolderSelect();
   renderStyleSelect();
   renderDocList();
-  renderTypeSelect();
+  documentTypeController.renderTypeSelect();
   renderEditor();
   renderApiSettings();
   renderCloudPanel();
@@ -1103,7 +1065,7 @@ function renderEditor() {
   if (currentDoc && !currentDoc.deletedAt) {
     hideSaveStatus();
   }
-  updateTypeControlState();
+  documentTypeController.updateTypeControlState();
 }
 
 function renderCloudPanel() {
@@ -2582,94 +2544,6 @@ function deleteFolder(folderId) {
   return folderManager.deleteFolder(folderId);
 }
 
-function normalizeCustomType(type) {
-  const name = String(type?.name || "").trim();
-  if (!name) return null;
-  const id = String(type?.id || "").trim();
-  const safeId = id && !DOCUMENT_TYPES.some((item) => item.id === id) ? id : `custom-type-${createId()}`;
-  return {
-    id: safeId,
-    name: name.slice(0, 24),
-    structure: String(type?.structure || "按该自定义类型的写作场景组织结构，保持表达清晰规范").trim(),
-    createdAt: type?.createdAt || now(),
-    updatedAt: type?.updatedAt || now(),
-  };
-}
-
-function isCustomDocumentType(typeId) {
-  return Array.isArray(state.customTypes) && state.customTypes.some((type) => type.id === typeId);
-}
-
-function addCustomType() {
-  state.customTypes = Array.isArray(state.customTypes) ? state.customTypes : [];
-  const name = window.prompt("新增文档类型名称，例如：调研报告、活动复盘、制度说明");
-  const normalizedName = String(name || "").trim();
-  if (!normalizedName) return;
-  if (getDocumentTypes().some((type) => type.name === normalizedName)) {
-    toast(`文档类型“${normalizedName}”已存在`, "warn");
-    return;
-  }
-  const structure =
-    window.prompt("该类型的常见结构，可留空", "按背景、目标、重点内容、安排要求、落款组织结构") ||
-    "按输入要点组织结构，保持表达清晰规范";
-  const type = normalizeCustomType({ name: normalizedName, structure });
-  if (!type) return;
-  state.customTypes.push(type);
-  renderTypeSelect(type.id);
-  saveEditor(false);
-  persist();
-  eventBus.emit(EVENTS.RENDER_DOC_LIST);
-  toast(`已新增文档类型：${type.name}`);
-}
-
-function renameCustomType() {
-  const type = state.customTypes.find((item) => item.id === els.typeSelect.value);
-  if (!type) {
-    toast("请先选择一个已添加的自定义类型", "warn");
-    return;
-  }
-  const name = window.prompt("重命名文档类型", type.name);
-  const normalizedName = String(name || "").trim();
-  if (!normalizedName) return;
-  if (getDocumentTypes().some((item) => item.id !== type.id && item.name === normalizedName)) {
-    toast(`文档类型“${normalizedName}”已存在`, "warn");
-    return;
-  }
-  const structure =
-    window.prompt("更新该类型的常见结构，可留空", type.structure) || "按输入要点组织结构，保持表达清晰规范";
-  type.name = normalizedName.slice(0, 24);
-  type.structure = structure.trim();
-  type.updatedAt = now();
-  persist();
-  renderTypeSelect(type.id);
-  eventBus.emit(EVENTS.RENDER_DOC_LIST);
-  toast(`已更新文档类型：${type.name}`);
-}
-
-function deleteCustomType() {
-  const type = state.customTypes.find((item) => item.id === els.typeSelect.value);
-  if (!type) {
-    toast("请先选择一个已添加的自定义类型", "warn");
-    return;
-  }
-  const affectedCount = state.docs.filter((doc) => doc.type === type.id).length;
-  const ok = window.confirm(
-    affectedCount
-      ? `删除自定义类型“${type.name}”？${affectedCount} 份文档会改为“自定义”。`
-      : `删除自定义类型“${type.name}”？`,
-  );
-  if (!ok) return;
-  state.customTypes = state.customTypes.filter((item) => item.id !== type.id);
-  state.docs.forEach((doc) => {
-    if (doc.type === type.id) doc.type = "custom";
-  });
-  renderTypeSelect("custom");
-  saveEditor(false);
-  persist();
-  eventBus.emit(EVENTS.RENDER_ALL);
-  toast(`已删除文档类型：${type.name}`, "warn");
-}
-
 function getFocusableElements(root) {
   if (!root) return [];
   const selector = [
@@ -3271,7 +3145,7 @@ function selectFirstDocumentIfNeeded() {
 }
 
 function getType(typeId) {
-  return getDocumentTypes().find((type) => type.id === typeId) || DOCUMENT_TYPES[DOCUMENT_TYPES.length - 1];
+  return documentTypeController.getType(typeId);
 }
 
 function normalizeFolder(folder) {

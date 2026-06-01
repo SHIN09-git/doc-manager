@@ -25615,6 +25615,194 @@ ${doc.content}`.toLowerCase().includes(query);
     };
   }
 
+  // src/modules/documents/documentTypeController.js
+  var DEFAULT_CUSTOM_TYPE_STRUCTURE = "\u6309\u8BE5\u81EA\u5B9A\u4E49\u7C7B\u578B\u7684\u5199\u4F5C\u573A\u666F\u7EC4\u7EC7\u7ED3\u6784\uFF0C\u4FDD\u6301\u8868\u8FBE\u6E05\u6670\u89C4\u8303";
+  var FALLBACK_CUSTOM_TYPE_STRUCTURE = "\u6309\u8F93\u5165\u8981\u70B9\u7EC4\u7EC7\u7ED3\u6784\uFF0C\u4FDD\u6301\u8868\u8FBE\u6E05\u6670\u89C4\u8303";
+  function normalizeCustomType(type, options = {}) {
+    const builtInTypes = options.builtInTypes || DOCUMENT_TYPES;
+    const makeId = options.createId || createId;
+    const getNow = options.now || now;
+    const name = String(type?.name || "").trim();
+    if (!name) return null;
+    const id = String(type?.id || "").trim();
+    const safeId = id && !builtInTypes.some((item) => item.id === id) ? id : `custom-type-${makeId()}`;
+    return {
+      id: safeId,
+      name: name.slice(0, 24),
+      structure: String(type?.structure || DEFAULT_CUSTOM_TYPE_STRUCTURE).trim(),
+      createdAt: type?.createdAt || getNow(),
+      updatedAt: type?.updatedAt || getNow()
+    };
+  }
+  function normalizeCustomTypes(types, options = {}) {
+    const builtInTypes = options.builtInTypes || DOCUMENT_TYPES;
+    const makeId = options.createId || createId;
+    const usedIds = new Set(builtInTypes.map((type) => type.id));
+    return (Array.isArray(types) ? types : []).map((type) => normalizeCustomType(type, { ...options, createId: makeId })).filter(Boolean).map((type) => {
+      while (usedIds.has(type.id)) {
+        type.id = `custom-type-${makeId()}`;
+      }
+      usedIds.add(type.id);
+      return type;
+    });
+  }
+  function createDocumentTypeController(deps = {}) {
+    const {
+      state: state2 = {},
+      els: els2 = {},
+      toast: toast2 = () => {
+      },
+      saveEditor: saveEditor2 = () => {
+      },
+      queueEditorSave: queueEditorSave2 = () => {
+      },
+      persist: persist2 = () => {
+      },
+      eventBus: eventBus2 = { emit: () => {
+      } },
+      getCurrentDoc: getCurrentDoc2 = () => null,
+      windowRef = globalThis.window
+    } = deps;
+    let eventsBound = false;
+    function bindEvents2() {
+      if (eventsBound) return;
+      eventsBound = true;
+      els2.typeSelect?.addEventListener("change", () => {
+        updateTypeControlState();
+        queueEditorSave2();
+      });
+      els2.addTypeBtn?.addEventListener("click", addCustomType);
+      els2.renameTypeBtn?.addEventListener("click", renameCustomType);
+      els2.deleteTypeBtn?.addEventListener("click", deleteCustomType);
+    }
+    function ensureCustomTypes() {
+      state2.customTypes = Array.isArray(state2.customTypes) ? state2.customTypes : [];
+      return state2.customTypes;
+    }
+    function getDocumentTypes() {
+      return [...DOCUMENT_TYPES, ...ensureCustomTypes()];
+    }
+    function getType2(typeId) {
+      return getDocumentTypes().find((type) => type.id === typeId) || DOCUMENT_TYPES[DOCUMENT_TYPES.length - 1];
+    }
+    function renderTypeSelect(selectedValue = els2.typeSelect?.value || getCurrentDoc2()?.type || "notice") {
+      if (!els2.typeSelect) return;
+      const builtInOptions = DOCUMENT_TYPES.map(
+        (type) => `<option value="${escapeHtml(type.id)}">${escapeHtml(type.name)}</option>`
+      ).join("");
+      const customOptions = ensureCustomTypes().map((type) => `<option value="${escapeHtml(type.id)}">${escapeHtml(type.name)}</option>`).join("");
+      els2.typeSelect.innerHTML = [
+        `<optgroup label="\u5185\u7F6E\u7C7B\u578B">${builtInOptions}</optgroup>`,
+        customOptions ? `<optgroup label="\u81EA\u5B9A\u4E49\u7C7B\u578B">${customOptions}</optgroup>` : ""
+      ].join("");
+      const nextValue = getDocumentTypes().some((type) => type.id === selectedValue) ? selectedValue : "custom";
+      els2.typeSelect.value = nextValue;
+      updateTypeControlState();
+    }
+    function updateTypeControlState() {
+      if (!els2.typeSelect || !els2.customTypeActions) return;
+      const typeId = els2.typeSelect.value;
+      const isActualCustomType = isCustomDocumentType(typeId);
+      const showCustomActions = typeId === "custom" || isActualCustomType;
+      els2.customTypeActions.hidden = !showCustomActions;
+      if (els2.renameTypeBtn) {
+        els2.renameTypeBtn.disabled = !isActualCustomType;
+        els2.renameTypeBtn.title = isActualCustomType ? "\u91CD\u547D\u540D\u81EA\u5B9A\u4E49\u7C7B\u578B" : "\u5148\u6DFB\u52A0\u6216\u9009\u62E9\u4E00\u4E2A\u81EA\u5B9A\u4E49\u7C7B\u578B";
+      }
+      if (els2.deleteTypeBtn) {
+        els2.deleteTypeBtn.disabled = !isActualCustomType;
+        els2.deleteTypeBtn.title = isActualCustomType ? "\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B" : "\u5148\u6DFB\u52A0\u6216\u9009\u62E9\u4E00\u4E2A\u81EA\u5B9A\u4E49\u7C7B\u578B";
+      }
+    }
+    function isCustomDocumentType(typeId) {
+      return ensureCustomTypes().some((type) => type.id === typeId);
+    }
+    function addCustomType() {
+      const name = windowRef?.prompt?.("\u65B0\u589E\u6587\u6863\u7C7B\u578B\u540D\u79F0\uFF0C\u4F8B\u5982\uFF1A\u8C03\u7814\u62A5\u544A\u3001\u6D3B\u52A8\u590D\u76D8\u3001\u5236\u5EA6\u8BF4\u660E");
+      const normalizedName = String(name || "").trim();
+      if (!normalizedName) return null;
+      if (getDocumentTypes().some((type2) => type2.name === normalizedName)) {
+        toast2(`\u6587\u6863\u7C7B\u578B\u201C${normalizedName}\u201D\u5DF2\u5B58\u5728`, "warn");
+        return null;
+      }
+      const structureInput = windowRef?.prompt?.(
+        "\u8BE5\u7C7B\u578B\u7684\u5E38\u89C1\u7ED3\u6784\uFF0C\u53EF\u7559\u7A7A",
+        "\u6309\u80CC\u666F\u3001\u76EE\u6807\u3001\u91CD\u70B9\u5185\u5BB9\u3001\u5B89\u6392\u8981\u6C42\u3001\u843D\u6B3E\u7EC4\u7EC7\u7ED3\u6784"
+      );
+      if (structureInput === null) return null;
+      const type = normalizeCustomType({
+        name: normalizedName,
+        structure: String(structureInput || FALLBACK_CUSTOM_TYPE_STRUCTURE).trim()
+      });
+      if (!type) return null;
+      ensureCustomTypes().push(type);
+      renderTypeSelect(type.id);
+      saveEditor2(false);
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_DOC_LIST);
+      toast2(`\u5DF2\u65B0\u589E\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`);
+      return type;
+    }
+    function renameCustomType() {
+      const type = ensureCustomTypes().find((item) => item.id === els2.typeSelect?.value);
+      if (!type) {
+        toast2("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u5DF2\u6DFB\u52A0\u7684\u81EA\u5B9A\u4E49\u7C7B\u578B", "warn");
+        return null;
+      }
+      const name = windowRef?.prompt?.("\u91CD\u547D\u540D\u6587\u6863\u7C7B\u578B", type.name);
+      const normalizedName = String(name || "").trim();
+      if (!normalizedName) return null;
+      if (getDocumentTypes().some((item) => item.id !== type.id && item.name === normalizedName)) {
+        toast2(`\u6587\u6863\u7C7B\u578B\u201C${normalizedName}\u201D\u5DF2\u5B58\u5728`, "warn");
+        return null;
+      }
+      const structureInput = windowRef?.prompt?.("\u66F4\u65B0\u8BE5\u7C7B\u578B\u7684\u5E38\u89C1\u7ED3\u6784\uFF0C\u53EF\u7559\u7A7A", type.structure);
+      if (structureInput === null) return null;
+      type.name = normalizedName.slice(0, 24);
+      type.structure = String(structureInput || FALLBACK_CUSTOM_TYPE_STRUCTURE).trim();
+      type.updatedAt = now();
+      persist2();
+      renderTypeSelect(type.id);
+      eventBus2.emit(EVENTS.RENDER_DOC_LIST);
+      toast2(`\u5DF2\u66F4\u65B0\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`);
+      return type;
+    }
+    function deleteCustomType() {
+      const type = ensureCustomTypes().find((item) => item.id === els2.typeSelect?.value);
+      if (!type) {
+        toast2("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u5DF2\u6DFB\u52A0\u7684\u81EA\u5B9A\u4E49\u7C7B\u578B", "warn");
+        return false;
+      }
+      const affectedCount = Array.isArray(state2.docs) ? state2.docs.filter((doc) => doc.type === type.id).length : 0;
+      const ok = windowRef?.confirm?.(
+        affectedCount ? `\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B\u201C${type.name}\u201D\uFF1F${affectedCount} \u4EFD\u6587\u6863\u4F1A\u6539\u4E3A\u201C\u81EA\u5B9A\u4E49\u201D\u3002` : `\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B\u201C${type.name}\u201D\uFF1F`
+      );
+      if (!ok) return false;
+      state2.customTypes = ensureCustomTypes().filter((item) => item.id !== type.id);
+      (Array.isArray(state2.docs) ? state2.docs : []).forEach((doc) => {
+        if (doc.type === type.id) doc.type = "custom";
+      });
+      renderTypeSelect("custom");
+      saveEditor2(false);
+      persist2();
+      eventBus2.emit(EVENTS.RENDER_ALL);
+      toast2(`\u5DF2\u5220\u9664\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`, "warn");
+      return true;
+    }
+    return {
+      bindEvents: bindEvents2,
+      normalizeCustomTypes: (types) => normalizeCustomTypes(types),
+      getDocumentTypes,
+      getType: getType2,
+      renderTypeSelect,
+      updateTypeControlState,
+      isCustomDocumentType,
+      addCustomType,
+      renameCustomType,
+      deleteCustomType
+    };
+  }
+
   // src/modules/editor/findReplaceController.js
   function createFindReplaceController(deps = {}) {
     const {
@@ -36524,6 +36712,16 @@ ${mention} ` : `${mention} `;
     onSyncFolder: syncRealFolder,
     onDeleteFolder: deleteFolder
   });
+  var documentTypeController = createDocumentTypeController({
+    state,
+    els,
+    toast,
+    saveEditor,
+    queueEditorSave,
+    persist,
+    eventBus,
+    getCurrentDoc
+  });
   var skillManager = createSkillManager({
     state,
     ui,
@@ -36990,7 +37188,7 @@ ${mention} ` : `${mention} `;
       ];
     }
     state.folders = state.folders.map((folder) => normalizeFolder(folder));
-    state.customTypes = Array.isArray(state.customTypes) ? state.customTypes.map((type) => normalizeCustomType(type)).filter(Boolean) : [];
+    state.customTypes = documentTypeController.normalizeCustomTypes(state.customTypes);
     if (!Array.isArray(state.styles) || state.styles.length === 0) {
       state.styles = [
         {
@@ -37140,13 +37338,7 @@ ${mention} ` : `${mention} `;
       els.contentEditor.addEventListener(eventName, queueEditorSave);
     });
     els.contentEditor.addEventListener("beforeinput", queueEditorUndoSnapshot);
-    els.typeSelect.addEventListener("change", () => {
-      updateTypeControlState();
-      queueEditorSave();
-    });
-    els.addTypeBtn.addEventListener("click", addCustomType);
-    els.renameTypeBtn.addEventListener("click", renameCustomType);
-    els.deleteTypeBtn.addEventListener("click", deleteCustomType);
+    documentTypeController.bindEvents();
     els.folderSelect.addEventListener("change", queueEditorSave);
     els.styleSelect.addEventListener("change", queueEditorSave);
     els.saveDocBtn.addEventListener("click", () => saveEditor(true));
@@ -37332,48 +37524,15 @@ ${mention} ` : `${mention} `;
     return /\.skill\.json$/i.test(file?.name || "");
   }
   function hydrateStaticSelects() {
-    renderTypeSelect();
+    documentTypeController.renderTypeSelect();
     pptController.hydratePptStyleSelect();
-  }
-  function getDocumentTypes() {
-    return [...DOCUMENT_TYPES, ...Array.isArray(state.customTypes) ? state.customTypes : []];
-  }
-  function renderTypeSelect(selectedValue = els.typeSelect?.value || getCurrentDoc()?.type || "notice") {
-    if (!els.typeSelect) return;
-    const builtInOptions = DOCUMENT_TYPES.map(
-      (type) => `<option value="${escapeHtml(type.id)}">${escapeHtml(type.name)}</option>`
-    ).join("");
-    const customTypes = Array.isArray(state.customTypes) ? state.customTypes : [];
-    const customOptions = customTypes.map((type) => `<option value="${escapeHtml(type.id)}">${escapeHtml(type.name)}</option>`).join("");
-    els.typeSelect.innerHTML = [
-      `<optgroup label="\u5185\u7F6E\u7C7B\u578B">${builtInOptions}</optgroup>`,
-      customOptions ? `<optgroup label="\u81EA\u5B9A\u4E49\u7C7B\u578B">${customOptions}</optgroup>` : ""
-    ].join("");
-    const nextValue = getDocumentTypes().some((type) => type.id === selectedValue) ? selectedValue : "custom";
-    els.typeSelect.value = nextValue;
-    updateTypeControlState();
-  }
-  function updateTypeControlState() {
-    if (!els.typeSelect || !els.customTypeActions) return;
-    const typeId = els.typeSelect.value;
-    const isActualCustomType = isCustomDocumentType(typeId);
-    const showCustomActions = typeId === "custom" || isActualCustomType;
-    els.customTypeActions.hidden = !showCustomActions;
-    if (els.renameTypeBtn) {
-      els.renameTypeBtn.disabled = !isActualCustomType;
-      els.renameTypeBtn.title = isActualCustomType ? "\u91CD\u547D\u540D\u81EA\u5B9A\u4E49\u7C7B\u578B" : "\u5148\u6DFB\u52A0\u6216\u9009\u62E9\u4E00\u4E2A\u81EA\u5B9A\u4E49\u7C7B\u578B";
-    }
-    if (els.deleteTypeBtn) {
-      els.deleteTypeBtn.disabled = !isActualCustomType;
-      els.deleteTypeBtn.title = isActualCustomType ? "\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B" : "\u5148\u6DFB\u52A0\u6216\u9009\u62E9\u4E00\u4E2A\u81EA\u5B9A\u4E49\u7C7B\u578B";
-    }
   }
   function render() {
     renderFolders();
     renderFolderSelect();
     renderStyleSelect();
     renderDocList();
-    renderTypeSelect();
+    documentTypeController.renderTypeSelect();
     renderEditor();
     renderApiSettings();
     renderCloudPanel();
@@ -37410,7 +37569,7 @@ ${mention} ` : `${mention} `;
     if (currentDoc && !currentDoc.deletedAt) {
       hideSaveStatus();
     }
-    updateTypeControlState();
+    documentTypeController.updateTypeControlState();
   }
   function renderCloudPanel() {
     if (!els.cloudBaseUrlInput) return;
@@ -38693,84 +38852,6 @@ ${mention} ` : `${mention} `;
   function deleteFolder(folderId) {
     return folderManager.deleteFolder(folderId);
   }
-  function normalizeCustomType(type) {
-    const name = String(type?.name || "").trim();
-    if (!name) return null;
-    const id = String(type?.id || "").trim();
-    const safeId = id && !DOCUMENT_TYPES.some((item) => item.id === id) ? id : `custom-type-${createId()}`;
-    return {
-      id: safeId,
-      name: name.slice(0, 24),
-      structure: String(type?.structure || "\u6309\u8BE5\u81EA\u5B9A\u4E49\u7C7B\u578B\u7684\u5199\u4F5C\u573A\u666F\u7EC4\u7EC7\u7ED3\u6784\uFF0C\u4FDD\u6301\u8868\u8FBE\u6E05\u6670\u89C4\u8303").trim(),
-      createdAt: type?.createdAt || now(),
-      updatedAt: type?.updatedAt || now()
-    };
-  }
-  function isCustomDocumentType(typeId) {
-    return Array.isArray(state.customTypes) && state.customTypes.some((type) => type.id === typeId);
-  }
-  function addCustomType() {
-    state.customTypes = Array.isArray(state.customTypes) ? state.customTypes : [];
-    const name = window.prompt("\u65B0\u589E\u6587\u6863\u7C7B\u578B\u540D\u79F0\uFF0C\u4F8B\u5982\uFF1A\u8C03\u7814\u62A5\u544A\u3001\u6D3B\u52A8\u590D\u76D8\u3001\u5236\u5EA6\u8BF4\u660E");
-    const normalizedName = String(name || "").trim();
-    if (!normalizedName) return;
-    if (getDocumentTypes().some((type2) => type2.name === normalizedName)) {
-      toast(`\u6587\u6863\u7C7B\u578B\u201C${normalizedName}\u201D\u5DF2\u5B58\u5728`, "warn");
-      return;
-    }
-    const structure = window.prompt("\u8BE5\u7C7B\u578B\u7684\u5E38\u89C1\u7ED3\u6784\uFF0C\u53EF\u7559\u7A7A", "\u6309\u80CC\u666F\u3001\u76EE\u6807\u3001\u91CD\u70B9\u5185\u5BB9\u3001\u5B89\u6392\u8981\u6C42\u3001\u843D\u6B3E\u7EC4\u7EC7\u7ED3\u6784") || "\u6309\u8F93\u5165\u8981\u70B9\u7EC4\u7EC7\u7ED3\u6784\uFF0C\u4FDD\u6301\u8868\u8FBE\u6E05\u6670\u89C4\u8303";
-    const type = normalizeCustomType({ name: normalizedName, structure });
-    if (!type) return;
-    state.customTypes.push(type);
-    renderTypeSelect(type.id);
-    saveEditor(false);
-    persist();
-    eventBus.emit(EVENTS.RENDER_DOC_LIST);
-    toast(`\u5DF2\u65B0\u589E\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`);
-  }
-  function renameCustomType() {
-    const type = state.customTypes.find((item) => item.id === els.typeSelect.value);
-    if (!type) {
-      toast("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u5DF2\u6DFB\u52A0\u7684\u81EA\u5B9A\u4E49\u7C7B\u578B", "warn");
-      return;
-    }
-    const name = window.prompt("\u91CD\u547D\u540D\u6587\u6863\u7C7B\u578B", type.name);
-    const normalizedName = String(name || "").trim();
-    if (!normalizedName) return;
-    if (getDocumentTypes().some((item) => item.id !== type.id && item.name === normalizedName)) {
-      toast(`\u6587\u6863\u7C7B\u578B\u201C${normalizedName}\u201D\u5DF2\u5B58\u5728`, "warn");
-      return;
-    }
-    const structure = window.prompt("\u66F4\u65B0\u8BE5\u7C7B\u578B\u7684\u5E38\u89C1\u7ED3\u6784\uFF0C\u53EF\u7559\u7A7A", type.structure) || "\u6309\u8F93\u5165\u8981\u70B9\u7EC4\u7EC7\u7ED3\u6784\uFF0C\u4FDD\u6301\u8868\u8FBE\u6E05\u6670\u89C4\u8303";
-    type.name = normalizedName.slice(0, 24);
-    type.structure = structure.trim();
-    type.updatedAt = now();
-    persist();
-    renderTypeSelect(type.id);
-    eventBus.emit(EVENTS.RENDER_DOC_LIST);
-    toast(`\u5DF2\u66F4\u65B0\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`);
-  }
-  function deleteCustomType() {
-    const type = state.customTypes.find((item) => item.id === els.typeSelect.value);
-    if (!type) {
-      toast("\u8BF7\u5148\u9009\u62E9\u4E00\u4E2A\u5DF2\u6DFB\u52A0\u7684\u81EA\u5B9A\u4E49\u7C7B\u578B", "warn");
-      return;
-    }
-    const affectedCount = state.docs.filter((doc) => doc.type === type.id).length;
-    const ok = window.confirm(
-      affectedCount ? `\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B\u201C${type.name}\u201D\uFF1F${affectedCount} \u4EFD\u6587\u6863\u4F1A\u6539\u4E3A\u201C\u81EA\u5B9A\u4E49\u201D\u3002` : `\u5220\u9664\u81EA\u5B9A\u4E49\u7C7B\u578B\u201C${type.name}\u201D\uFF1F`
-    );
-    if (!ok) return;
-    state.customTypes = state.customTypes.filter((item) => item.id !== type.id);
-    state.docs.forEach((doc) => {
-      if (doc.type === type.id) doc.type = "custom";
-    });
-    renderTypeSelect("custom");
-    saveEditor(false);
-    persist();
-    eventBus.emit(EVENTS.RENDER_ALL);
-    toast(`\u5DF2\u5220\u9664\u6587\u6863\u7C7B\u578B\uFF1A${type.name}`, "warn");
-  }
   function getFocusableElements(root2) {
     if (!root2) return [];
     const selector = [
@@ -39328,7 +39409,7 @@ ${mention} ` : `${mention} `;
     return documentManager.selectFirstDocumentIfNeeded();
   }
   function getType(typeId) {
-    return getDocumentTypes().find((type) => type.id === typeId) || DOCUMENT_TYPES[DOCUMENT_TYPES.length - 1];
+    return documentTypeController.getType(typeId);
   }
   function normalizeFolder(folder) {
     return folderManager.normalizeFolder(folder);

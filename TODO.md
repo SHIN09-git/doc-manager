@@ -2,6 +2,8 @@
 
 ## 2026-06-01 全量审阅发现问题修复记录
 
+- [x] 从 `app.js` 拆出 `documentTypeController`，集中管理文档类型下拉、自定义类型添加/编辑/删除、旧类型数据归一化和文档类型查询。
+- [x] 新增文档类型控制器单元测试，覆盖内置类型保护、旧数据 ID 去重、类型操作按钮状态、重复名称拦截、重命名和删除后文档回退。
 - [x] 从 `app.js` 拆出 `skillWorkbenchController`，集中管理执笔人卡片调用、复制、启停、测试入口、说明.md 编辑保存、构建进度状态和卡片级导出/删除/取消。
 - [x] 新增执笔人工作台控制器单元测试，覆盖构建状态回写、@调用插入、复制、说明.md 保存、测试/导出/删除/取消等卡片动作。
 - [x] 从 `app.js` 拆出 `documentPanelController`，集中管理文档侧栏新建、导入、拖拽、导出、备份、选择、复制、排序、删除和垃圾箱入口。
@@ -334,7 +336,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：135 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：142 项前端与核心单元测试通过，54 项后端商业化 API 测试通过，30 项端到端测试通过。
 
 ## 已完成
 
@@ -407,6 +409,8 @@
 - [x] 拆出 `documentPanelController`
 - [x] 拆出 `apiSettingsController`
 - [x] 拆出 `editorContextMenuController`
+- [x] 拆出 `findReplaceController`
+- [x] 拆出 `documentTypeController`
 
 目标：让 `app.js` 只负责装配，不再承载大量业务细节。
 
