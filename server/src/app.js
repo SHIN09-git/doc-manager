@@ -2793,18 +2793,11 @@ function getPlanLimits(plan, env) {
 }
 
 async function recordUsage(ctx, usage) {
+  const item = buildUsageRecord(ctx, usage);
+  if (typeof ctx.store.recordAiUsage === "function") {
+    return ctx.store.recordAiUsage({ usage: item });
+  }
   return ctx.store.write((data) => {
-    const promptTokens = Number(usage.prompt_tokens || 0);
-    const completionTokens = Number(usage.completion_tokens || 0);
-    const totalTokens = Number(usage.total_tokens || promptTokens + completionTokens || 0);
-    const item = {
-      id: createId("use"),
-      ...usage,
-      prompt_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      total_tokens: totalTokens,
-      estimated_cost: resolveEstimatedUsageCost(ctx.env, { ...usage, prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens }),
-    };
     data.ai_usage.push(item);
     addAudit(data, usage.organization_id, usage.user_id, "ai.chat", "ai_usage", item.id, {
       provider: usage.provider,
@@ -2814,6 +2807,20 @@ async function recordUsage(ctx, usage) {
     });
     return item;
   });
+}
+
+function buildUsageRecord(ctx, usage) {
+  const promptTokens = Number(usage.prompt_tokens || 0);
+  const completionTokens = Number(usage.completion_tokens || 0);
+  const totalTokens = Number(usage.total_tokens || promptTokens + completionTokens || 0);
+  return {
+    id: createId("use"),
+    ...usage,
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: totalTokens,
+    estimated_cost: resolveEstimatedUsageCost(ctx.env, { ...usage, prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens }),
+  };
 }
 
 function getProviderKey(data, organizationId, provider, env) {

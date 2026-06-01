@@ -1,5 +1,34 @@
 # 代码评审记录
 
+## 2026-06-02 AI 用量写入 PostgreSQL Repository Review
+
+范围：`server/src/db/repositories/usageRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
+
+结论：本轮没有发现阻断问题。AI 调用用量记录已从 `ctx.store.write()` 的整库快照写回拆成 `ai_usage` 表级插入 repository；PostgreSQL Store 下会在同一事务写入用量记录和 `ai.chat` 审计日志。JSON Store 兼容路径不变。
+
+已确认：
+
+- `recordUsage` 会先构造统一的用量记录，Store 支持 `recordAiUsage` 时走 repository hook，否则仍走原 JSON Store 写入。
+- `insertUsageRecord` 会归一化 token、成本、状态、时间字段，并返回与历史查询一致的公开结构。
+- `POST /api/ai/chat` 在支持 repository hook 的 Store 下，正常调用只保留额度检查写入；实际用量记录和审计日志不再通过兼容 `write()` 追加。
+- Repository 测试覆盖用量插入归一；API 回归测试覆盖 repository hook 路径。
+
+残余风险：
+
+- 失败 AI 调用后的 `system_events` 追加仍走兼容写入；当前与 repository 写入共享队列和 advisory lock，不会覆盖新用量记录，但后续可继续拆为表级事件插入。
+- 额度扣减与额度流水仍走兼容写入；商业化并发升高前建议继续拆出 `credit_accounts`/`credit_ledger` repository。
+- 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
+
+验证命令：
+
+```bash
+node --check server\src\db\repositories\usageRepository.js
+node --check server\src\db\postgresStore.js
+node --check server\src\app.js
+node --test server\tests\postgres-repository.test.js
+node --test server\tests\commercial-api.test.js
+```
+
 ## 2026-06-02 执笔人 PostgreSQL Repository Review
 
 范围：`server/src/db/repositories/writerRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
@@ -18,7 +47,7 @@
 
 - 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
 - `writer_profiles` 当前数据库唯一约束包含软删除记录；本轮已保证返回友好冲突，但如果未来需要“删除后释放调用名”，需要改为部分唯一索引并提供迁移脚本。
-- `recordUsage` 和部分系统事件写入仍保留兼容路径，正式多实例上线前还应继续评估 insert-only 或表级 update repository。
+- `recordUsage` 已在后一轮切到 `ai_usage` 表级插入；部分系统事件写入仍保留兼容路径，正式多实例上线前还应继续评估表级 insert/update repository。
 
 验证命令：
 
@@ -297,14 +326,14 @@ npm run test:e2e
 - `GET /api/audit` 在 PostgreSQL Store 下优先走 repository；JSON Store 仍沿用原来的内存筛选逻辑。
 - `documentRepository` 查询始终带组织隔离，默认排除 `deleted_at`，并支持 `include_deleted`、`type`、`folder_id`、`cursor_updated_at`、`cursor_id` 和 limit。
 - `GET /api/documents` 在 PostgreSQL Store 下返回 `{ documents, page_info }`，旧的 `documents` 字段保持不变；JSON Store 响应不增加分页字段，保持旧行为。
-- `ai_usage` 写入本轮暂不切为 insert-only。当前 `recordUsage` 会和审计写入一起通过 `ctx.store.write` 进入快照事务，过早混用增量写和快照写存在覆盖风险。
+- `ai_usage` 写入已在后一轮切为 insert-only repository；本节保留当时的阶段性风险记录。
 - repository 测试覆盖了组织隔离、筛选、limit、游标分页、JSON/日期归一和迁移版本重复跳过。
 
 剩余风险：
 
 - 当前 repository 测试使用轻量假 pool 验证 SQL 与归一逻辑，尚未接真实 PostgreSQL 实例跑集成测试。
 - 执笔人表级 repository 已在后一轮完成；本节保留当时的阶段性风险记录。
-- 用量写入和部分系统事件写入仍主要依赖快照兼容层，不适合高并发多实例生产。
+- 用量写入已在后一轮完成表级 repository；部分系统事件写入仍主要依赖快照兼容层，不适合高并发多实例生产。
 
 验证命令：
 

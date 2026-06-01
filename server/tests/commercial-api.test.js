@@ -1589,6 +1589,118 @@ test("writer APIs use repository hooks when available", async () => {
   }
 });
 
+test("AI chat usage uses repository hook when available", async () => {
+  const now = new Date().toISOString();
+  const token = `usage-repo-${crypto.randomUUID()}`;
+  const data = normalizeData({
+    users: [{
+      id: "usr_usage_repo",
+      email: "usage-repo@example.com",
+      name: "Usage Repo",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_usage_repo",
+      name: "Usage Repo Org",
+      slug: "usage-repo-org",
+      plan: "free",
+      created_by: "usr_usage_repo",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_usage_repo",
+      organization_id: "org_usage_repo",
+      user_id: "usr_usage_repo",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_usage_repo",
+      user_id: "usr_usage_repo",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+  });
+  let writeCount = 0;
+  let recordedUsageOptions = null;
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      writeCount += 1;
+      return mutator(data);
+    },
+    async recordAiUsage(options) {
+      recordedUsageOptions = options;
+      const record = options.usage;
+      data.ai_usage.push(record);
+      data.audit_logs.push({
+        id: "aud_usage_repo",
+        organization_id: record.organization_id,
+        user_id: record.user_id,
+        action: "ai.chat",
+        target_type: "ai_usage",
+        target_id: record.id,
+        metadata: {
+          provider: record.provider,
+          model: record.model,
+          status: record.status,
+          task_type: record.task_type,
+        },
+        created_at: record.created_at,
+      });
+      return record;
+    },
+  };
+  const usageServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+      AI_COST_RATES: JSON.stringify({ default: { prompt_per_1k: 0.01, completion_per_1k: 0.02 } }),
+    },
+    store,
+  });
+  await new Promise((resolve) => usageServer.listen(0, "127.0.0.1", resolve));
+  const address = usageServer.address();
+  const usageBaseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${usageBaseUrl}/api/ai/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `mowen_session=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({
+        task_type: "draft",
+        messages: [{ role: "user", content: "hello repository usage" }],
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(writeCount, 1);
+    assert.equal(data.rate_limits.length, 1);
+    assert.equal(data.ai_usage.length, 1);
+    assert.equal(data.audit_logs.length, 1);
+    assert.equal(recordedUsageOptions.usage.organization_id, "org_usage_repo");
+    assert.equal(recordedUsageOptions.usage.user_id, "usr_usage_repo");
+    assert.equal(recordedUsageOptions.usage.task_type, "draft");
+    assert.equal(recordedUsageOptions.usage.status, "success");
+    assert.equal(body.usage.id, recordedUsageOptions.usage.id);
+    assert.ok(recordedUsageOptions.usage.estimated_cost > 0);
+  } finally {
+    await new Promise((resolve) => usageServer.close(resolve));
+  }
+});
+
 async function register(email, options = {}) {
   const response = await api("/api/auth/register", {
     method: "POST",

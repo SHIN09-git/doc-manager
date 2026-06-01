@@ -8,7 +8,7 @@ import { buildAdminPreferencesGetQuery, deleteAdminPreferences, getAdminPreferen
 import { buildAuditHistoryQuery, insertAuditLog, listAuditByOrganization } from "../src/db/repositories/auditRepository.js";
 import { buildDocumentListQuery, listDocumentsByOrganization } from "../src/db/repositories/documentRepository.js";
 import { buildOpsTriageGetQuery, getOpsTriage, upsertOpsTriage } from "../src/db/repositories/opsTriageRepository.js";
-import { buildUsageHistoryQuery, listUsageByOrganization } from "../src/db/repositories/usageRepository.js";
+import { buildUsageHistoryQuery, insertUsageRecord, listUsageByOrganization } from "../src/db/repositories/usageRepository.js";
 import {
   createWriterProfile,
   getWriterById,
@@ -109,6 +109,69 @@ test("usage repository normalizes PostgreSQL rows without exposing other organiz
   assert.equal(usage[0].total_tokens, 25);
   assert.equal(usage[0].estimated_cost, 0.12);
   assert.equal(usage[0].created_at, "2026-05-24T01:02:03.000Z");
+});
+
+test("usage repository inserts normalized usage rows", async () => {
+  let captured = null;
+  const pool = {
+    async query(text, values) {
+      captured = { text, values };
+      return {
+        rows: [{
+          id: values[0],
+          organization_id: values[1],
+          user_id: values[2],
+          provider: values[3],
+          model: values[4],
+          task_type: values[5],
+          prompt_tokens: values[6],
+          completion_tokens: values[7],
+          total_tokens: values[8],
+          estimated_cost: values[9],
+          status: values[10],
+          error: values[11],
+          created_at: new Date(values[12]),
+        }],
+      };
+    },
+  };
+
+  const record = await insertUsageRecord(pool, {
+    usage: {
+      id: "use_insert",
+      organization_id: "org_usage",
+      user_id: "usr_usage",
+      provider: "openai-compatible",
+      model: "gpt-test",
+      task_type: "draft",
+      prompt_tokens: "8",
+      completion_tokens: "12",
+      total_tokens: "",
+      estimated_cost: "0.03",
+      status: "success",
+      created_at: "2026-05-24T02:00:00.000Z",
+    },
+  });
+
+  assert.match(captured.text, /insert into ai_usage/);
+  assert.deepEqual(captured.values, [
+    "use_insert",
+    "org_usage",
+    "usr_usage",
+    "openai-compatible",
+    "gpt-test",
+    "draft",
+    8,
+    12,
+    20,
+    0.03,
+    "success",
+    "",
+    "2026-05-24T02:00:00.000Z",
+  ]);
+  assert.equal(record.total_tokens, 20);
+  assert.equal(record.estimated_cost, 0.03);
+  assert.equal(record.created_at, "2026-05-24T02:00:00.000Z");
 });
 
 test("audit repository query is organization-scoped and filterable", async () => {

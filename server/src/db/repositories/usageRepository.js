@@ -1,3 +1,5 @@
+import { createId } from "../../utils/crypto.js";
+
 const USAGE_COLUMNS = [
   "id",
   "organization_id",
@@ -18,6 +20,19 @@ export async function listUsageByOrganization(pool, { organizationId, userId = "
   const query = buildUsageHistoryQuery({ organizationId, userId, filters, limit });
   const result = await pool.query(query.text, query.values);
   return result.rows.map(normalizeUsageRow);
+}
+
+export async function insertUsageRecord(pool, { usage = {} } = {}) {
+  const record = normalizeUsageDraft(usage);
+  const result = await pool.query(
+    `
+      insert into ai_usage (${USAGE_COLUMNS.join(", ")})
+      values (${USAGE_COLUMNS.map((_, index) => `$${index + 1}`).join(", ")})
+      returning ${USAGE_COLUMNS.join(", ")}
+    `,
+    USAGE_COLUMNS.map((column) => record[column]),
+  );
+  return normalizeUsageRow(result.rows[0]);
 }
 
 export function buildUsageHistoryQuery({ organizationId, userId = "", filters = {}, limit = 200 } = {}) {
@@ -87,6 +102,29 @@ function normalizeUsageRow(row) {
     total_tokens: Number(row.total_tokens || 0),
     estimated_cost: Number(row.estimated_cost || 0),
     created_at: normalizeDateValue(row.created_at),
+  };
+}
+
+function normalizeUsageDraft(usage) {
+  if (!usage.organization_id) throw new Error("usage.organization_id is required");
+  if (!usage.user_id) throw new Error("usage.user_id is required");
+  const promptTokens = Number(usage.prompt_tokens || 0);
+  const completionTokens = Number(usage.completion_tokens || 0);
+  const totalTokens = Number(usage.total_tokens || promptTokens + completionTokens || 0);
+  return {
+    id: usage.id || createId("use"),
+    organization_id: usage.organization_id,
+    user_id: usage.user_id,
+    provider: String(usage.provider || "openai-compatible"),
+    model: String(usage.model || "default"),
+    task_type: String(usage.task_type || "chat"),
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: totalTokens,
+    estimated_cost: Number(usage.estimated_cost || 0),
+    status: String(usage.status || "success"),
+    error: String(usage.error || ""),
+    created_at: usage.created_at || new Date().toISOString(),
   };
 }
 

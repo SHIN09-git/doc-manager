@@ -14,6 +14,8 @@
 - PostgreSQL Store 新增 `writerRepository`，执笔人档案创建、更新、软删除、版本列表和版本恢复在 PostgreSQL 下可走 `writer_profiles`/`writer_versions` 表级事务。
 - 执笔人写入 repository 会把数据库唯一约束冲突统一映射为 `handle_exists`，避免软删除同名或并发同名写入变成 500。
 - 补充执笔人 repository 与 API hook 回归测试，确认 Store 提供表级方法时 `/api/writers` 不再回退整库 `write()`。
+- `ai_usage` 新增表级插入 repository，AI 调用用量与 `ai.chat` 审计日志在 PostgreSQL 下同事务写入，不再通过整库快照保存用量记录。
+- 补充 AI 用量写入 API hook 回归测试，确认正常 AI 调用只保留额度检查写入，实际用量记录走 repository hook。
 
 ## 2026-06-01
 

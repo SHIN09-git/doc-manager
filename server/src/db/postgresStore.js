@@ -7,7 +7,7 @@ import { getAdminPreferences, upsertAdminPreferences, deleteAdminPreferences } f
 import { insertAuditLog, listAuditByOrganization } from "./repositories/auditRepository.js";
 import { listDocumentsByOrganization } from "./repositories/documentRepository.js";
 import { getOpsTriage, upsertOpsTriage } from "./repositories/opsTriageRepository.js";
-import { listUsageByOrganization } from "./repositories/usageRepository.js";
+import { insertUsageRecord, listUsageByOrganization } from "./repositories/usageRepository.js";
 import {
   createWriterProfile,
   getWriterById,
@@ -121,6 +121,28 @@ export class PostgresStore {
   async listUsageByOrganization(options) {
     await this.init();
     return listUsageByOrganization(this.pool, options);
+  }
+
+  async recordAiUsage(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const record = await insertUsageRecord(client, options);
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: record.organization_id,
+        user_id: record.user_id,
+        action: "ai.chat",
+        target_type: "ai_usage",
+        target_id: record.id,
+        metadata: {
+          provider: record.provider,
+          model: record.model,
+          status: record.status,
+          task_type: record.task_type,
+        },
+        created_at: record.created_at || new Date().toISOString(),
+      });
+      return record;
+    });
   }
 
   async listAuditByOrganization(options) {

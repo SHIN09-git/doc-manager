@@ -161,6 +161,7 @@
 - [x] 执笔人云端写入已接入 `writerRepository`，创建、更新、软删除、版本列表和版本恢复不再依赖整库快照写回。
 - [x] 执笔人调用名冲突统一返回 `handle_exists`，避免 PostgreSQL 唯一约束错误泄漏成 500。
 - [x] 补充执笔人 repository 单测和 API hook 测试，确认新路径不会调用兼容 `write()`。
+- [x] AI 用量写入已接入 `ai_usage` 表级插入 repository，用量记录与 `ai.chat` 审计日志不再依赖整库快照写回。
 
 ## 2026-05-24 后台深水区完成记录
 
@@ -341,7 +342,7 @@
 - [x] `GET /api/audit` 在 PostgreSQL Store 下优先走 audit repository，JSON Store 路径保持原行为。
 - [x] 新增 `documents` 分页只读 repository，支持组织隔离、软删除过滤、类型、文件夹和游标分页。
 - [x] `GET /api/documents` 在 PostgreSQL Store 下优先走 documents repository，响应继续包含 `documents`，并额外提供 `page_info`。
-- [x] 评估 `ai_usage` 写入：本阶段暂不切为 insert-only，避免和现有 `ctx.store.write` 快照写回混用产生覆盖风险。
+- [x] 评估 `ai_usage` 写入：后续已切为 insert-only repository，并与 `ai.chat` 审计日志同事务写入。
 - [x] PostgreSQL repository 测试补充 audit/documents 查询构建、组织隔离、分页、JSON/日期归一和迁移版本跳过重复执行。
 
 下一步进入 P2 第五轮阶段 D：备份恢复演练。
@@ -384,7 +385,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：238 项前端与核心单元测试通过，70 项后端服务与 repository 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：238 项前端与核心单元测试通过，80 项后端服务与 repository 测试通过，30 项端到端测试通过。
 
 ## 已完成
 
