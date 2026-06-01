@@ -35990,6 +35990,156 @@ ${JSON.stringify(result2, null, 2)}`
     };
   }
 
+  // src/modules/skills/skillDetailController.js
+  function createSkillDetailController(deps = {}) {
+    const {
+      ui: ui2 = {},
+      els: els2 = {},
+      eventBus: eventBus2 = { emit: () => {
+      } },
+      skillRenderer: skillRenderer2,
+      skillBuilder: skillBuilder2,
+      toast: toast2 = () => {
+      },
+      syncEditingStyleFromInputs: syncEditingStyleFromInputs2 = () => ui2.editingStyle || {},
+      parseSkillJsonObject: parseSkillJsonObject2 = (value) => JSON.parse(value || "{}"),
+      commitSkillToState: commitSkillToState2 = (style) => style,
+      getSkillLocation: getSkillLocation2 = (style) => style?.name || "\u6267\u7B14\u4EBA\u5E93",
+      cancelActiveTask: cancelActiveTask2 = () => false,
+      withCancelableTask: withCancelableTask2 = async (_options, task) => task({ progress: { update: () => {
+      } }, signal: null }),
+      throwIfTaskAborted: throwIfTaskAborted2 = () => {
+      },
+      openSkillBuilderModal: openSkillBuilderModal2 = () => {
+      },
+      flushSkillMarkdownEdits: flushSkillMarkdownEdits2 = () => {
+      },
+      updateSkillMarkdownSaveState: updateSkillMarkdownSaveState2 = () => {
+      },
+      saveSkillMarkdownEdits: saveSkillMarkdownEdits2 = () => {
+      },
+      documentRef = () => globalThis.document
+    } = deps;
+    function bindEvents2() {
+      els2.styleSummaryInput?.addEventListener("input", handleSummaryInput);
+      els2.styleSummaryInput?.addEventListener("blur", handleSummaryBlur);
+      els2.saveSkillMdBtn?.addEventListener("click", saveSkillMarkdownEdits2);
+      els2.skillJsonInput?.addEventListener("input", handleSkillJsonInput);
+      els2.runSkillTestBtn?.addEventListener("click", runGenerationTest);
+      els2.saveSkillFeedbackBtn?.addEventListener("click", saveFeedback);
+      els2.skillDetailCloseBtn?.addEventListener("click", hide);
+      documentRef()?.querySelectorAll?.(".detail-tab")?.forEach((button) => {
+        button.addEventListener("click", () => switchTab2(button.dataset.detailTab));
+      });
+    }
+    function handleSummaryInput() {
+      if (!ui2.editingStyle) return;
+      ui2.editingStyle.summary = els2.styleSummaryInput?.value || "";
+      ui2.skillMarkdownDirty = true;
+      ui2.skillMarkdownDirtySkillId = ui2.editingStyle.id || null;
+      updateSkillMarkdownSaveState2();
+    }
+    function handleSummaryBlur() {
+      if (ui2.skillMarkdownDirty && ui2.skillMarkdownDirtySkillId === ui2.editingStyle?.id) {
+        saveSkillMarkdownEdits2({ silent: true });
+      }
+    }
+    function handleSkillJsonInput() {
+      if (!ui2.editingStyle) return;
+      ui2.editingStyle.skillJson = els2.skillJsonInput?.value || "";
+    }
+    function open(skillId) {
+      flushSkillMarkdownEdits2();
+      const result2 = skillRenderer2.openSkillDetail(skillId);
+      ui2.skillMarkdownDirty = false;
+      ui2.skillMarkdownDirtySkillId = null;
+      updateSkillMarkdownSaveState2();
+      return result2;
+    }
+    function hide() {
+      return skillRenderer2.hideSkillDetailMenu();
+    }
+    function switchTab2(tabName) {
+      return skillRenderer2.switchSkillDetailTab(tabName);
+    }
+    async function runGenerationTest() {
+      if (cancelActiveTask2("skill-test")) return null;
+      const style = syncEditingStyleFromInputs2() || {};
+      const testPrompt = String(els2.skillTestPrompt?.value || "").trim();
+      if (!String(style.skillJson || "").trim()) {
+        toast2("\u8BF7\u5148\u751F\u6210\u6216\u586B\u5199\u6267\u7B14\u4EBA\u89C4\u5219 JSON", "warn");
+        return null;
+      }
+      if (!testPrompt) {
+        toast2("\u8BF7\u8F93\u5165\u6D4B\u8BD5\u8D77\u8349\u4EFB\u52A1", "warn");
+        return null;
+      }
+      return withCancelableTask2({
+        key: "skill-test",
+        button: els2.runSkillTestBtn,
+        busyText: "\u6D4B\u8BD5\u4E2D",
+        progressMessage: "\u6B63\u5728\u6D4B\u8BD5\u6267\u7B14\u4EBA\u751F\u6210\u6548\u679C",
+        cancelToast: "\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6D4B\u8BD5"
+      }, async ({ progress, signal }) => {
+        const skillJson = parseSkillJsonObject2(style.skillJson, style);
+        progress.update("\u6B65\u9AA4 1/2\uFF1A\u6B63\u5728\u751F\u6210\u6D4B\u8BD5\u6587\u6863", 35);
+        const outputs = await skillBuilder2.testSkillOnGeneration(style, skillJson, { \u7528\u6237\u6D4B\u8BD5\u4EFB\u52A1: testPrompt }, { signal });
+        throwIfTaskAborted2(signal);
+        progress.update("\u6B63\u5728\u4FDD\u5B58\u6D4B\u8BD5\u62A5\u544A", 86);
+        style.lastTest = {
+          id: createId(),
+          createdAt: now(),
+          prompt: testPrompt,
+          result: outputs.document,
+          report: JSON.stringify(outputs.report, null, 2)
+        };
+        style.qualityReport = skillBuilder2.normalizeSkillQualityReport(
+          style,
+          style.aggregationData || {},
+          style.qualityReport || {},
+          outputs.report
+        );
+        commitSkillToState2(style);
+        eventBus2.emit(EVENTS.RENDER_SKILL_TEST);
+        eventBus2.emit(EVENTS.RENDER_SKILL_QUALITY);
+        toast2(`\u6D4B\u8BD5\u7ED3\u679C\u5DF2\u4FDD\u5B58\u5230\uFF1A${getSkillLocation2(ui2.editingStyle)} / \u6D4B\u8BD5\u8BB0\u5F55`);
+        return style.lastTest;
+      });
+    }
+    function saveFeedback() {
+      const style = syncEditingStyleFromInputs2() || {};
+      const text = String(els2.skillFeedbackInput?.value || "").trim();
+      if (!text) {
+        toast2("\u8BF7\u8F93\u5165\u53CD\u9988\u5185\u5BB9", "warn");
+        return null;
+      }
+      style.feedbacks = [
+        ...style.feedbacks || [],
+        {
+          id: createId(),
+          text,
+          createdAt: now()
+        }
+      ].slice(-50);
+      commitSkillToState2(style);
+      eventBus2.emit(EVENTS.RENDER_SKILL_TEST);
+      toast2(`\u53CD\u9988\u5DF2\u4FDD\u5B58\u5230\uFF1A${getSkillLocation2(ui2.editingStyle)} / \u6301\u7EED\u4F18\u5316`);
+      openSkillBuilderModal2(style.id);
+      return style.feedbacks.at(-1);
+    }
+    return {
+      bindEvents: bindEvents2,
+      open,
+      hide,
+      switchTab: switchTab2,
+      runGenerationTest,
+      saveFeedback,
+      handleSummaryInput,
+      handleSummaryBlur,
+      handleSkillJsonInput
+    };
+  }
+
   // src/utils/privacyScan.js
   var SENSITIVE_KEY_RE = /(api[-_]?key|secret|token|password|authorization|credential|private[_-]?key|手机号|身份证|邮箱|电话|密钥|令牌|密码)/i;
   var DEFAULT_IGNORED_KEYS = /* @__PURE__ */ new Set([
@@ -38749,6 +38899,25 @@ ${mention} ` : `${mention} `;
     deleteStyle,
     cancelActiveTask
   });
+  var skillDetailController = createSkillDetailController({
+    ui,
+    els,
+    eventBus,
+    skillRenderer,
+    skillBuilder,
+    toast,
+    syncEditingStyleFromInputs,
+    parseSkillJsonObject,
+    commitSkillToState,
+    getSkillLocation,
+    cancelActiveTask,
+    withCancelableTask,
+    throwIfTaskAborted,
+    openSkillBuilderModal,
+    flushSkillMarkdownEdits,
+    updateSkillMarkdownSaveState,
+    saveSkillMarkdownEdits
+  });
   var skillBuilderModalController = createSkillBuilderModalController({
     state,
     ui,
@@ -39222,28 +39391,7 @@ ${mention} ` : `${mention} `;
     els.skillEnabledOnlyInput.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
     els.skillSearchInput.addEventListener("input", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
     skillPackageController.bindEvents();
-    els.styleSummaryInput.addEventListener("input", () => {
-      if (!ui.editingStyle) return;
-      ui.editingStyle.summary = els.styleSummaryInput.value;
-      ui.skillMarkdownDirty = true;
-      ui.skillMarkdownDirtySkillId = ui.editingStyle.id || null;
-      updateSkillMarkdownSaveState();
-    });
-    els.styleSummaryInput.addEventListener("blur", () => {
-      if (ui.skillMarkdownDirty && ui.skillMarkdownDirtySkillId === ui.editingStyle?.id) {
-        saveSkillMarkdownEdits({ silent: true });
-      }
-    });
-    els.saveSkillMdBtn.addEventListener("click", saveSkillMarkdownEdits);
-    els.skillJsonInput.addEventListener("input", () => {
-      ui.editingStyle.skillJson = els.skillJsonInput.value;
-    });
-    els.runSkillTestBtn.addEventListener("click", runSkillGenerationTest);
-    els.saveSkillFeedbackBtn.addEventListener("click", saveSkillFeedback);
-    els.skillDetailCloseBtn.addEventListener("click", hideSkillDetailMenu);
-    document.querySelectorAll(".detail-tab").forEach((button) => {
-      button.addEventListener("click", () => switchSkillDetailTab(button.dataset.detailTab));
-    });
+    skillDetailController.bindEvents();
     apiSettingsController.bindEvents();
     cloudActionsController.bindEvents();
     cloudSessionController.bindEvents();
@@ -39594,18 +39742,13 @@ ${mention} ` : `${mention} `;
     return folderManager.syncRealFolder(folderId);
   }
   function openSkillDetail(skillId) {
-    flushSkillMarkdownEdits();
-    const result2 = skillRenderer.openSkillDetail(skillId);
-    ui.skillMarkdownDirty = false;
-    ui.skillMarkdownDirtySkillId = null;
-    updateSkillMarkdownSaveState();
-    return result2;
+    return skillDetailController.open(skillId);
   }
   function hideSkillDetailMenu() {
-    skillRenderer.hideSkillDetailMenu();
+    return skillDetailController.hide();
   }
   function switchSkillDetailTab(tabName) {
-    skillRenderer.switchSkillDetailTab(tabName);
+    return skillDetailController.switchTab(tabName);
   }
   function addFolder() {
     return folderManager.addFolder();
@@ -39863,64 +40006,6 @@ ${mention} ` : `${mention} `;
   }
   function syncEditingStyleFromInputs() {
     return skillManager.syncEditingStyleFromInputs();
-  }
-  async function runSkillGenerationTest() {
-    if (cancelActiveTask("skill-test")) return;
-    const style = syncEditingStyleFromInputs();
-    const testPrompt = els.skillTestPrompt.value.trim();
-    if (!style.skillJson.trim()) {
-      toast("\u8BF7\u5148\u751F\u6210\u6216\u586B\u5199\u6267\u7B14\u4EBA\u89C4\u5219 JSON", "warn");
-      return;
-    }
-    if (!testPrompt) {
-      toast("\u8BF7\u8F93\u5165\u6D4B\u8BD5\u8D77\u8349\u4EFB\u52A1", "warn");
-      return;
-    }
-    await withCancelableTask({
-      key: "skill-test",
-      button: els.runSkillTestBtn,
-      busyText: "\u6D4B\u8BD5\u4E2D",
-      progressMessage: "\u6B63\u5728\u6D4B\u8BD5\u6267\u7B14\u4EBA\u751F\u6210\u6548\u679C",
-      cancelToast: "\u5DF2\u53D6\u6D88\u672C\u6B21\u6267\u7B14\u4EBA\u6D4B\u8BD5"
-    }, async ({ progress, signal }) => {
-      const skillJson = parseSkillJsonObject(style.skillJson, style);
-      progress.update("\u6B65\u9AA4 1/2\uFF1A\u6B63\u5728\u751F\u6210\u6D4B\u8BD5\u6587\u6863", 35);
-      const outputs = await skillBuilder.testSkillOnGeneration(style, skillJson, { \u7528\u6237\u6D4B\u8BD5\u4EFB\u52A1: testPrompt }, { signal });
-      throwIfTaskAborted(signal);
-      progress.update("\u6B63\u5728\u4FDD\u5B58\u6D4B\u8BD5\u62A5\u544A", 86);
-      style.lastTest = {
-        id: createId(),
-        createdAt: now(),
-        prompt: testPrompt,
-        result: outputs.document,
-        report: JSON.stringify(outputs.report, null, 2)
-      };
-      style.qualityReport = skillBuilder.normalizeSkillQualityReport(style, style.aggregationData || {}, style.qualityReport || {}, outputs.report);
-      commitSkillToState(style);
-      eventBus.emit(EVENTS.RENDER_SKILL_TEST);
-      eventBus.emit(EVENTS.RENDER_SKILL_QUALITY);
-      toast(`\u6D4B\u8BD5\u7ED3\u679C\u5DF2\u4FDD\u5B58\u5230\uFF1A${getSkillLocation(ui.editingStyle)} / \u6D4B\u8BD5\u8BB0\u5F55`);
-    });
-  }
-  function saveSkillFeedback() {
-    const style = syncEditingStyleFromInputs();
-    const text = els.skillFeedbackInput.value.trim();
-    if (!text) {
-      toast("\u8BF7\u8F93\u5165\u53CD\u9988\u5185\u5BB9", "warn");
-      return;
-    }
-    style.feedbacks = [
-      ...style.feedbacks || [],
-      {
-        id: createId(),
-        text,
-        createdAt: now()
-      }
-    ].slice(-50);
-    commitSkillToState(style);
-    eventBus.emit(EVENTS.RENDER_SKILL_TEST);
-    toast(`\u53CD\u9988\u5DF2\u4FDD\u5B58\u5230\uFF1A${getSkillLocation(ui.editingStyle)} / \u6301\u7EED\u4F18\u5316`);
-    openSkillBuilderModal(style.id);
   }
   function normalizeSkillJsonText(value, style) {
     return skillManager.normalizeSkillJsonText(value, style);

@@ -49,6 +49,7 @@ import { createPptxBlob } from "./src/modules/ppt/pptxBuilder.js";
 import { createApiSettingsController } from "./src/modules/settings/apiSettingsController.js";
 import { createSkillBuilder } from "./src/modules/skills/skillBuilder.js";
 import { createSkillBuilderModalController } from "./src/modules/skills/skillBuilderModalController.js";
+import { createSkillDetailController } from "./src/modules/skills/skillDetailController.js";
 import { createSkillManager } from "./src/modules/skills/skillManager.js";
 import { createSkillMentionController } from "./src/modules/skills/skillMentionController.js";
 import { createSkillPackageController } from "./src/modules/skills/skillPackageController.js";
@@ -306,6 +307,25 @@ const skillWorkbenchController = createSkillWorkbenchController({
   exportSkillPackage,
   deleteStyle,
   cancelActiveTask,
+});
+const skillDetailController = createSkillDetailController({
+  ui,
+  els,
+  eventBus,
+  skillRenderer,
+  skillBuilder,
+  toast,
+  syncEditingStyleFromInputs,
+  parseSkillJsonObject,
+  commitSkillToState,
+  getSkillLocation,
+  cancelActiveTask,
+  withCancelableTask,
+  throwIfTaskAborted,
+  openSkillBuilderModal,
+  flushSkillMarkdownEdits,
+  updateSkillMarkdownSaveState,
+  saveSkillMarkdownEdits,
 });
 const skillBuilderModalController = createSkillBuilderModalController({
   state,
@@ -791,28 +811,7 @@ function bindEvents() {
   els.skillEnabledOnlyInput.addEventListener("change", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
   els.skillSearchInput.addEventListener("input", () => eventBus.emit(EVENTS.RENDER_STYLE_LIST));
   skillPackageController.bindEvents();
-  els.styleSummaryInput.addEventListener("input", () => {
-    if (!ui.editingStyle) return;
-    ui.editingStyle.summary = els.styleSummaryInput.value;
-    ui.skillMarkdownDirty = true;
-    ui.skillMarkdownDirtySkillId = ui.editingStyle.id || null;
-    updateSkillMarkdownSaveState();
-  });
-  els.styleSummaryInput.addEventListener("blur", () => {
-    if (ui.skillMarkdownDirty && ui.skillMarkdownDirtySkillId === ui.editingStyle?.id) {
-      saveSkillMarkdownEdits({ silent: true });
-    }
-  });
-  els.saveSkillMdBtn.addEventListener("click", saveSkillMarkdownEdits);
-  els.skillJsonInput.addEventListener("input", () => {
-    ui.editingStyle.skillJson = els.skillJsonInput.value;
-  });
-  els.runSkillTestBtn.addEventListener("click", runSkillGenerationTest);
-  els.saveSkillFeedbackBtn.addEventListener("click", saveSkillFeedback);
-  els.skillDetailCloseBtn.addEventListener("click", hideSkillDetailMenu);
-  document.querySelectorAll(".detail-tab").forEach((button) => {
-    button.addEventListener("click", () => switchSkillDetailTab(button.dataset.detailTab));
-  });
+  skillDetailController.bindEvents();
 
   apiSettingsController.bindEvents();
   cloudActionsController.bindEvents();
@@ -1312,20 +1311,15 @@ async function syncRealFolder(folderId) {
 }
 
 function openSkillDetail(skillId) {
-  flushSkillMarkdownEdits();
-  const result = skillRenderer.openSkillDetail(skillId);
-  ui.skillMarkdownDirty = false;
-  ui.skillMarkdownDirtySkillId = null;
-  updateSkillMarkdownSaveState();
-  return result;
+  return skillDetailController.open(skillId);
 }
 
 function hideSkillDetailMenu() {
-  skillRenderer.hideSkillDetailMenu();
+  return skillDetailController.hide();
 }
 
 function switchSkillDetailTab(tabName) {
-  skillRenderer.switchSkillDetailTab(tabName);
+  return skillDetailController.switchTab(tabName);
 }
 
 function addFolder() {
@@ -1604,67 +1598,6 @@ async function summarizeStyle() {
 
 function syncEditingStyleFromInputs() {
   return skillManager.syncEditingStyleFromInputs();
-}
-
-async function runSkillGenerationTest() {
-  if (cancelActiveTask("skill-test")) return;
-  const style = syncEditingStyleFromInputs();
-  const testPrompt = els.skillTestPrompt.value.trim();
-  if (!style.skillJson.trim()) {
-    toast("请先生成或填写执笔人规则 JSON", "warn");
-    return;
-  }
-  if (!testPrompt) {
-    toast("请输入测试起草任务", "warn");
-    return;
-  }
-
-  await withCancelableTask({
-    key: "skill-test",
-    button: els.runSkillTestBtn,
-    busyText: "测试中",
-    progressMessage: "正在测试执笔人生成效果",
-    cancelToast: "已取消本次执笔人测试",
-  }, async ({ progress, signal }) => {
-    const skillJson = parseSkillJsonObject(style.skillJson, style);
-    progress.update("步骤 1/2：正在生成测试文档", 35);
-    const outputs = await skillBuilder.testSkillOnGeneration(style, skillJson, { 用户测试任务: testPrompt }, { signal });
-    throwIfTaskAborted(signal);
-    progress.update("正在保存测试报告", 86);
-    style.lastTest = {
-      id: createId(),
-      createdAt: now(),
-      prompt: testPrompt,
-      result: outputs.document,
-      report: JSON.stringify(outputs.report, null, 2),
-    };
-    style.qualityReport = skillBuilder.normalizeSkillQualityReport(style, style.aggregationData || {}, style.qualityReport || {}, outputs.report);
-    commitSkillToState(style);
-    eventBus.emit(EVENTS.RENDER_SKILL_TEST);
-    eventBus.emit(EVENTS.RENDER_SKILL_QUALITY);
-    toast(`测试结果已保存到：${getSkillLocation(ui.editingStyle)} / 测试记录`);
-  });
-}
-
-function saveSkillFeedback() {
-  const style = syncEditingStyleFromInputs();
-  const text = els.skillFeedbackInput.value.trim();
-  if (!text) {
-    toast("请输入反馈内容", "warn");
-    return;
-  }
-  style.feedbacks = [
-    ...(style.feedbacks || []),
-    {
-      id: createId(),
-      text,
-      createdAt: now(),
-    },
-  ].slice(-50);
-  commitSkillToState(style);
-  eventBus.emit(EVENTS.RENDER_SKILL_TEST);
-  toast(`反馈已保存到：${getSkillLocation(ui.editingStyle)} / 持续优化`);
-  openSkillBuilderModal(style.id);
 }
 
 function normalizeSkillJsonText(value, style) {
