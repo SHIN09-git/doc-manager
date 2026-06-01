@@ -1519,7 +1519,10 @@ function normalizePreferenceFilter(value) {
 async function getAdminPreferences(ctx) {
   const { data, organization, membership } = await loadOrg(ctx);
   if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以查看后台偏好", "forbidden");
-  const preferences = findAdminPreferences(data, organization.id, ctx.auth.user.id)?.preferences || {};
+  const record = typeof ctx.store.getAdminPreferences === "function"
+    ? await ctx.store.getAdminPreferences({ organizationId: organization.id, userId: ctx.auth.user.id })
+    : findAdminPreferences(data, organization.id, ctx.auth.user.id);
+  const preferences = record?.preferences || {};
   sendJson(ctx.response, 200, { preferences: normalizeAdminPreferences(preferences) });
 }
 
@@ -1528,6 +1531,15 @@ async function updateAdminPreferences(ctx) {
   const preferences = normalizeAdminPreferences(body.preferences || body);
   const { organization, membership } = await loadOrg(ctx);
   if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以保存后台偏好", "forbidden");
+  if (typeof ctx.store.saveAdminPreferences === "function") {
+    const record = await ctx.store.saveAdminPreferences({
+      organizationId: organization.id,
+      userId: ctx.auth.user.id,
+      preferences,
+    });
+    sendJson(ctx.response, 200, { preferences: record.preferences });
+    return;
+  }
   const record = await ctx.store.write((data) => {
     const saved = upsertAdminPreferences(data, organization.id, ctx.auth.user.id, preferences);
     addAudit(data, organization.id, ctx.auth.user.id, "admin.preferences.update", "admin_preferences", saved.id, {
@@ -1541,6 +1553,14 @@ async function updateAdminPreferences(ctx) {
 async function deleteAdminPreferences(ctx) {
   const { organization, membership } = await loadOrg(ctx);
   if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以清空后台偏好", "forbidden");
+  if (typeof ctx.store.clearAdminPreferences === "function") {
+    await ctx.store.clearAdminPreferences({
+      organizationId: organization.id,
+      userId: ctx.auth.user.id,
+    });
+    sendJson(ctx.response, 200, { preferences: normalizeAdminPreferences({}) });
+    return;
+  }
   await ctx.store.write((data) => {
     data.admin_preferences = data.admin_preferences.filter((item) =>
       !(item.organization_id === organization.id && item.user_id === ctx.auth.user.id));

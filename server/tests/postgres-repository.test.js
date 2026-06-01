@@ -4,7 +4,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runMigrations } from "../src/db/migrations/migrationRunner.js";
-import { buildAuditHistoryQuery, listAuditByOrganization } from "../src/db/repositories/auditRepository.js";
+import { buildAdminPreferencesGetQuery, deleteAdminPreferences, getAdminPreferences, upsertAdminPreferences } from "../src/db/repositories/adminPreferenceRepository.js";
+import { buildAuditHistoryQuery, insertAuditLog, listAuditByOrganization } from "../src/db/repositories/auditRepository.js";
 import { buildDocumentListQuery, listDocumentsByOrganization } from "../src/db/repositories/documentRepository.js";
 import { buildUsageHistoryQuery, listUsageByOrganization } from "../src/db/repositories/usageRepository.js";
 
@@ -161,6 +162,178 @@ test("audit repository normalizes metadata and dates", async () => {
   assert.equal(logs[0].organization_id, "org_audit_rows");
   assert.deepEqual(logs[0].metadata, { name: "新组织" });
   assert.equal(logs[0].created_at, "2026-05-24T02:03:04.000Z");
+});
+
+test("audit repository can insert audit logs without snapshot writes", async () => {
+  let captured = null;
+  const pool = {
+    async query(text, values) {
+      captured = { text, values };
+      return {
+        rows: [{
+          id: values[0],
+          organization_id: values[1],
+          user_id: values[2],
+          action: values[3],
+          target_type: values[4],
+          target_id: values[5],
+          metadata: values[6],
+          created_at: new Date(values[7]),
+        }],
+      };
+    },
+  };
+
+  const entry = await insertAuditLog(pool, {
+    id: "aud_pref",
+    organization_id: "org_pref",
+    user_id: "usr_pref",
+    action: "admin.preferences.update",
+    target_type: "admin_preferences",
+    target_id: "pref_001",
+    metadata: { audit_filter_count: 2 },
+    created_at: "2026-05-24T03:04:05.000Z",
+  });
+
+  assert.match(captured.text, /insert into audit_logs/);
+  assert.deepEqual(captured.values.slice(0, 6), [
+    "aud_pref",
+    "org_pref",
+    "usr_pref",
+    "admin.preferences.update",
+    "admin_preferences",
+    "pref_001",
+  ]);
+  assert.deepEqual(entry.metadata, { audit_filter_count: 2 });
+  assert.equal(entry.created_at, "2026-05-24T03:04:05.000Z");
+});
+
+test("admin preferences repository scopes preferences to one organization user", async () => {
+  const query = buildAdminPreferencesGetQuery({
+    organizationId: "org_pref",
+    userId: "usr_pref",
+  });
+
+  assert.match(query.text, /from admin_preferences/);
+  assert.match(query.text, /organization_id = \$1 and user_id = \$2/);
+  assert.match(query.text, /limit 1/);
+  assert.deepEqual(query.values, ["org_pref", "usr_pref"]);
+});
+
+test("admin preferences repository reads and normalizes preferences", async () => {
+  const pool = {
+    async query(text, values) {
+      return {
+        rows: [{
+          id: "pref_001",
+          organization_id: values[0],
+          user_id: values[1],
+          preferences: "{\"audit_filters\":[{\"name\":\"daily\"}]}",
+          created_at: new Date("2026-05-24T01:00:00.000Z"),
+          updated_at: new Date("2026-05-24T02:00:00.000Z"),
+        }],
+      };
+    },
+  };
+
+  const record = await getAdminPreferences(pool, {
+    organizationId: "org_pref",
+    userId: "usr_pref",
+  });
+
+  assert.equal(record.organization_id, "org_pref");
+  assert.equal(record.user_id, "usr_pref");
+  assert.deepEqual(record.preferences, { audit_filters: [{ name: "daily" }] });
+  assert.equal(record.updated_at, "2026-05-24T02:00:00.000Z");
+});
+
+test("admin preferences repository updates the latest existing record", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/select/.test(text)) {
+        return {
+          rows: [{
+            id: "pref_existing",
+            organization_id: values[0],
+            user_id: values[1],
+            preferences: {},
+            created_at: "2026-05-24T01:00:00.000Z",
+            updated_at: "2026-05-24T01:00:00.000Z",
+          }],
+        };
+      }
+      return {
+        rows: [{
+          id: values[0],
+          organization_id: "org_pref",
+          user_id: "usr_pref",
+          preferences: values[1],
+          created_at: "2026-05-24T01:00:00.000Z",
+          updated_at: values[2],
+        }],
+      };
+    },
+  };
+
+  const record = await upsertAdminPreferences(pool, {
+    organizationId: "org_pref",
+    userId: "usr_pref",
+    preferences: { feedback_filter: { status: "pending" } },
+    now: "2026-05-24T03:00:00.000Z",
+  });
+
+  assert.match(calls[1].text, /update admin_preferences/);
+  assert.deepEqual(calls[1].values, [
+    "pref_existing",
+    { feedback_filter: { status: "pending" } },
+    "2026-05-24T03:00:00.000Z",
+  ]);
+  assert.equal(record.id, "pref_existing");
+  assert.deepEqual(record.preferences, { feedback_filter: { status: "pending" } });
+});
+
+test("admin preferences repository inserts and deletes scoped preferences", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/select/.test(text)) return { rows: [] };
+      if (/insert into admin_preferences/.test(text)) {
+        return {
+          rows: [{
+            id: values[0],
+            organization_id: values[1],
+            user_id: values[2],
+            preferences: values[3],
+            created_at: values[4],
+            updated_at: values[5],
+          }],
+        };
+      }
+      if (/delete from admin_preferences/.test(text)) return { rows: [], rowCount: 2 };
+      return { rows: [], rowCount: 0 };
+    },
+  };
+
+  const inserted = await upsertAdminPreferences(pool, {
+    organizationId: "org_pref",
+    userId: "usr_pref",
+    preferences: { error_filter: { level: "warn" } },
+    now: "2026-05-24T04:00:00.000Z",
+  });
+  const deleted = await deleteAdminPreferences(pool, {
+    organizationId: "org_pref",
+    userId: "usr_pref",
+  });
+
+  assert.match(inserted.id, /^pref_/);
+  assert.equal(calls[1].values[1], "org_pref");
+  assert.deepEqual(calls[1].values[3], { error_filter: { level: "warn" } });
+  assert.match(calls[2].text, /delete from admin_preferences/);
+  assert.deepEqual(calls[2].values, ["org_pref", "usr_pref"]);
+  assert.deepEqual(deleted, { deleted_count: 2 });
 });
 
 test("document repository query supports pagination without deleted documents by default", async () => {

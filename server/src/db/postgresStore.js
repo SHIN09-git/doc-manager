@@ -1,8 +1,10 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createId } from "../utils/crypto.js";
 import { normalizeData } from "./jsonStore.js";
 import { runMigrations } from "./migrations/migrationRunner.js";
-import { listAuditByOrganization } from "./repositories/auditRepository.js";
+import { getAdminPreferences, upsertAdminPreferences, deleteAdminPreferences } from "./repositories/adminPreferenceRepository.js";
+import { insertAuditLog, listAuditByOrganization } from "./repositories/auditRepository.js";
 import { listDocumentsByOrganization } from "./repositories/documentRepository.js";
 import { listUsageByOrganization } from "./repositories/usageRepository.js";
 
@@ -119,6 +121,73 @@ export class PostgresStore {
   async listDocumentsByOrganization(options) {
     await this.init();
     return listDocumentsByOrganization(this.pool, options);
+  }
+
+  async getAdminPreferences(options) {
+    await this.init();
+    return getAdminPreferences(this.pool, options);
+  }
+
+  async saveAdminPreferences(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const record = await upsertAdminPreferences(client, { ...options, now });
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "admin.preferences.update",
+        target_type: "admin_preferences",
+        target_id: record.id,
+        metadata: {
+          audit_filter_count: Array.isArray(record.preferences?.audit_filters)
+            ? record.preferences.audit_filters.length
+            : 0,
+        },
+        created_at: now,
+      });
+      return record;
+    });
+  }
+
+  async clearAdminPreferences(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const result = await deleteAdminPreferences(client, options);
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "admin.preferences.clear",
+        target_type: "admin_preferences",
+        target_id: options.userId,
+        metadata: {},
+        created_at: now,
+      });
+      return result;
+    });
+  }
+
+  async repositoryWrite(callback) {
+    const run = this.writeQueue.catch(() => null).then(async () => {
+      await this.init();
+      const client = await this.pool.connect();
+      try {
+        await client.query("begin");
+        await client.query("select pg_advisory_xact_lock(hashtext('mowen_store_write'))");
+        const result = await callback(client);
+        this.data = await this.loadAll(client);
+        await client.query("commit");
+        return result;
+      } catch (error) {
+        await client.query("rollback").catch(() => null);
+        throw error;
+      } finally {
+        client.release();
+      }
+    });
+    this.writeQueue = run.catch(() => null);
+    return run;
   }
 
   async loadAll(client = this.pool) {

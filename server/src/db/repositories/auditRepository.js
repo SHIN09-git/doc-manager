@@ -15,6 +15,27 @@ export async function listAuditByOrganization(pool, { organizationId, filters = 
   return result.rows.map(normalizeAuditRow);
 }
 
+export async function insertAuditLog(pool, entry = {}) {
+  const result = await pool.query(
+    `
+      insert into audit_logs (${AUDIT_COLUMNS.join(", ")})
+      values ($1, $2, $3, $4, $5, $6, $7, $8)
+      returning ${AUDIT_COLUMNS.join(", ")}
+    `,
+    [
+      entry.id,
+      entry.organization_id,
+      entry.user_id,
+      entry.action,
+      entry.target_type,
+      entry.target_id,
+      normalizeJson(entry.metadata),
+      entry.created_at,
+    ],
+  );
+  return normalizeAuditRow(result.rows[0]);
+}
+
 export function buildAuditHistoryQuery({ organizationId, filters = {}, limit = 200 } = {}) {
   if (!organizationId) throw new Error("organizationId is required");
   const values = [organizationId];

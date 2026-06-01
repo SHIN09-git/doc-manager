@@ -35,6 +35,8 @@
 - [x] 新增人工充值服务单元测试，覆盖默认套餐、自定义套餐归一、支付方式校验、无效套餐剔除和凭证脱敏。
 - [x] 新增 `operator` 运营只读角色，可查看独立后台运营数据和保存个人后台偏好，但不能修改组织、成员、接口、账单、反馈或错误跟进。
 - [x] 补充运营只读角色回归测试，覆盖后台查看权限、组织级用量/审计/错误/账单读取，以及关键写操作 403 拦截。
+- [x] 新增 PostgreSQL `adminPreferenceRepository`，后台偏好读取、保存和清空在 PostgreSQL Store 下可走表级事务。
+- [x] 后台偏好表级写入与旧快照写队列共享 advisory lock，并在同一事务写入审计日志，降低多实例灰度下的覆盖风险。
 - [x] 从 `app.js` 拆出 `cloudApiClient`，集中管理云端 API 默认地址推导、地址归一化、组织请求头、`credentials: include`、JSON 响应解析和错误负载。
 - [x] 修复部署站点上旧的本地云端地址带多个尾随斜杠时不会自动替换为当前站点 `/api` 的问题。
 - [x] 新增云端 API 客户端单元测试，覆盖本地/部署地址推导、旧本地地址替换、请求头、服务端错误和网络失败提示。
@@ -147,7 +149,7 @@
 
 下一阶段优先建议：
 
-- [ ] 继续拆 PostgreSQL 写入路径，优先处理 `writer_profiles`、`writer_versions`、`admin_preferences`、`ops_triage` 的表级 repository。
+- [ ] 继续拆 PostgreSQL 写入路径，优先处理 `writer_profiles`、`writer_versions`、`ops_triage` 的表级 repository。
 - [x] 为管理后台补一个只读运营角色，避免 owner/admin 承担所有后台查看权限。
 - [ ] 建立真实支付渠道接入方案，选择 Stripe、Paddle、Creem 或国内支付渠道之一做签名与 webhook 适配。
 - [ ] 补充真实 Resend 域名、webhook 订阅与投递率验证记录。
@@ -374,7 +376,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：238 项前端与核心单元测试通过，60 项后端商业化 API 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：238 项前端与核心单元测试通过，65 项后端服务与 repository 测试通过，30 项端到端测试通过。
 
 ## 已完成
 

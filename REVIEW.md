@@ -1,5 +1,23 @@
 # 代码评审记录
 
+## 2026-06-02 后台偏好 PostgreSQL Repository Review
+
+范围：`server/src/db/repositories/adminPreferenceRepository.js`、`server/src/db/repositories/auditRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`。
+
+结论：本轮没有发现阻断问题。后台偏好在 PostgreSQL Store 下已从整库快照写回拆为表级 repository，读取、保存和清空都按 `organization_id + user_id` 隔离；保存/清空时仍与旧快照写队列共享 `mowen_store_write` advisory lock，并在同一事务内写入审计日志，避免和未拆完的旧写路径交错。
+
+已确认：
+
+- `GET /api/admin/preferences` 在支持 repository 的 Store 下直接读取 `admin_preferences`，JSON Store 仍走原内存路径。
+- `PUT /api/admin/preferences` 和 `DELETE /api/admin/preferences` 在 PostgreSQL Store 下使用表级事务，并回填 `this.data` 缓存，保证后续兼容读写仍能看到最新数据。
+- `audit_logs` 新增插入方法，偏好保存和清空仍会写入审计记录。
+- Repository 测试覆盖后台偏好查询构建、读取归一、已有记录更新、新记录插入、清空删除和审计插入。
+
+残余风险：
+
+- `ops_triage`、`writer_profiles`、`writer_versions` 仍未拆成表级写入 repository，正式多实例上线前应继续收口。
+- 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
+
 ## 2026-06-02 运营只读角色 Review
 
 范围：`server/src/app.js`、`server/src/billing/manualPaymentService.js`、`src/admin/adminPage.js`、`src/modules/cloud/cloudActionsController.js`、`src/modules/cloud/cloudPanelRenderer.js`、`server/tests/commercial-api.test.js`。
