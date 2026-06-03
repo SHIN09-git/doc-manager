@@ -84,7 +84,7 @@ http://127.0.0.1:8787/api
 
 最新后台能力还包括：AI 失败记录可与系统错误使用同一跟进入口保存负责人、备注、优先级和 SLA；审计筛选与后台筛选偏好会按组织和用户保存到云端，并保留本地兜底；成本估算可由后端 `AI_COST_RATES` 统一计算，并在后台展示今日/本月预算摘要；人工确认版充值支持微信/支付宝收款码、用户提交付款备注/凭证、管理员确认后开通会员或发放 AI 额度。
 
-云端开发模式默认使用 `server/.data/db.json`。设置 `STORE_DRIVER=postgres` 和 `DATABASE_URL` 后，后端会使用 PostgreSQL，按 `server/migrations/*.sql` 执行迁移并记录 `migration_versions`。当前已把 `ai_usage` 历史查询、`audit_logs` 审计查询、`documents` 文档列表作为表级只读 repository 试点，并把 `admin_preferences` 后台偏好、`ops_triage` AI 失败跟进改为表级读写 repository；JSON Store 路径保持不变。生产模式会校验强密钥、`CORS_ORIGIN` 和邮件投递模式，避免默认配置直接上线。邮件发送可选择通用 HTTP webhook 或 Resend 适配，邮件服务商状态可通过 `POST /api/webhooks/email` 回调更新；支付渠道价格 ID 可通过 `PAYMENT_PLAN_PRICE_MAP` 映射到内部套餐；人工确认充值可配置 `MANUAL_PAYMENT_WECHAT_QR_URL`、`MANUAL_PAYMENT_ALIPAY_QR_URL`、`MANUAL_PAYMENT_PACKAGES`；备份可运行 `npm run server:backup`，配置 `BACKUP_ENCRYPTION_KEY` 后会输出 `.json.gcm` 加密备份，也可以配置 S3-compatible 对象存储上传副本。`npm run server:backup:verify -- <backup-file>` 可校验明文或加密备份结构，失败告警可接 `BACKUP_FAILURE_WEBHOOK_URL`。
+云端开发模式默认使用 `server/.data/db.json`。设置 `STORE_DRIVER=postgres` 和 `DATABASE_URL` 后，后端会使用 PostgreSQL，按 `server/migrations/*.sql` 执行迁移并记录 `migration_versions`。当前已把 `ai_usage` 历史查询、`audit_logs` 审计查询、`documents` 文档列表拆为表级只读 repository，并把后台偏好、AI 失败跟进、反馈处理、系统错误事件跟进、执笔人云端写入、AI 用量写入、额度扣减和人工确认充值等高价值路径推进到表级读写 repository；JSON Store 路径保持不变。生产模式会校验强密钥、`CORS_ORIGIN` 和邮件投递模式，避免默认配置直接上线。邮件发送可选择通用 HTTP webhook 或 Resend 适配，邮件服务商状态可通过 `POST /api/webhooks/email` 回调更新；支付渠道价格 ID 可通过 `PAYMENT_PLAN_PRICE_MAP` 映射到内部套餐；人工确认充值可配置 `MANUAL_PAYMENT_WECHAT_QR_URL`、`MANUAL_PAYMENT_ALIPAY_QR_URL`、`MANUAL_PAYMENT_PACKAGES`；备份可运行 `npm run server:backup`，配置 `BACKUP_ENCRYPTION_KEY` 后会输出 `.json.gcm` 加密备份，也可以配置 S3-compatible 对象存储上传副本。`npm run server:backup:verify -- <backup-file>` 可校验明文或加密备份结构，失败告警可接 `BACKUP_FAILURE_WEBHOOK_URL`。
 
 ## 基本流程
 
@@ -138,7 +138,7 @@ npm run test:e2e
 当前测试覆盖：
 
 - 前端与核心单元测试：238 项
-- 后端服务与 repository 测试：70 项，其中商业化 API 主链路 61 项
+- 后端服务与 repository 测试：97 项
 - 端到端测试：30 项
 - GitHub Actions：自动运行 `npm run check` 和 `npm test`
 

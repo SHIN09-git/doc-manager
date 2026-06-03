@@ -43,6 +43,8 @@
 - [x] 新增 PostgreSQL `opsTriageRepository`，AI 失败记录的后台跟进映射在 PostgreSQL Store 下可走表级 upsert。
 - [x] 补充 `ops_triage` repository 测试和 API 回归测试，确认支持 repository hook 的 Store 不会再走整库 `write()`。
 - [x] 新增 PostgreSQL `feedbackRepository`，用户反馈创建、单条状态流转和批量处理在 PostgreSQL Store 下可走 `system_events` 表级事务。
+- [x] 新增 PostgreSQL `systemEventRepository`，后台最近错误中的系统 warn/error 事件跟进可直接更新 `system_events.metadata` 并写入审计。
+- [x] 补充系统错误事件 repository 测试和 API hook 回归测试，确认系统事件跟进不再依赖数据库快照写回。
 - [x] 补充反馈 repository 测试和 API hook 回归测试，确认反馈创建、处理和批量处理不再依赖整库快照写回。
 - [x] 从 `app.js` 拆出 `cloudApiClient`，集中管理云端 API 默认地址推导、地址归一化、组织请求头、`credentials: include`、JSON 响应解析和错误负载。
 - [x] 修复部署站点上旧的本地云端地址带多个尾随斜杠时不会自动替换为当前站点 `/api` 的问题。
@@ -182,8 +184,8 @@
 
 ## 2026-05-24 下一阶段待施工重点
 
-- [ ] 收口 `/api/ops/recent-errors` 权限边界，组织管理员默认只能看本组织事件，不能看到平台级全局事件。
-- [ ] 统一 AI 失败记录与系统错误事件的跟进契约，避免“能展示但无法保存跟进”。
+- [x] 收口 `/api/ops/recent-errors` 权限边界，组织管理员默认只能看本组织事件，不能看到平台级全局事件。
+- [x] 统一 AI 失败记录与系统错误事件的跟进契约，避免“能展示但无法保存跟进”。
 - [x] 增加反馈批量状态接口，替换前端逐条请求。
 - [ ] 将后台审计筛选从 localStorage 升级为按组织/用户隔离的云端偏好。
 - [ ] 将成本估算后端化，增加 provider/model 价格配置、月度成本汇总和预算预警。
@@ -391,7 +393,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：238 项前端与核心单元测试通过，94 项后端服务与 repository 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：238 项前端与核心单元测试通过，97 项后端服务与 repository 测试通过，30 项端到端测试通过。
 
 ## 已完成
 

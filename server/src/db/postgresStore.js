@@ -18,6 +18,7 @@ import {
   reviewManualPaymentOrder as reviewManualPaymentOrderRecord,
 } from "./repositories/manualPaymentRepository.js";
 import { getOpsTriage, upsertOpsTriage } from "./repositories/opsTriageRepository.js";
+import { updateSystemEventMetadata } from "./repositories/systemEventRepository.js";
 import { insertUsageRecord, listUsageByOrganization } from "./repositories/usageRepository.js";
 import {
   createWriterProfile,
@@ -392,6 +393,28 @@ export class PostgresStore {
         created_at: now,
       });
       return record;
+    });
+  }
+
+  async saveSystemEventTriage(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const event = await updateSystemEventMetadata(client, options);
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "ops.error.triage",
+        target_type: "system_event",
+        target_id: options.eventId,
+        metadata: {
+          triage_status: event.metadata?.triage_status || "",
+          assignee: event.metadata?.assignee || "",
+          sla_at: event.metadata?.sla_at || "",
+        },
+        created_at: now,
+      });
+      return event;
     });
   }
 

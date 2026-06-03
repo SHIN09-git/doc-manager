@@ -1,5 +1,32 @@
 # 代码评审记录
 
+## 2026-06-03 系统错误事件跟进 PostgreSQL Repository Review
+
+范围：`server/src/db/repositories/systemEventRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
+
+结论：本轮没有发现阻断问题。后台最近错误里的系统事件本体跟进已从 PostgreSQL Store 的整库快照写回拆到 `system_events` 表级 repository：命中当前组织 warn/error 事件时，接口会优先走 `saveSystemEventTriage` hook，直接更新事件 metadata，并在同一事务写入 `ops.error.triage` 审计；JSON Store 兼容路径不变。
+
+已确认：
+
+- `systemEventRepository` 只按 `organization_id + event id + level in (warn,error)` 更新，不会触碰全局事件、其他组织事件或 info 事件。
+- `/api/ops/events/:id/triage` 对系统事件和 AI 失败记录分别走 `saveSystemEventTriage` 与 `saveOpsTriage` hook，支持 PostgreSQL Store 下的表级写入。
+- Store hook 不存在时仍沿用原 JSON Store 逻辑，旧本地开发和测试数据不会受影响。
+- Repository 测试覆盖 SQL 范围、metadata 归一化和 `system_event_not_found`；API 回归测试确认系统事件跟进不会调用整库 `write()`。
+
+残余风险：
+
+- 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
+- 邮件/支付回调未匹配事件、部分平台运行事件仍会写入 `system_events`；后续可继续评估是否需要通用 system event insert repository。
+
+验证命令：
+```bash
+node --check server\src\db\repositories\systemEventRepository.js
+node --check server\src\db\postgresStore.js
+node --check server\src\app.js
+node --test server\tests\postgres-repository.test.js
+node --test server\tests\commercial-api.test.js
+```
+
 ## 2026-06-03 反馈处理 PostgreSQL Repository Review
 
 范围：`server/src/db/repositories/feedbackRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
@@ -1003,7 +1030,7 @@ npm run test:e2e
 结果：
 
 - 前端与核心单元测试：238 项通过
-- 后端服务与 repository 测试：94 项通过
+- 后端服务与 repository 测试：97 项通过
 - 端到端测试：30 项通过
 
 GitHub Actions 已配置基础 CI，自动运行：

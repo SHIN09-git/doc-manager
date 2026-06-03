@@ -2,6 +2,14 @@
 
 项目遵循轻量版本记录方式。正式发布前的更新会按日期归档，稳定后再切换为语义化版本。
 
+## 2026-06-03
+
+### 工程
+
+- PostgreSQL Store 新增 `systemEventRepository`，系统错误事件的后台跟进可直接更新 `system_events.metadata`，并与 `ops.error.triage` 审计保持同事务写入。
+- `/api/ops/events/:id/triage` 在 Store 提供 `saveSystemEventTriage` hook 时不再回退整库 `write()`；JSON Store 兼容路径保持不变。
+- 补充系统错误事件 repository 与 API hook 回归测试，覆盖 warn/error 范围限定、组织隔离、not found 错误码和不触发快照写回。
+
 ## 2026-06-02
 
 ### 工程

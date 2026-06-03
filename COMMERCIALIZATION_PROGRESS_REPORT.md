@@ -2,6 +2,17 @@
 
 更新时间：2026-06-03
 
+## 2026-06-03 新增完成：系统错误事件跟进 PostgreSQL 表级写入
+
+本轮继续收口独立后台“最近错误”的运营闭环，把系统错误事件本体跟进从兼容快照写回拆到表级 repository：
+
+- 新增 `systemEventRepository`，系统 warn/error 事件的负责人、备注、SLA、优先级和处理状态可直接更新到 `system_events.metadata`。
+- PostgreSQL Store 新增 `saveSystemEventTriage` hook，更新事件 metadata 与写入 `ops.error.triage` 审计保持同事务。
+- `/api/ops/events/:id/triage` 命中系统事件时优先走 repository hook；AI 失败记录继续走 `ops_triage`，JSON Store 路径保持原有兼容行为。
+- 补充 repository 与 API 回归测试，确认组织隔离、warn/error 范围限定、not found 错误码和不触发整库 `write()`。
+
+这一步让后台“错误跟进”与“AI 失败跟进”“反馈处理”一样进入表级写入状态。后续剩余的 `system_events` 风险主要集中在邮件/支付回调未匹配事件、少数平台运行事件和未来是否需要通用事件插入 repository。
+
 ## 2026-06-03 新增完成：反馈处理 PostgreSQL 表级写入
 
 本轮继续压缩 `system_events` 的高频运营写入，把用户反馈闭环接入表级 repository：
@@ -11,7 +22,7 @@
 - 反馈处理会保留原有来源等 metadata，并补写状态、负责人、SLA、备注、处理人和处理时间；处理审计与状态更新保持同事务写入。
 - 补充 repository 与 API hook 回归测试，确认反馈创建、处理和批量处理不会回退整库 `write()`。
 
-这一步让后台“反馈处理”从可用走向更适合多实例灰度运营。后续剩余的 `system_events` 风险主要集中在错误事件本体跟进、邮件/支付回调事件和少数平台运行事件。
+这一步让后台“反馈处理”从可用走向更适合多实例灰度运营。后续剩余的 `system_events` 风险主要集中在邮件/支付回调事件和少数平台运行事件。
 
 ## 2026-06-02 新增完成：人工确认充值 PostgreSQL 表级写入
 
@@ -81,7 +92,7 @@ git diff --check
 结果：
 
 - 前端与核心单元测试：238 项通过
-- 后端服务与 repository 测试：94 项通过
+- 后端服务与 repository 测试：97 项通过
 - 端到端测试：30 项通过
 - diff 空白检查：通过
 

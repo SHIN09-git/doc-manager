@@ -1421,6 +1421,123 @@ test("ops triage uses repository hook for AI usage when available", async () => 
   }
 });
 
+test("ops triage uses repository hook for system events when available", async () => {
+  const now = new Date().toISOString();
+  const token = `ops-system-repo-${crypto.randomUUID()}`;
+  const data = normalizeData({
+    users: [{
+      id: "usr_ops_system_repo",
+      email: "ops-system-repo@example.com",
+      name: "Ops System Repo",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_ops_system_repo",
+      name: "Ops System Repo Org",
+      slug: "ops-system-repo-org",
+      plan: "free",
+      created_by: "usr_ops_system_repo",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_ops_system_repo",
+      organization_id: "org_ops_system_repo",
+      user_id: "usr_ops_system_repo",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_ops_system_repo",
+      user_id: "usr_ops_system_repo",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+    system_events: [{
+      id: "evt_ops_system_repo_warning",
+      organization_id: "org_ops_system_repo",
+      user_id: "usr_ops_system_repo",
+      level: "warn",
+      type: "billing.warning",
+      message: "repository system event",
+      metadata: {},
+      created_at: now,
+    }],
+  });
+  let writeCalled = false;
+  let savedSystemEventOptions = null;
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      writeCalled = true;
+      return mutator(data);
+    },
+    async saveSystemEventTriage(options) {
+      savedSystemEventOptions = options;
+      const event = data.system_events.find((item) =>
+        item.organization_id === options.organizationId &&
+        item.id === options.eventId);
+      event.metadata = options.metadata;
+      data.audit_logs.push({
+        id: "aud_ops_system_repo",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "ops.error.triage",
+        target_type: "system_event",
+        target_id: options.eventId,
+        metadata: { triage_status: options.metadata.triage_status },
+        created_at: now,
+      });
+      return event;
+    },
+  };
+  const opsServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+    },
+    store,
+  });
+  await new Promise((resolve) => opsServer.listen(0, "127.0.0.1", resolve));
+  const address = opsServer.address();
+  const opsBaseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${opsBaseUrl}/api/ops/events/evt_ops_system_repo_warning/triage`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `mowen_session=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({
+        status: "processing",
+        priority: "urgent",
+        assignee: "ops-system@example.com",
+        note: "system repository path",
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(writeCalled, false);
+    assert.equal(savedSystemEventOptions.organizationId, "org_ops_system_repo");
+    assert.equal(savedSystemEventOptions.eventId, "evt_ops_system_repo_warning");
+    assert.equal(body.event.source_type, "system_event");
+    assert.equal(body.event.metadata.triage_status, "processing");
+    assert.equal(body.event.metadata.assignee, "ops-system@example.com");
+    assert.equal(data.audit_logs[0].target_type, "system_event");
+  } finally {
+    await new Promise((resolve) => opsServer.close(resolve));
+  }
+});
+
 test("feedback APIs use repository hooks when available", async () => {
   const now = new Date().toISOString();
   const token = `feedback-repo-${crypto.randomUUID()}`;

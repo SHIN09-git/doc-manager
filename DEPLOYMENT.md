@@ -232,13 +232,21 @@ Resend 事件映射：
 
 服务启动时会执行 `server/migrations/001_initial.sql`。
 
-当前 PostgreSQL Store 已将部分高频读路径拆为表级只读 repository：
+当前 PostgreSQL Store 已将部分高频读写路径拆为表级 repository：
 
 - `GET /api/usage/history`：`ai_usage`
 - `GET /api/audit`：`audit_logs`
 - `GET /api/documents`：`documents`
+- 后台偏好：`admin_preferences`
+- AI 失败跟进：`ops_triage`
+- 反馈创建与处理：`system_events` 中的 `user.feedback`
+- 系统错误事件跟进：`system_events.metadata`
+- 执笔人云端写入：`writer_profiles` / `writer_versions`
+- AI 用量写入：`ai_usage`
+- 额度扣减：`credit_accounts` / `credit_ledger`
+- 人工确认充值：`manual_payment_orders` / `credit_accounts` / `credit_ledger` / `organizations`
 
-JSON Store 行为保持不变。`ai_usage`、`audit_logs` 和文档写入仍沿用兼容快照事务，正式高并发部署前需要继续推进增量写 repository。
+JSON Store 行为保持不变。正式高并发部署前仍建议补充真实 PostgreSQL 集成测试，并继续评估邮件/支付回调事件等低频 `system_events` 写入是否需要进一步拆分。
 
 如需把本地 JSON 数据导入 PostgreSQL：
 

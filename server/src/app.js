@@ -1558,6 +1558,26 @@ async function updateOpsEventTriage(ctx, eventId) {
     entry.id === eventId &&
     entry.organization_id === organization.id &&
     ["warn", "error"].includes(entry.level));
+  if (systemEvent && typeof ctx.store.saveSystemEventTriage === "function") {
+    const metadata = applyTriageMetadata(
+      { ...(systemEvent.metadata || {}), triage_status: triageStatus },
+      triage,
+      ctx.auth.user.id,
+    );
+    let event;
+    try {
+      event = await ctx.store.saveSystemEventTriage({
+        organizationId: organization.id,
+        eventId,
+        metadata,
+        userId: ctx.auth.user.id,
+      });
+    } catch (error) {
+      throw mapSystemEventRepositoryError(error);
+    }
+    sendJson(ctx.response, 200, { event: buildSystemEventErrorItem(event) });
+    return;
+  }
   if (!systemEvent) {
     const usage = data.ai_usage.find((entry) =>
       entry.id === eventId &&
@@ -2375,6 +2395,13 @@ function normalizeFeedbackStatus(status) {
 function mapFeedbackRepositoryError(error) {
   if (error?.code === "feedback_not_found") {
     return new HttpError(404, "反馈不存在", "not_found");
+  }
+  return error;
+}
+
+function mapSystemEventRepositoryError(error) {
+  if (error?.code === "system_event_not_found") {
+    return new HttpError(404, "错误事件不存在", "not_found");
   }
   return error;
 }

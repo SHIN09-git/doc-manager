@@ -19,6 +19,7 @@ import {
   reviewManualPaymentOrder,
 } from "../src/db/repositories/manualPaymentRepository.js";
 import { buildOpsTriageGetQuery, getOpsTriage, upsertOpsTriage } from "../src/db/repositories/opsTriageRepository.js";
+import { updateSystemEventMetadata } from "../src/db/repositories/systemEventRepository.js";
 import { buildUsageHistoryQuery, insertUsageRecord, listUsageByOrganization } from "../src/db/repositories/usageRepository.js";
 import {
   createWriterProfile,
@@ -1067,6 +1068,62 @@ test("ops triage repository inserts a new scoped record", async () => {
     { triage_status: "processing" },
   ]);
   assert.equal(record.updated_by, "usr_ops");
+});
+
+test("system event repository updates scoped warn or error metadata", async () => {
+  let captured = null;
+  const pool = {
+    async query(text, values) {
+      captured = { text, values };
+      return {
+        rows: [{
+          id: values[1],
+          organization_id: values[0],
+          user_id: "usr_ops",
+          level: "warn",
+          type: "billing.warning",
+          message: "needs attention",
+          metadata: values[2],
+          created_at: new Date("2026-05-24T05:00:00.000Z"),
+        }],
+      };
+    },
+  };
+
+  const event = await updateSystemEventMetadata(pool, {
+    organizationId: "org_ops",
+    eventId: "evt_ops_warning",
+    metadata: { triage_status: "processing", assignee: "ops@example.com" },
+  });
+
+  assert.match(captured.text, /update system_events/);
+  assert.match(captured.text, /where organization_id = \$1 and id = \$2 and level = any\(\$4::text\[\]\)/);
+  assert.deepEqual(captured.values, [
+    "org_ops",
+    "evt_ops_warning",
+    { triage_status: "processing", assignee: "ops@example.com" },
+    ["warn", "error"],
+  ]);
+  assert.equal(event.id, "evt_ops_warning");
+  assert.deepEqual(event.metadata, { triage_status: "processing", assignee: "ops@example.com" });
+  assert.equal(event.created_at, "2026-05-24T05:00:00.000Z");
+});
+
+test("system event repository reports missing events", async () => {
+  const pool = {
+    async query() {
+      return { rows: [] };
+    },
+  };
+
+  await assert.rejects(
+    () => updateSystemEventMetadata(pool, {
+      organizationId: "org_ops",
+      eventId: "evt_missing",
+      metadata: { triage_status: "processing" },
+    }),
+    (error) => error.code === "system_event_not_found",
+  );
 });
 
 test("writer repository lists organization writers and normalizes rows", async () => {
