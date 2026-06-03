@@ -6,6 +6,10 @@
 
 ### 工程
 
+- PostgreSQL Store 新增 `feedbackRepository`，用户反馈创建、单条处理和批量状态流转在 PostgreSQL 下可走 `system_events` 表级事务。
+- 反馈处理 repository 会保留原有反馈 metadata，并补写状态、负责人、SLA、备注、处理人和处理时间；处理审计与状态更新保持同事务写入。
+- `/api/feedback`、`/api/feedback/:id/status` 和 `/api/feedback/batch-status` 在 Store 提供反馈 hook 时不再调用整库 `write()`，JSON Store 兼容路径不变。
+- 补充反馈 repository 与 API hook 回归测试，确认反馈创建、单条处理和批量处理不会回退快照写入。
 - PostgreSQL Store 新增 `manualPaymentRepository`，人工充值订单创建、审核状态更新、额度入账和会员开通在 PostgreSQL 下可走表级事务。
 - `manual_payment_orders`、`credit_accounts`、`credit_ledger`、`organizations` 的人工确认充值变更会与对应审计和系统事件保持同事务写入，JSON Store 兼容路径不变。
 - `manualPaymentService` 在 Store 提供人工充值 repository hook 时不再调用整库 `write()`，并保持原有错误码、凭证公开字段和额度流水响应契约。

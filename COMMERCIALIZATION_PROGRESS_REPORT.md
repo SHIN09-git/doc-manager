@@ -1,6 +1,17 @@
 # 商业化施工总结报告
 
-更新时间：2026-06-02
+更新时间：2026-06-03
+
+## 2026-06-03 新增完成：反馈处理 PostgreSQL 表级写入
+
+本轮继续压缩 `system_events` 的高频运营写入，把用户反馈闭环接入表级 repository：
+
+- 新增 `feedbackRepository`，覆盖 `user.feedback` 创建、单条状态流转和批量状态处理。
+- PostgreSQL Store 下 `/api/feedback`、`/api/feedback/:id/status` 与 `/api/feedback/batch-status` 优先走 repository hook，JSON Store 本地兼容路径不变。
+- 反馈处理会保留原有来源等 metadata，并补写状态、负责人、SLA、备注、处理人和处理时间；处理审计与状态更新保持同事务写入。
+- 补充 repository 与 API hook 回归测试，确认反馈创建、处理和批量处理不会回退整库 `write()`。
+
+这一步让后台“反馈处理”从可用走向更适合多实例灰度运营。后续剩余的 `system_events` 风险主要集中在错误事件本体跟进、邮件/支付回调事件和少数平台运行事件。
 
 ## 2026-06-02 新增完成：人工确认充值 PostgreSQL 表级写入
 
@@ -38,7 +49,7 @@
 - 权限细分：新增 `operator` 运营只读角色，可查看独立后台运营数据并保存个人筛选偏好，但不能修改组织、成员、接口、账单、反馈或错误跟进。
 - 存储拆分：`admin_preferences` 已在 PostgreSQL Store 下改为表级 repository 读写，保存/清空后台偏好不再依赖整库快照写回。
 - 存储拆分：`ops_triage` 已在 PostgreSQL Store 下改为表级 repository upsert，AI 失败记录跟进不再依赖整库快照写回。
-- 存储拆分：`writer_profiles`、`writer_versions`、`ai_usage` 用量插入、AI 超额额度扣减与人工确认充值已在 PostgreSQL Store 下改为表级 repository，执笔人云端写入、版本恢复、AI 用量记录、已购额度扣减和人工充值到账不再依赖整库快照写回。
+- 存储拆分：`writer_profiles`、`writer_versions`、`ai_usage` 用量插入、AI 超额额度扣减、人工确认充值与用户反馈处理已在 PostgreSQL Store 下改为表级 repository，执笔人云端写入、版本恢复、AI 用量记录、已购额度扣减、人工充值到账和反馈状态流转不再依赖整库快照写回。
 
 这意味着独立后台已经从“可看数据”进入“可跟进、可批量处理、可成本观察、可只读授权、关键高频运营写入表级化”的灰度运营状态。下一阶段建议继续处理真实支付渠道、真实邮件投递联调、剩余系统事件写入拆分和真实 PostgreSQL 集成验证。
 
@@ -70,7 +81,7 @@ git diff --check
 结果：
 
 - 前端与核心单元测试：238 项通过
-- 后端服务与 repository 测试：89 项通过
+- 后端服务与 repository 测试：94 项通过
 - 端到端测试：30 项通过
 - diff 空白检查：通过
 
@@ -369,11 +380,11 @@ Review 后修复：
 
 ### 3. PostgreSQL Store 生产级改造
 
-当前 PostgreSQL Store 已完成迁移版本表、`ai_usage` 历史查询与表级插入、`audit_logs` 审计查询、`documents` 文档列表只读 repository，以及 `admin_preferences`、`ops_triage`、`writer_profiles`、`writer_versions`、AI 超额额度扣减、人工确认充值表级读写 repository；执笔人写入、版本恢复、AI 用量记录、已购额度扣减、人工充值到账和后台轻量运营字段已不再依赖整库快照写回。
+当前 PostgreSQL Store 已完成迁移版本表、`ai_usage` 历史查询与表级插入、`audit_logs` 审计查询、`documents` 文档列表只读 repository，以及 `admin_preferences`、`ops_triage`、`feedback`、`writer_profiles`、`writer_versions`、AI 超额额度扣减、人工确认充值表级读写 repository；执笔人写入、版本恢复、AI 用量记录、已购额度扣减、人工充值到账、反馈状态流转和后台轻量运营字段已不再依赖整库快照写回。
 
 需要完成：
 
-- 继续评估系统事件、反馈状态流转等剩余高频写入的增量 SQL 替代方案。
+- 继续评估错误事件本体跟进、邮件/支付回调事件等剩余 `system_events` 写入的增量 SQL 替代方案。
 - 给文档、执笔人、用量、审计等高频表增加分页查询。
 - 增加 PostgreSQL 集成测试。
 - 扩展多版本迁移脚本和回滚演练。

@@ -1421,6 +1421,182 @@ test("ops triage uses repository hook for AI usage when available", async () => 
   }
 });
 
+test("feedback APIs use repository hooks when available", async () => {
+  const now = new Date().toISOString();
+  const token = `feedback-repo-${crypto.randomUUID()}`;
+  const data = normalizeData({
+    users: [{
+      id: "usr_feedback_repo",
+      email: "feedback-repo@example.com",
+      name: "Feedback Repo",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_feedback_repo",
+      name: "Feedback Repo Org",
+      slug: "feedback-repo-org",
+      plan: "free",
+      created_by: "usr_feedback_repo",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_feedback_repo",
+      organization_id: "org_feedback_repo",
+      user_id: "usr_feedback_repo",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_feedback_repo",
+      user_id: "usr_feedback_repo",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+  });
+  let writeCalled = false;
+  const hookCalls = [];
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      writeCalled = true;
+      return mutator(data);
+    },
+    async createFeedback(options) {
+      hookCalls.push(["create", options]);
+      const event = {
+        id: data.system_events.length ? "evt_feedback_repo_2" : "evt_feedback_repo_1",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        level: "info",
+        type: "user.feedback",
+        message: options.message.slice(0, 4000),
+        metadata: { source: options.source },
+        created_at: now,
+      };
+      data.system_events.push(event);
+      return event;
+    },
+    async updateFeedbackStatus(options) {
+      hookCalls.push(["update", options]);
+      const event = data.system_events.find((item) => item.id === options.feedbackId);
+      event.metadata = {
+        ...(event.metadata || {}),
+        status: options.status,
+        ...(options.metadataPatch || {}),
+        handled_by: options.userId,
+        handled_at: now,
+      };
+      data.audit_logs.push({
+        id: "aud_feedback_repo_update",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "feedback.status.update",
+        target_type: "feedback",
+        target_id: options.feedbackId,
+        metadata: { status: options.status },
+        created_at: now,
+      });
+      return event;
+    },
+    async updateFeedbackBatchStatus(options) {
+      hookCalls.push(["batch", options]);
+      const feedbacks = data.system_events.filter((item) => options.feedbackIds.includes(item.id));
+      feedbacks.forEach((event) => {
+        event.metadata = {
+          ...(event.metadata || {}),
+          status: options.status,
+          ...(options.metadataPatch || {}),
+          handled_by: options.userId,
+          handled_at: now,
+        };
+      });
+      data.audit_logs.push({
+        id: "aud_feedback_repo_batch",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "feedback.status.batch_update",
+        target_type: "feedback",
+        target_id: "batch",
+        metadata: { status: options.status, count: feedbacks.length },
+        created_at: now,
+      });
+      return feedbacks;
+    },
+  };
+  const feedbackServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+    },
+    store,
+  });
+  await new Promise((resolve) => feedbackServer.listen(0, "127.0.0.1", resolve));
+  const address = feedbackServer.address();
+  const feedbackBaseUrl = `http://127.0.0.1:${address.port}`;
+  const headers = {
+    "Content-Type": "application/json",
+    Cookie: `mowen_session=${encodeURIComponent(token)}`,
+  };
+  try {
+    const created = await fetch(`${feedbackBaseUrl}/api/feedback`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message: "需要批量导出", source: "admin_panel" }),
+    });
+    const createdBody = await created.json();
+    assert.equal(created.status, 201, JSON.stringify(createdBody));
+    assert.equal(data.system_events.length, 1);
+
+    const updated = await fetch(`${feedbackBaseUrl}/api/feedback/${data.system_events[0].id}/status`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ status: "processing", assignee: "ops@example.com", sla_at: "2026-05-30" }),
+    });
+    const updatedBody = await updated.json();
+    assert.equal(updated.status, 200, JSON.stringify(updatedBody));
+    assert.equal(updatedBody.feedback.metadata.status, "processing");
+    assert.equal(updatedBody.feedback.metadata.assignee, "ops@example.com");
+
+    await store.createFeedback({
+      organizationId: "org_feedback_repo",
+      userId: "usr_feedback_repo",
+      message: "第二条反馈",
+      source: "admin_panel",
+    });
+    const batched = await fetch(`${feedbackBaseUrl}/api/feedback/batch-status`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        feedback_ids: data.system_events.map((item) => item.id),
+        status: "resolved",
+        note: "统一处理",
+      }),
+    });
+    const batchedBody = await batched.json();
+    assert.equal(batched.status, 200, JSON.stringify(batchedBody));
+    assert.equal(batchedBody.count, 2);
+    assert.ok(batchedBody.feedbacks.every((item) => item.metadata.status === "resolved"));
+
+    assert.equal(writeCalled, false);
+    assert.deepEqual(hookCalls.map((item) => item[0]), ["create", "update", "create", "batch"]);
+    assert.equal(hookCalls[0][1].organizationId, "org_feedback_repo");
+    assert.equal(hookCalls[1][1].feedbackId, "evt_feedback_repo_1");
+    assert.deepEqual(hookCalls[3][1].feedbackIds, ["evt_feedback_repo_1", "evt_feedback_repo_2"]);
+    assert.ok(data.audit_logs.some((item) => item.action === "feedback.status.batch_update"));
+  } finally {
+    await new Promise((resolve) => feedbackServer.close(resolve));
+  }
+});
+
 test("writer APIs use repository hooks when available", async () => {
   const now = new Date().toISOString();
   const token = `writer-repo-${crypto.randomUUID()}`;

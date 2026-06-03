@@ -9,6 +9,11 @@ import { buildAuditHistoryQuery, insertAuditLog, listAuditByOrganization } from 
 import { grantCreditsForOrder, spendCreditsForUsage } from "../src/db/repositories/creditRepository.js";
 import { buildDocumentListQuery, listDocumentsByOrganization } from "../src/db/repositories/documentRepository.js";
 import {
+  createFeedbackEvent,
+  updateFeedbackBatchStatus,
+  updateFeedbackStatus,
+} from "../src/db/repositories/feedbackRepository.js";
+import {
   activatePlanForManualPaymentOrder,
   createManualPaymentOrder,
   reviewManualPaymentOrder,
@@ -545,6 +550,151 @@ test("manual payment repository activates plan from existing future expiry", asy
   assert.equal(organization.plan, "pro");
   assert.equal(organization.plan_expires_at, "2026-07-01T00:00:00.000Z");
   assert.match(calls[1].text, /update organizations/);
+});
+
+test("feedback repository creates a user feedback event", async () => {
+  let captured = null;
+  const pool = {
+    async query(text, values) {
+      captured = { text, values };
+      return {
+        rows: [{
+          id: values[0],
+          organization_id: values[1],
+          user_id: values[2],
+          level: values[3],
+          type: values[4],
+          message: values[5],
+          metadata: values[6],
+          created_at: new Date(values[7]),
+        }],
+      };
+    },
+  };
+
+  const event = await createFeedbackEvent(pool, {
+    organizationId: "org_feedback",
+    userId: "usr_feedback",
+    message: "请增加批量导出",
+    source: "admin_panel",
+    now: "2026-05-24T08:00:00.000Z",
+  });
+
+  assert.match(captured.text, /insert into system_events/);
+  assert.equal(event.organization_id, "org_feedback");
+  assert.equal(event.user_id, "usr_feedback");
+  assert.equal(event.type, "user.feedback");
+  assert.equal(event.message, "请增加批量导出");
+  assert.deepEqual(event.metadata, { source: "admin_panel" });
+  assert.equal(event.created_at, "2026-05-24T08:00:00.000Z");
+});
+
+test("feedback repository updates one feedback status with triage metadata", async () => {
+  const calls = [];
+  const existing = {
+    id: "evt_feedback",
+    organization_id: "org_feedback",
+    user_id: "usr_feedback",
+    level: "info",
+    type: "user.feedback",
+    message: "需要处理",
+    metadata: { source: "cloud_panel", priority: "normal" },
+    created_at: "2026-05-24T08:00:00.000Z",
+  };
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/select/.test(text)) return { rows: [existing] };
+      if (/update system_events/.test(text)) {
+        return {
+          rows: [{
+            ...existing,
+            metadata: values[2],
+          }],
+        };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const event = await updateFeedbackStatus(pool, {
+    organizationId: "org_feedback",
+    feedbackId: "evt_feedback",
+    status: "processing",
+    metadataPatch: { assignee: "ops@example.com", sla_at: "2026-05-30" },
+    userId: "usr_admin",
+    now: "2026-05-24T09:00:00.000Z",
+  });
+
+  assert.match(calls[1].text, /where organization_id = \$1 and id = \$2 and type = 'user.feedback'/);
+  assert.equal(event.metadata.status, "processing");
+  assert.equal(event.metadata.assignee, "ops@example.com");
+  assert.equal(event.metadata.sla_at, "2026-05-30");
+  assert.equal(event.metadata.handled_by, "usr_admin");
+  assert.equal(event.metadata.handled_at, "2026-05-24T09:00:00.000Z");
+  assert.equal(event.metadata.source, "cloud_panel");
+});
+
+test("feedback repository batch updates scoped feedback events", async () => {
+  const calls = [];
+  const rows = ["evt_feedback_1", "evt_feedback_2"].map((id) => ({
+    id,
+    organization_id: "org_feedback",
+    user_id: "usr_feedback",
+    level: "info",
+    type: "user.feedback",
+    message: id,
+    metadata: { source: "cloud_panel" },
+    created_at: "2026-05-24T08:00:00.000Z",
+  }));
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/select/.test(text)) return { rows };
+      if (/update system_events/.test(text)) {
+        const row = rows.find((item) => item.id === values[1]);
+        return { rows: [{ ...row, metadata: values[2] }] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const updated = await updateFeedbackBatchStatus(pool, {
+    organizationId: "org_feedback",
+    feedbackIds: ["evt_feedback_1", "evt_feedback_2"],
+    status: "resolved",
+    metadataPatch: { note: "已处理" },
+    userId: "usr_admin",
+    now: "2026-05-24T10:00:00.000Z",
+  });
+
+  assert.match(calls[0].text, /id = any\(\$2::text\[\]\)/);
+  assert.equal(updated.length, 2);
+  assert.ok(updated.every((item) => item.metadata.status === "resolved"));
+  assert.ok(updated.every((item) => item.metadata.note === "已处理"));
+  assert.ok(updated.every((item) => item.metadata.handled_by === "usr_admin"));
+});
+
+test("feedback repository reports not found updates", async () => {
+  const pool = { async query() { return { rows: [] }; } };
+  await assert.rejects(
+    () => updateFeedbackStatus(pool, {
+      organizationId: "org_feedback",
+      feedbackId: "evt_missing",
+      status: "closed",
+      userId: "usr_admin",
+    }),
+    (error) => error.code === "feedback_not_found",
+  );
+  await assert.rejects(
+    () => updateFeedbackBatchStatus(pool, {
+      organizationId: "org_feedback",
+      feedbackIds: ["evt_missing"],
+      status: "closed",
+      userId: "usr_admin",
+    }),
+    (error) => error.code === "feedback_not_found",
+  );
 });
 
 test("audit repository query is organization-scoped and filterable", async () => {

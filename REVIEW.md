@@ -1,5 +1,33 @@
 # 代码评审记录
 
+## 2026-06-03 反馈处理 PostgreSQL Repository Review
+
+范围：`server/src/db/repositories/feedbackRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
+
+结论：本轮没有发现阻断问题。用户反馈链路已从 PostgreSQL Store 的整库快照写回拆为 `system_events` 表级 repository：反馈创建、单条状态流转和批量状态处理都可在 PostgreSQL Store 下走独立事务；处理审计与状态更新保持同事务写入，JSON Store 兼容路径不变。
+
+已确认：
+
+- `/api/feedback` 在 Store 提供 `createFeedback` hook 时不再调用整库 `write()`。
+- `/api/feedback/:id/status` 和 `/api/feedback/batch-status` 在 Store 提供反馈状态 hook 时会保留原有 metadata，并补写状态、负责人、SLA、备注、处理人和处理时间。
+- `feedbackRepository` 会按 `organization_id + type='user.feedback'` 限定更新范围，找不到反馈时返回可映射为 404 的 `feedback_not_found`。
+- Repository 测试覆盖反馈创建、单条处理、批量处理和 not found；API 回归测试覆盖 hook 路径不会回退 `write()`。
+
+残余风险：
+
+- 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
+- 错误事件本体跟进、邮件/支付回调事件和部分平台运行事件仍会写入或更新 `system_events`，后续可继续拆出更通用的 system event repository。
+
+验证命令：
+
+```bash
+node --check server\src\db\repositories\feedbackRepository.js
+node --check server\src\db\postgresStore.js
+node --check server\src\app.js
+node --test server\tests\postgres-repository.test.js
+node --test server\tests\commercial-api.test.js
+```
+
 ## 2026-06-02 人工确认充值 PostgreSQL Repository Review
 
 范围：`server/src/db/repositories/manualPaymentRepository.js`、`server/src/db/repositories/creditRepository.js`、`server/src/db/postgresStore.js`、`server/src/billing/manualPaymentService.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
@@ -975,7 +1003,7 @@ npm run test:e2e
 结果：
 
 - 前端与核心单元测试：238 项通过
-- 后端服务与 repository 测试：89 项通过
+- 后端服务与 repository 测试：94 项通过
 - 端到端测试：30 项通过
 
 GitHub Actions 已配置基础 CI，自动运行：

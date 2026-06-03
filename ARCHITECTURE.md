@@ -291,6 +291,7 @@ P2 第五轮阶段 C 已补充：
 - `documents` 分页只读 repository，`GET /api/documents` 在 PostgreSQL Store 下优先走表级查询，并返回可选 `page_info`。
 - `admin_preferences` 表级 repository，后台偏好读取、保存和清空在 PostgreSQL Store 下走独立事务，并与旧快照写队列共享 advisory lock。
 - `ops_triage` 表级 repository，AI 失败记录的后台跟进映射在 PostgreSQL Store 下走独立 upsert，并在同一事务写审计日志。
+- `feedback` 表级 repository，`user.feedback` 创建、单条状态流转和批量处理在 PostgreSQL Store 下走 `system_events` 表级事务，并在同一事务写处理审计。
 - `writer_profiles`/`writer_versions` 表级 repository，执笔人创建、更新、软删除、版本列表和版本恢复在 PostgreSQL Store 下走独立事务，并保持版本快照和审计日志同事务写入。
 - `ai_usage` 表级写入 repository，AI 调用用量记录与 `ai.chat` 审计日志在 PostgreSQL Store 下同事务插入；AI 超额调用的额度扣减走 `credit_accounts`/`credit_ledger` repository，并在同事务写入扣减审计。
 - `manual_payment_orders` 表级 repository，人工充值订单创建、审核、额度入账和会员开通在 PostgreSQL Store 下走独立事务，并与审计、系统事件保持同事务写入。
@@ -335,7 +336,7 @@ npm run test:e2e
 当前覆盖：
 
 - 前端与核心单元测试：238 项
-- 后端服务与 repository 测试：89 项
+- 后端服务与 repository 测试：94 项
 - 端到端测试：30 项
 
 重点测试对象：
@@ -355,7 +356,7 @@ npm run test:e2e
 
 - 用量：`ai_usage` 记录任务类型、token、状态和后端统一估算成本；`AI_COST_RATES` 可按 provider/model 配置价格。
 - 错误：`system_events` 保存组织归属的系统事件；`ai_usage` 失败记录通过 `ops_triage` 保存跟进状态，避免污染原始用量事实；PostgreSQL Store 下 AI 失败跟进已走表级 repository 写入。
-- 反馈：`user.feedback` 仍保存在 `system_events`，单条和批量状态流转都会写审计。
+- 反馈：`user.feedback` 仍保存在 `system_events`，单条和批量状态流转都会写审计；PostgreSQL Store 下反馈创建和状态流转已走表级 repository 写入。
 - 偏好：`admin_preferences` 保存后台审计筛选、错误筛选和反馈筛选，按 `organization_id + user_id` 隔离；PostgreSQL Store 下已走表级 repository 写入。
 - 权限：owner/admin 可管理后台数据，operator 为运营只读角色；组织后台只返回当前组织事件，平台级 `organization_id === null` 事件预留给未来平台管理后台。
 

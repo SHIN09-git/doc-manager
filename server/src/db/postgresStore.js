@@ -8,6 +8,11 @@ import { insertAuditLog, listAuditByOrganization } from "./repositories/auditRep
 import { grantCreditsForOrder, spendCreditsForUsage as spendCreditsForUsageRecord } from "./repositories/creditRepository.js";
 import { listDocumentsByOrganization } from "./repositories/documentRepository.js";
 import {
+  createFeedbackEvent,
+  updateFeedbackBatchStatus as updateFeedbackBatchStatusRecord,
+  updateFeedbackStatus as updateFeedbackStatusRecord,
+} from "./repositories/feedbackRepository.js";
+import {
   activatePlanForManualPaymentOrder,
   createManualPaymentOrder as createManualPaymentOrderRecord,
   reviewManualPaymentOrder as reviewManualPaymentOrderRecord,
@@ -387,6 +392,57 @@ export class PostgresStore {
         created_at: now,
       });
       return record;
+    });
+  }
+
+  async createFeedback(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      return createFeedbackEvent(client, { ...options, now });
+    });
+  }
+
+  async updateFeedbackStatus(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const feedback = await updateFeedbackStatusRecord(client, { ...options, now });
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "feedback.status.update",
+        target_type: "feedback",
+        target_id: options.feedbackId,
+        metadata: {
+          status: options.status || "",
+          assignee: feedback.metadata?.assignee || "",
+          sla_at: feedback.metadata?.sla_at || "",
+        },
+        created_at: now,
+      });
+      return feedback;
+    });
+  }
+
+  async updateFeedbackBatchStatus(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const feedbacks = await updateFeedbackBatchStatusRecord(client, { ...options, now });
+      await insertAuditLog(client, {
+        id: createId("aud"),
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        action: "feedback.status.batch_update",
+        target_type: "feedback",
+        target_id: "batch",
+        metadata: {
+          status: options.status || "",
+          count: feedbacks.length,
+          feedback_ids: feedbacks.map((item) => item.id),
+        },
+        created_at: now,
+      });
+      return feedbacks;
     });
   }
 

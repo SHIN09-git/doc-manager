@@ -1448,6 +1448,16 @@ async function createFeedback(ctx) {
   const message = String(body.message || "").trim();
   if (!message) throw new HttpError(400, "请填写反馈内容", "missing_feedback");
   const { organization } = await loadOrg(ctx);
+  if (typeof ctx.store.createFeedback === "function") {
+    await ctx.store.createFeedback({
+      organizationId: organization.id,
+      userId: ctx.auth.user.id,
+      message,
+      source: String(body.source || "cloud_panel").slice(0, 80),
+    });
+    sendJson(ctx.response, 201, { ok: true });
+    return;
+  }
   await ctx.store.write((data) => {
     addSystemEvent(data, organization.id, ctx.auth.user.id, "info", "user.feedback", message.slice(0, 4000), {
       source: String(body.source || "cloud_panel").slice(0, 80),
@@ -1462,6 +1472,22 @@ async function updateFeedbackStatus(ctx, feedbackId) {
   const triage = normalizeTriagePayload(body);
   const { organization, membership } = await loadOrg(ctx);
   if (!ADMIN_ROLES.has(membership.role)) throw new HttpError(403, "只有管理员可以处理反馈", "forbidden");
+  if (typeof ctx.store.updateFeedbackStatus === "function") {
+    let feedback;
+    try {
+      feedback = await ctx.store.updateFeedbackStatus({
+        organizationId: organization.id,
+        feedbackId,
+        status,
+        metadataPatch: triage,
+        userId: ctx.auth.user.id,
+      });
+    } catch (error) {
+      throw mapFeedbackRepositoryError(error);
+    }
+    sendJson(ctx.response, 200, { feedback });
+    return;
+  }
   const feedback = await ctx.store.write((data) => {
     const item = data.system_events.find((event) =>
       event.id === feedbackId &&
@@ -1487,6 +1513,22 @@ async function updateFeedbackBatchStatus(ctx) {
   if (ids.length === 0) throw new HttpError(400, "请选择要处理的反馈", "missing_feedback_ids");
   const { organization, membership } = await loadOrg(ctx);
   if (!ADMIN_ROLES.has(membership.role)) throw new HttpError(403, "只有管理员可以批量处理反馈", "forbidden");
+  if (typeof ctx.store.updateFeedbackBatchStatus === "function") {
+    let feedbacks;
+    try {
+      feedbacks = await ctx.store.updateFeedbackBatchStatus({
+        organizationId: organization.id,
+        feedbackIds: ids,
+        status,
+        metadataPatch: triage,
+        userId: ctx.auth.user.id,
+      });
+    } catch (error) {
+      throw mapFeedbackRepositoryError(error);
+    }
+    sendJson(ctx.response, 200, { count: feedbacks.length, feedbacks });
+    return;
+  }
   const feedbacks = await ctx.store.write((data) => {
     const idSet = new Set(ids);
     const updated = [];
@@ -2328,6 +2370,13 @@ function normalizePlan(plan) {
 
 function normalizeFeedbackStatus(status) {
   return ["pending", "processing", "resolved", "closed"].includes(status) ? status : "pending";
+}
+
+function mapFeedbackRepositoryError(error) {
+  if (error?.code === "feedback_not_found") {
+    return new HttpError(404, "反馈不存在", "not_found");
+  }
+  return error;
 }
 
 function normalizeTriageStatus(status) {
