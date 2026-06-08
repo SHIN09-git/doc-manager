@@ -38,11 +38,11 @@ export function createSkillRenderer(deps) {
     const enabledStyles = state.styles.filter(isSkillEnabled);
     els.styleSelect.innerHTML = [
       '<option value="">无默认执笔人</option>',
-      ...enabledStyles.map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)} · ${escapeHtml(style.name)}</option>`),
+      ...enabledStyles.map((style) => `<option value="${escapeHtml(style.id)}">@${escapeHtml(style.handle)} · ${escapeHtml(style.name)}</option>`),
     ].join("");
     els.editorSkillSelect.innerHTML = [
       '<option value="">不指定执笔人</option>',
-      ...enabledStyles.map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)}</option>`),
+      ...enabledStyles.map((style) => `<option value="${escapeHtml(style.id)}">@${escapeHtml(style.handle)}</option>`),
     ].join("");
   }
 
@@ -323,27 +323,28 @@ export function createSkillRenderer(deps) {
     const buildProgress = style.buildProgress || {};
     const isSelected = ui.selectedSkillCardId === style.id;
     const isExpanded = isSelected || status.key === "building" || status.key === "failed";
+    const skillId = escapeHtml(style.id);
     if (!isExpanded) {
-      return `<article class="skill-card is-collapsed is-${status.key}" data-skill-card="${style.id}" tabindex="0" aria-expanded="false">
+      return `<article class="skill-card is-collapsed is-${status.key}" data-skill-card="${skillId}" tabindex="0" aria-expanded="false">
         <div class="skill-card-compact">
           <div class="skill-card-title">
             <span class="skill-avatar"><i data-lucide="book-open-text"></i></span>
             <h3>${escapeHtml(style.name || "未命名执笔人")}</h3>
           </div>
-          <button class="primary-action" type="button" data-invoke-skill="${style.id}">
+          <button class="primary-action" type="button" data-invoke-skill="${skillId}">
             <i data-lucide="at-sign"></i>
             调用
           </button>
         </div>
       </article>`;
     }
-    return `<article class="skill-card is-expanded ${isSelected ? "is-active" : ""} is-${status.key}" data-skill-card="${style.id}" tabindex="0" aria-expanded="true">
+    return `<article class="skill-card is-expanded ${isSelected ? "is-active" : ""} is-${status.key}" data-skill-card="${skillId}" tabindex="0" aria-expanded="true">
       <div class="skill-card-head">
         <div class="skill-card-title">
           <span class="skill-avatar"><i data-lucide="book-open-text"></i></span>
           <div>
             <h3>${escapeHtml(style.name || "未命名执笔人")}</h3>
-            <button class="skill-handle-copy" type="button" data-copy-skill-handle="${style.id}" title="复制调用名">@${escapeHtml(style.handle || normalizeHandle(style.name))}</button>
+            <button class="skill-handle-copy" type="button" data-copy-skill-handle="${skillId}" title="复制调用名">@${escapeHtml(style.handle || normalizeHandle(style.name))}</button>
           </div>
         </div>
         <span class="skill-status-badge ${status.className}">${status.label}</span>
@@ -360,23 +361,23 @@ export function createSkillRenderer(deps) {
       ${status.key === "building" ? renderBuildProgress(style, buildProgress) : ""}
       ${status.key === "failed" ? renderBuildFailure(style) : renderBuildResult(style, result)}
       <div class="skill-card-actions">
-        <button class="primary-action" type="button" data-invoke-skill="${style.id}">
+        <button class="primary-action" type="button" data-invoke-skill="${skillId}">
           <i data-lucide="at-sign"></i>
           调用
         </button>
-        <button type="button" data-edit-skill="${style.id}">编辑</button>
-        <button type="button" data-retrain-skill="${style.id}">重训</button>
+        <button type="button" data-edit-skill="${skillId}">编辑</button>
+        <button type="button" data-retrain-skill="${skillId}">重训</button>
         <label class="inline-check skill-toggle">
-          <input type="checkbox" data-toggle-skill="${style.id}" ${style.enabled !== false ? "checked" : ""} />
+          <input type="checkbox" data-toggle-skill="${skillId}" ${style.enabled !== false ? "checked" : ""} />
           <span>启用</span>
         </label>
         <details class="skill-more">
           <summary title="更多操作"><i data-lucide="more-horizontal"></i></summary>
           <div class="skill-more-menu">
-            <button type="button" data-skill-detail="${style.id}">查看详情</button>
-            <button type="button" data-skill-test="${style.id}">测试</button>
-            <button type="button" data-skill-export="${style.id}">导出该执笔人</button>
-            <button class="danger-text" type="button" data-skill-delete="${style.id}">删除</button>
+            <button type="button" data-skill-detail="${skillId}">查看详情</button>
+            <button type="button" data-skill-test="${skillId}">测试</button>
+            <button type="button" data-skill-export="${skillId}">导出该执笔人</button>
+            <button class="danger-text" type="button" data-skill-delete="${skillId}">删除</button>
           </div>
         </details>
       </div>
@@ -385,20 +386,22 @@ export function createSkillRenderer(deps) {
 
   function renderBuildProgress(style, progress) {
     const value = Math.max(0, Math.min(100, Number(progress.progress) || 8));
+    const skillId = escapeHtml(style.id);
     return `<div class="skill-build-progress" role="status" aria-live="polite">
       <div class="skill-build-progress-head">
         <span>${escapeHtml(progress.message || "正在生成执笔人")}</span>
-        <button class="tiny-button" type="button" data-cancel-skill-build="${style.id}">取消</button>
+        <button class="tiny-button" type="button" data-cancel-skill-build="${skillId}">取消</button>
       </div>
       <div class="skill-progress-track"><span style="width: ${value}%"></span></div>
     </div>`;
   }
 
   function renderBuildFailure(style) {
+    const skillId = escapeHtml(style.id);
     return `<div class="skill-build-result is-failed">
       <span>生成失败：${escapeHtml(style.lastBuildError || "请稍后重试")}</span>
-      <button class="tiny-button" type="button" data-retry-skill="${style.id}">重试</button>
-      <button class="tiny-button" type="button" data-skill-detail="${style.id}">查看日志</button>
+      <button class="tiny-button" type="button" data-retry-skill="${skillId}">重试</button>
+      <button class="tiny-button" type="button" data-skill-detail="${skillId}">查看日志</button>
     </div>`;
   }
 

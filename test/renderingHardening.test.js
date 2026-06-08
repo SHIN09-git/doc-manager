@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createDocumentRenderer } from "../src/modules/documents/documentRenderer.js";
 import { createFolderRenderer } from "../src/modules/folders/folderRenderer.js";
+import { createSkillRenderer } from "../src/modules/skills/skillRenderer.js";
 
 test("document renderer escapes document ids in HTML attributes", () => {
   const originalWindow = globalThis.window;
@@ -71,6 +72,46 @@ test("folder renderer escapes folder ids and sanitizes folder colors", () => {
   assert.equal(folderList.innerHTML.includes("javascript:alert"), false);
   assert.match(folderList.innerHTML, /background:#2d3234/);
   assert.match(folderSelect.innerHTML, /folder-1&quot; data-bad=&quot;1/);
+});
+
+test("skill renderer escapes skill ids in selectors and action attributes", () => {
+  const originalWindow = globalThis.window;
+  globalThis.window = {};
+  const styleList = createFakeElement();
+  const styleSelect = createFakeElement();
+  const editorSkillSelect = createFakeElement();
+  try {
+    const skill = {
+      id: 'skill-1" onclick="alert(1)',
+      name: "通知执笔人",
+      handle: "notice",
+      category: "公文写作",
+      description: "起草通知",
+      enabled: true,
+      examples: [],
+      versions: [],
+    };
+    const renderer = createSkillRenderer({
+      state: { styles: [skill] },
+      ui: { selectedSkillCardId: skill.id, editingStyle: skill },
+      els: { styleList, styleSelect, editorSkillSelect },
+      createEmptyStyle: () => ({}),
+      isSkillEnabled: () => true,
+      commitSkillToState: () => {},
+      getSkillLocation: () => "",
+      toast: () => {},
+    });
+
+    renderer.renderStyleSelect();
+    renderer.renderStyleList();
+
+    assert.match(styleSelect.innerHTML, /skill-1&quot; onclick=&quot;alert\(1\)/);
+    assert.match(editorSkillSelect.innerHTML, /skill-1&quot; onclick=&quot;alert\(1\)/);
+    assert.match(styleList.innerHTML, /skill-1&quot; onclick=&quot;alert\(1\)/);
+    assert.equal(styleList.innerHTML.includes('skill-1" onclick="alert(1)'), false);
+  } finally {
+    globalThis.window = originalWindow;
+  }
 });
 
 function createFakeElement() {

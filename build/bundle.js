@@ -37838,11 +37838,11 @@ ${JSON.stringify(payload, null, 2)}`
       const enabledStyles = state2.styles.filter(isSkillEnabled2);
       els2.styleSelect.innerHTML = [
         '<option value="">\u65E0\u9ED8\u8BA4\u6267\u7B14\u4EBA</option>',
-        ...enabledStyles.map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)} \xB7 ${escapeHtml(style.name)}</option>`)
+        ...enabledStyles.map((style) => `<option value="${escapeHtml(style.id)}">@${escapeHtml(style.handle)} \xB7 ${escapeHtml(style.name)}</option>`)
       ].join("");
       els2.editorSkillSelect.innerHTML = [
         '<option value="">\u4E0D\u6307\u5B9A\u6267\u7B14\u4EBA</option>',
-        ...enabledStyles.map((style) => `<option value="${style.id}">@${escapeHtml(style.handle)}</option>`)
+        ...enabledStyles.map((style) => `<option value="${escapeHtml(style.id)}">@${escapeHtml(style.handle)}</option>`)
       ].join("");
     }
     function renderStyleEditor2() {
@@ -38101,27 +38101,28 @@ ${JSON.stringify(payload, null, 2)}`
       const buildProgress = style.buildProgress || {};
       const isSelected = ui2.selectedSkillCardId === style.id;
       const isExpanded = isSelected || status.key === "building" || status.key === "failed";
+      const skillId = escapeHtml(style.id);
       if (!isExpanded) {
-        return `<article class="skill-card is-collapsed is-${status.key}" data-skill-card="${style.id}" tabindex="0" aria-expanded="false">
+        return `<article class="skill-card is-collapsed is-${status.key}" data-skill-card="${skillId}" tabindex="0" aria-expanded="false">
         <div class="skill-card-compact">
           <div class="skill-card-title">
             <span class="skill-avatar"><i data-lucide="book-open-text"></i></span>
             <h3>${escapeHtml(style.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA")}</h3>
           </div>
-          <button class="primary-action" type="button" data-invoke-skill="${style.id}">
+          <button class="primary-action" type="button" data-invoke-skill="${skillId}">
             <i data-lucide="at-sign"></i>
             \u8C03\u7528
           </button>
         </div>
       </article>`;
       }
-      return `<article class="skill-card is-expanded ${isSelected ? "is-active" : ""} is-${status.key}" data-skill-card="${style.id}" tabindex="0" aria-expanded="true">
+      return `<article class="skill-card is-expanded ${isSelected ? "is-active" : ""} is-${status.key}" data-skill-card="${skillId}" tabindex="0" aria-expanded="true">
       <div class="skill-card-head">
         <div class="skill-card-title">
           <span class="skill-avatar"><i data-lucide="book-open-text"></i></span>
           <div>
             <h3>${escapeHtml(style.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA")}</h3>
-            <button class="skill-handle-copy" type="button" data-copy-skill-handle="${style.id}" title="\u590D\u5236\u8C03\u7528\u540D">@${escapeHtml(style.handle || normalizeHandle(style.name))}</button>
+            <button class="skill-handle-copy" type="button" data-copy-skill-handle="${skillId}" title="\u590D\u5236\u8C03\u7528\u540D">@${escapeHtml(style.handle || normalizeHandle(style.name))}</button>
           </div>
         </div>
         <span class="skill-status-badge ${status.className}">${status.label}</span>
@@ -38138,23 +38139,23 @@ ${JSON.stringify(payload, null, 2)}`
       ${status.key === "building" ? renderBuildProgress(style, buildProgress) : ""}
       ${status.key === "failed" ? renderBuildFailure(style) : renderBuildResult(style, result2)}
       <div class="skill-card-actions">
-        <button class="primary-action" type="button" data-invoke-skill="${style.id}">
+        <button class="primary-action" type="button" data-invoke-skill="${skillId}">
           <i data-lucide="at-sign"></i>
           \u8C03\u7528
         </button>
-        <button type="button" data-edit-skill="${style.id}">\u7F16\u8F91</button>
-        <button type="button" data-retrain-skill="${style.id}">\u91CD\u8BAD</button>
+        <button type="button" data-edit-skill="${skillId}">\u7F16\u8F91</button>
+        <button type="button" data-retrain-skill="${skillId}">\u91CD\u8BAD</button>
         <label class="inline-check skill-toggle">
-          <input type="checkbox" data-toggle-skill="${style.id}" ${style.enabled !== false ? "checked" : ""} />
+          <input type="checkbox" data-toggle-skill="${skillId}" ${style.enabled !== false ? "checked" : ""} />
           <span>\u542F\u7528</span>
         </label>
         <details class="skill-more">
           <summary title="\u66F4\u591A\u64CD\u4F5C"><i data-lucide="more-horizontal"></i></summary>
           <div class="skill-more-menu">
-            <button type="button" data-skill-detail="${style.id}">\u67E5\u770B\u8BE6\u60C5</button>
-            <button type="button" data-skill-test="${style.id}">\u6D4B\u8BD5</button>
-            <button type="button" data-skill-export="${style.id}">\u5BFC\u51FA\u8BE5\u6267\u7B14\u4EBA</button>
-            <button class="danger-text" type="button" data-skill-delete="${style.id}">\u5220\u9664</button>
+            <button type="button" data-skill-detail="${skillId}">\u67E5\u770B\u8BE6\u60C5</button>
+            <button type="button" data-skill-test="${skillId}">\u6D4B\u8BD5</button>
+            <button type="button" data-skill-export="${skillId}">\u5BFC\u51FA\u8BE5\u6267\u7B14\u4EBA</button>
+            <button class="danger-text" type="button" data-skill-delete="${skillId}">\u5220\u9664</button>
           </div>
         </details>
       </div>
@@ -38162,19 +38163,21 @@ ${JSON.stringify(payload, null, 2)}`
     }
     function renderBuildProgress(style, progress) {
       const value = Math.max(0, Math.min(100, Number(progress.progress) || 8));
+      const skillId = escapeHtml(style.id);
       return `<div class="skill-build-progress" role="status" aria-live="polite">
       <div class="skill-build-progress-head">
         <span>${escapeHtml(progress.message || "\u6B63\u5728\u751F\u6210\u6267\u7B14\u4EBA")}</span>
-        <button class="tiny-button" type="button" data-cancel-skill-build="${style.id}">\u53D6\u6D88</button>
+        <button class="tiny-button" type="button" data-cancel-skill-build="${skillId}">\u53D6\u6D88</button>
       </div>
       <div class="skill-progress-track"><span style="width: ${value}%"></span></div>
     </div>`;
     }
     function renderBuildFailure(style) {
+      const skillId = escapeHtml(style.id);
       return `<div class="skill-build-result is-failed">
       <span>\u751F\u6210\u5931\u8D25\uFF1A${escapeHtml(style.lastBuildError || "\u8BF7\u7A0D\u540E\u91CD\u8BD5")}</span>
-      <button class="tiny-button" type="button" data-retry-skill="${style.id}">\u91CD\u8BD5</button>
-      <button class="tiny-button" type="button" data-skill-detail="${style.id}">\u67E5\u770B\u65E5\u5FD7</button>
+      <button class="tiny-button" type="button" data-retry-skill="${skillId}">\u91CD\u8BD5</button>
+      <button class="tiny-button" type="button" data-skill-detail="${skillId}">\u67E5\u770B\u65E5\u5FD7</button>
     </div>`;
     }
     function renderBuildResult(style, result2) {
