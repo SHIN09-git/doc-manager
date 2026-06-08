@@ -8,6 +8,7 @@
 
 - [x] 修复 JSON Store `write()` 失败 mutator 污染内存快照的问题，改为草稿副本成功后提交。
 - [x] 修复 PostgreSQL Store 兼容 `write()` rollback 后仍可能保留失败事务内存状态的问题。
+- [x] 修复 PostgreSQL Store 表级 `repositoryWrite()` commit 失败后仍可能保留未提交快照的问题。
 - [x] 调整登录失败、登录限流和邮箱请求限流路径，改为显式保存失败记录/系统事件后再抛出错误。
 - [x] 新增 Store 事务回归测试，覆盖 JSON Store 和 PostgreSQL Store 失败写入不污染后续状态。
 - [x] 将网站上线 TODO 整理为总控清单，明确剩余工作、P0/P1/P2 优先级和项目负责人需准备的资源。
@@ -406,7 +407,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：238 项前端与核心单元测试通过，102 项后端服务与 repository 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：238 项前端与核心单元测试通过，103 项后端服务与 repository 测试通过，30 项端到端测试通过。
 
 ## 已完成
 

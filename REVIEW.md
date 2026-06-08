@@ -4,12 +4,13 @@
 
 范围：`server/src/db/jsonStore.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/store-transaction.test.js`、`server/tests/commercial-api.test.js`。
 
-结论：修复了兼容 Store 写入的内存事务语义问题。JSON Store 和 PostgreSQL Store 现在都会在草稿副本上执行 mutator，只有成功保存/提交后才替换 `this.data`；mutator 抛错时不会把半截用户、事件、登录尝试或其他变更留在内存快照里。
+结论：修复了兼容 Store 写入和 PostgreSQL 表级 repository 写入的内存事务语义问题。JSON Store 和 PostgreSQL Store 现在都会在草稿副本上执行 mutator，只有成功保存/提交后才替换 `this.data`；PostgreSQL Store 的 `repositoryWrite()` 也会等 commit 成功后才刷新快照。mutator 抛错、rollback 或 commit 失败时，不会把半截用户、事件、登录尝试或 repository 结果留在内存快照里。
 
 已确认：
 
 - JSON Store 失败 mutator 不会污染后续 read 或下一次成功写入。
 - PostgreSQL Store rollback 后不会保留失败事务中的 draft 数据；成功 commit 后才刷新内存快照。
+- PostgreSQL Store 表级 `repositoryWrite()` 在 commit 失败时不会保留事务内 `loadAll()` 读到的未提交快照；后续 commit 成功时才刷新内存。
 - 登录失败和登录限流仍会显式保存 login_attempt/system_events 后返回错误，不再依赖失败 mutator 的副作用。
 - 邮箱验证和密码重置限流仍会显式保存 `email.request.throttled` 事件后返回错误。
 - 回归测试覆盖 Store 级回滚语义；商业 API 测试确认登录限流仍可用。
@@ -1087,7 +1088,7 @@ npm run test:e2e
 结果：
 
 - 前端与核心单元测试：238 项通过
-- 后端服务与 repository 测试：102 项通过
+- 后端服务与 repository 测试：103 项通过
 - 端到端测试：30 项通过
 
 GitHub Actions 已配置基础 CI，自动运行：

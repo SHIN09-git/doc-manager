@@ -571,8 +571,9 @@ export class PostgresStore {
         await client.query("begin");
         await client.query("select pg_advisory_xact_lock(hashtext('mowen_store_write'))");
         const result = await callback(client);
-        this.data = await this.loadAll(client);
+        const snapshot = await this.loadAll(client);
         await client.query("commit");
+        this.data = snapshot;
         return result;
       } catch (error) {
         await client.query("rollback").catch(() => null);

@@ -7,8 +7,9 @@
 ### 工程
 
 - 修复 JSON Store 与 PostgreSQL Store 兼容 `write()` 的失败事务内存污染：mutator 现在只在草稿副本上执行，成功提交后才替换内存快照。
+- 修复 PostgreSQL Store 表级 `repositoryWrite()` 的提交失败内存污染：repository 回调和事务内快照加载成功后，仍需等 commit 成功才刷新 `this.data`。
 - 登录失败、登录限流、邮箱验证/密码重置限流改为先提交失败记录或系统事件，再由调用层抛出错误，避免依赖失败 mutator 的副作用。
-- 新增 Store 事务回归测试，覆盖 JSON Store 和 PostgreSQL Store 在 mutator 抛错后的回滚语义。
+- 新增 Store 事务回归测试，覆盖 JSON Store 和 PostgreSQL Store 在 mutator 抛错、rollback 和 commit 失败后的回滚语义。
 
 ### 文档
 

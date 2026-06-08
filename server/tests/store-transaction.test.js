@@ -79,3 +79,62 @@ test("PostgresStore.write leaves the memory snapshot untouched after rollback", 
   assert.deepEqual(store.data.users.map((user) => user.id), ["usr_initial", "usr_saved"]);
   assert.deepEqual(databaseData.users.map((user) => user.id), ["usr_initial", "usr_saved"]);
 });
+
+test("PostgresStore.repositoryWrite refreshes memory only after commit succeeds", async () => {
+  const client = {
+    queries: [],
+    failCommit: true,
+    async query(sql) {
+      this.queries.push(sql);
+      if (String(sql).toLowerCase() === "commit" && this.failCommit) {
+        throw new Error("commit failed");
+      }
+    },
+    release() {
+      this.released = true;
+    },
+  };
+  let committedData = normalizeData({
+    users: [{ id: "usr_initial", email: "initial@example.com" }],
+  });
+  let transactionData = structuredClone(committedData);
+  const store = Object.create(PostgresStore.prototype);
+  Object.assign(store, {
+    data: structuredClone(committedData),
+    writeQueue: Promise.resolve(),
+    pool: { connect: async () => client },
+    init: async () => {},
+    loadAll: async () => structuredClone(transactionData),
+  });
+
+  await assert.rejects(
+    () => store.repositoryWrite(async () => {
+      transactionData = normalizeData({
+        ...transactionData,
+        users: [
+          ...transactionData.users,
+          { id: "usr_uncommitted", email: "uncommitted@example.com" },
+        ],
+      });
+    }),
+    /commit failed/,
+  );
+
+  assert.deepEqual(store.data.users.map((user) => user.id), ["usr_initial"]);
+  assert.equal(client.queries.some((sql) => String(sql).toLowerCase() === "rollback"), true);
+
+  client.failCommit = false;
+  transactionData = structuredClone(committedData);
+  await store.repositoryWrite(async () => {
+    transactionData = normalizeData({
+      ...transactionData,
+      users: [
+        ...transactionData.users,
+        { id: "usr_committed", email: "committed@example.com" },
+      ],
+    });
+    committedData = structuredClone(transactionData);
+  });
+
+  assert.deepEqual(store.data.users.map((user) => user.id), ["usr_initial", "usr_committed"]);
+});
