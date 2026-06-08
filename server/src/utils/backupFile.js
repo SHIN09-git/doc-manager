@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { EMPTY_DATA, normalizeData } from "../db/jsonStore.js";
 import { decryptBackupPayload, isEncryptedBackupEnvelope } from "./backupCrypto.js";
 
@@ -38,4 +39,15 @@ export function validateBackupPayload(parsed, { backupPath = "", encrypted = fal
     table_counts: tableCounts,
     data: normalizeData(data),
   };
+}
+
+export async function writeBackupFileAtomically(filePath, content) {
+  const tempPath = `${filePath}.tmp-${process.pid}-${randomUUID()}`;
+  try {
+    await writeFile(tempPath, content, { encoding: "utf8", flag: "wx" });
+    await rename(tempPath, filePath);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => null);
+    throw error;
+  }
 }

@@ -295,7 +295,7 @@ GET /api/ready
 npm run server:backup
 ```
 
-备份脚本会读取当前 Store，写入 `BACKUP_DIR`，并按 `BACKUP_RETENTION_DAYS` 清理旧备份。脚本失败时会输出 `{ "ok": false }` 并返回非 0 退出码；如配置 `BACKUP_FAILURE_WEBHOOK_URL`，会向运维 webhook 发送最小告警信息。
+备份脚本会读取当前 Store，先写入同目录临时文件，再原子重命名到 `BACKUP_DIR` 的最终备份路径，并立即回读校验表结构和表计数。校验通过后才会继续上传对象存储，并按 `BACKUP_RETENTION_DAYS` 清理旧备份。脚本失败时会输出 `{ "ok": false }` 并返回非 0 退出码；如配置 `BACKUP_FAILURE_WEBHOOK_URL`，会向运维 webhook 发送最小告警信息。
 
 默认未配置 `BACKUP_ENCRYPTION_KEY` 时，脚本继续输出明文 `.json`，便于本地开发兼容。生产环境建议配置 `BACKUP_ENCRYPTION_KEY`，脚本会输出 AES-256-GCM 加密的 `.json.gcm` 文件。生成后可以先做只读结构校验：
 

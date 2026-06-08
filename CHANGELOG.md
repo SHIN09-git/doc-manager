@@ -24,6 +24,7 @@
 - 人工充值运行时套餐归一化同步收紧，零金额、非数字金额或非数字额度的套餐不会进入用户可提交订单列表。
 - 人工充值套餐只要显式填写 `plan` 就必须是 Pro/Team 付费档，`free` 免费档不会作为可购买套餐通过运行时或部署自检。
 - 正式支付 checkout 增加价格映射门禁：`PAYMENT_CHECKOUT_MODE=webhook` 必须配置强 `PAYMENT_WEBHOOK_SECRET` 和 pro/team `PAYMENT_PLAN_PRICE_MAP`，缺少映射时账单摘要不展示可购买套餐，checkout 接口返回明确配置错误。
+- 备份脚本改为临时文件原子写入，重命名后立即用统一备份解析器回读校验，确认表结构和表计数后再上传对象存储。
 - 管理后台用量和审计 CSV 导出新增公式注入防护，疑似公式的单元格会作为文本导出；发布清单同步包含新 CSV 模块，并补充独立单元测试。
 - 静态发布脚本会从后台入口递归收集相对 ESM 依赖，避免后台继续拆模块后部署目录缺少间接依赖。
 - 新增 Store 事务回归测试，覆盖 JSON Store 和 PostgreSQL Store 在 mutator 抛错、rollback 和 commit 失败后的回滚语义。

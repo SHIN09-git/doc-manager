@@ -1,8 +1,9 @@
-import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { loadEnv } from "../src/config/env.js";
 import { createStore } from "../src/db/storeFactory.js";
 import { encryptBackupPayload } from "../src/utils/backupCrypto.js";
+import { readBackupFile, writeBackupFileAtomically } from "../src/utils/backupFile.js";
 import { uploadBackupToObjectStorage } from "../src/utils/objectStorage.js";
 
 let env;
@@ -25,7 +26,8 @@ try {
   const fileContent = encrypted
     ? `${JSON.stringify(encryptBackupPayload(backupPayload, env.backupEncryptionKey, { exported_at: exportedAt }), null, 2)}\n`
     : backupPayload;
-  await writeFile(filePath, fileContent, "utf8");
+  await writeBackupFileAtomically(filePath, fileContent);
+  const verified = await readBackupFile(filePath, { encryptionKey: env.backupEncryptionKey });
   const objectStorage = await uploadBackupToObjectStorage(env, { filePath, fileName });
 
   const cutoff = Date.now() - env.backupRetentionDays * 24 * 60 * 60 * 1000;
@@ -46,6 +48,7 @@ try {
     ok: true,
     backup: filePath,
     encrypted,
+    table_counts: verified.table_counts,
     object_storage: objectStorage,
     removed_old_backups: removed,
   }));
