@@ -4,6 +4,7 @@ import {
   formatManualOrderStatus,
   formatManualPaymentChannel,
 } from "../modules/cloud/billingFormatters.js";
+import { sanitizeUrl } from "../utils/helpers.js";
 import { buildCsv } from "./adminCsv.js";
 
 const LOCAL_API_BASE_URL = "http://127.0.0.1:8787/api";
@@ -926,7 +927,7 @@ async function startBillingCheckout(button) {
       method: "POST",
       body: JSON.stringify({ plan, price_id: priceId }),
     });
-    const url = data.checkout?.checkout_url;
+    const url = sanitizeUrl(data.checkout?.checkout_url);
     if (!url) throw new Error("未返回支付链接");
     window.open(url, "_blank", "noopener,noreferrer");
     toast("已打开升级页面");

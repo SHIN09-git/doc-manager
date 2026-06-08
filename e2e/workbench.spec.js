@@ -813,6 +813,7 @@ test("standalone admin page supports core management actions with API session", 
   let adminPreferences = { audit_filters: [] };
   let adminPreferenceWriteCount = 0;
   let feedbackBatchWriteCount = 0;
+  let checkoutUrl = "http://127.0.0.1:4173/checkout?plan=pro";
   let apiKeys = [{ id: "key-1", provider: "openai-compatible", key_hint: "sk-…test", updated_at: "2026-05-24T00:00:00.000Z" }];
   const usageRows = [
     { id: "use-1", task_type: "draft", status: "success", total_tokens: 1200, estimated_cost: 0.03, created_at: "2026-05-23T01:00:00.000Z" },
@@ -928,7 +929,7 @@ test("standalone admin page supports core management actions with API session", 
       return json(200, { membership: { id: "mem-2", role: memberRole } });
     }
     if (path === "/billing/checkout" && method === "POST") {
-      return json(201, { checkout: { plan: body.plan, price_id: body.price_id, checkout_url: `http://127.0.0.1:4173/checkout?plan=${body.plan}` } });
+      return json(201, { checkout: { plan: body.plan, price_id: body.price_id, checkout_url: checkoutUrl } });
     }
     if (path === "/billing/manual-orders/mop-1/review" && method === "POST") {
       manualOrders = manualOrders.map((item) =>
@@ -1046,6 +1047,10 @@ test("standalone admin page supports core management actions with API session", 
   await expect(page.locator("#adminContent")).toContainText("额度明细");
   await page.locator('[data-admin-action="billing-checkout"]').click();
   await expect.poll(() => page.evaluate(() => window.__openedAdminUrls.at(-1))).toContain("plan=pro");
+  checkoutUrl = "javascript:alert(1)";
+  const openedCheckoutCount = await page.evaluate(() => window.__openedAdminUrls.length);
+  await page.locator('[data-admin-action="billing-checkout"]').click();
+  await expect.poll(() => page.evaluate(() => window.__openedAdminUrls.length)).toBe(openedCheckoutCount);
 });
 
 test("routes style panel drops into the current skill examples", async ({ page }) => {
