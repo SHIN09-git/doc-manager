@@ -1,4 +1,4 @@
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,15 +8,18 @@ export const STATIC_FILE_COPIES = [
   ["admin.html", "admin.html"],
   ["styles.css", "styles.css"],
   ["build/bundle.js", "build/bundle.js"],
-  ["src/admin/adminPage.js", "src/admin/adminPage.js"],
-  ["src/admin/adminCsv.js", "src/admin/adminCsv.js"],
-  ["src/modules/cloud/billingFormatters.js", "src/modules/cloud/billingFormatters.js"],
 ];
+
+export const STATIC_MODULE_ENTRIES = ["src/admin/adminPage.js"];
+
+const RELATIVE_IMPORT_PATTERN =
+  /(?:import|export)\s+(?:[^'"]*?\s+from\s+)?["'](\.{1,2}\/[^"']+)["']|import\(\s*["'](\.{1,2}\/[^"']+)["']\s*\)/g;
 
 export async function buildStaticSite({ root = process.cwd(), dist = path.join(root, "dist") } = {}) {
   await rm(dist, { recursive: true, force: true });
 
-  await Promise.all(STATIC_FILE_COPIES.map(async ([source, target]) => {
+  const fileCopies = await collectStaticFileCopies({ root });
+  await Promise.all(fileCopies.map(async ([source, target]) => {
     const outputPath = path.join(dist, target);
     await mkdir(path.dirname(outputPath), { recursive: true });
     await cp(path.join(root, source), outputPath);
@@ -27,6 +30,60 @@ export async function buildStaticSite({ root = process.cwd(), dist = path.join(r
   }
 
   return dist;
+}
+
+export async function collectStaticFileCopies({
+  root = process.cwd(),
+  fileCopies = STATIC_FILE_COPIES,
+  moduleEntries = STATIC_MODULE_ENTRIES,
+} = {}) {
+  const copies = new Map(fileCopies);
+  const queue = [...moduleEntries];
+  const visited = new Set();
+
+  moduleEntries.forEach((entry) => copies.set(normalizePath(entry), normalizePath(entry)));
+
+  while (queue.length) {
+    const source = normalizePath(queue.shift());
+    if (visited.has(source)) continue;
+    visited.add(source);
+
+    const absolutePath = path.join(root, source);
+    if (!existsSync(absolutePath)) {
+      throw new Error(`Static module not found: ${source}`);
+    }
+
+    const content = await readFile(absolutePath, "utf8");
+    for (const specifier of parseRelativeImports(content)) {
+      const dependency = resolveRelativeImport(source, specifier);
+      if (!existsSync(path.join(root, dependency))) {
+        throw new Error(`Static module dependency not found: ${dependency}`);
+      }
+      copies.set(dependency, dependency);
+      if (isJavaScriptModule(dependency)) queue.push(dependency);
+    }
+  }
+
+  return Array.from(copies.entries());
+}
+
+export function parseRelativeImports(content) {
+  return Array.from(String(content || "").matchAll(RELATIVE_IMPORT_PATTERN))
+    .map((match) => match[1] || match[2])
+    .filter(Boolean);
+}
+
+export function resolveRelativeImport(source, specifier) {
+  const resolved = normalizePath(path.normalize(path.join(path.dirname(source), specifier)));
+  return path.extname(resolved) ? resolved : `${resolved}.js`;
+}
+
+function normalizePath(value) {
+  return String(value || "").replace(/\\/g, "/");
+}
+
+function isJavaScriptModule(source) {
+  return [".js", ".mjs"].includes(path.extname(source));
 }
 
 const currentFile = fileURLToPath(import.meta.url);

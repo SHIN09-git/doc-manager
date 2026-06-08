@@ -1,5 +1,27 @@
 # 代码评审记录
 
+## 2026-06-09 静态发布依赖收集 Review
+
+范围：`scripts/build-static.mjs`、`test/deployScripts.test.js`。
+
+结论：修复了静态发布清单需要手工维护后台 ESM 依赖的结构性缺陷。此前 `admin.html` 依赖的模块必须逐个写进 `STATIC_FILE_COPIES`；一旦后台页面继续拆模块，容易出现本地测试可用、`dist/admin.html` 部署后缺文件的问题。现在静态构建会从 `src/admin/adminPage.js` 出发，递归收集相对 `import` / `export ... from` / 动态 `import()` 依赖，并把这些模块按原路径复制到 `dist`。
+
+已确认：
+
+- `index.html`、`admin.html`、`styles.css`、`build/bundle.js` 仍作为固定静态文件复制。
+- 后台入口 `src/admin/adminPage.js` 及其直接和间接相对依赖会自动复制。
+- 缺失依赖会在构建阶段抛出明确错误，而不是生成缺文件的发布目录。
+- 新增回归测试覆盖真实后台入口依赖，以及临时模块中的二级转导依赖。
+
+验证命令：
+
+```bash
+node --check scripts/build-static.mjs
+node --check test/deployScripts.test.js
+node --test test/deployScripts.test.js
+npm run build:static
+```
+
 ## 2026-06-09 管理后台 CSV 导出 Review
 
 范围：`src/admin/adminPage.js`、`src/admin/adminCsv.js`、`scripts/build-static.mjs`、`test/adminCsv.test.js`、`test/deployScripts.test.js`。

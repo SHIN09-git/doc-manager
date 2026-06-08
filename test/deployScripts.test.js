@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { STATIC_FILE_COPIES } from "../scripts/build-static.mjs";
+import { collectStaticFileCopies } from "../scripts/build-static.mjs";
 import { buildProductionChecks, parseDotEnv } from "../scripts/verify-production.mjs";
 
 test("parseDotEnv reads simple quoted and unquoted values", () => {
@@ -57,8 +59,8 @@ test("production checks reject placeholder launch configuration", () => {
   assert.ok(failedNames.includes("MANUAL_PAYMENT_PACKAGES"));
 });
 
-test("static build manifest includes admin page module dependencies", () => {
-  const copiedSources = new Set(STATIC_FILE_COPIES.map(([source]) => source.replace(/\\/g, "/")));
+test("static build manifest includes admin page module dependencies", async () => {
+  const copiedSources = new Set((await collectStaticFileCopies()).map(([source]) => source.replace(/\\/g, "/")));
   const adminSource = "src/admin/adminPage.js";
   const adminContent = readFileSync(adminSource, "utf8");
   const imports = Array.from(adminContent.matchAll(/from\s+["'](\.\.?\/[^"']+)["']/g))
@@ -72,4 +74,29 @@ test("static build manifest includes admin page module dependencies", () => {
   imports.forEach((source) => {
     assert.ok(copiedSources.has(source), `${source} must be copied for dist/admin.html`);
   });
+});
+
+test("static build manifest recursively includes transitive module dependencies", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "mowen-static-"));
+  try {
+    await mkdir(path.join(root, "nested"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "entry.js"), 'import "./nested/child.js";\n');
+    await writeFile(path.join(root, "nested", "child.js"), 'export { value } from "../shared/value.js";\n');
+    await writeFile(path.join(root, "shared", "value.js"), "export const value = 1;\n");
+    await writeFile(path.join(root, "static.txt"), "static\n");
+
+    const copiedSources = new Set((await collectStaticFileCopies({
+      root,
+      fileCopies: [["static.txt", "static.txt"]],
+      moduleEntries: ["entry.js"],
+    })).map(([source]) => source.replace(/\\/g, "/")));
+
+    assert.ok(copiedSources.has("static.txt"));
+    assert.ok(copiedSources.has("entry.js"));
+    assert.ok(copiedSources.has("nested/child.js"));
+    assert.ok(copiedSources.has("shared/value.js"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
