@@ -60,6 +60,19 @@ export function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
+export function sanitizeCssColor(value, fallback = "#2d3234") {
+  const color = String(value || "").trim();
+  if (/^#[0-9a-fA-F]{3,8}$/.test(color)) return color;
+  if (/^rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/.test(color)) {
+    return color;
+  }
+  if (/^hsla?\(\s*[\d.]+(?:deg|rad|turn)?\s*,\s*[\d.]+%\s*,\s*[\d.]+%(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/.test(color)) {
+    return color;
+  }
+  if (/^[a-zA-Z]+$/.test(color)) return color;
+  return fallback;
+}
+
 export function stableTextHash(value) {
   let hash = 0;
   const text = String(value || "");

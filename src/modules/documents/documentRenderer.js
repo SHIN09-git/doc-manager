@@ -52,16 +52,17 @@ export function createDocumentRenderer(deps) {
         const type = getType(doc.type).name;
         const folder = state.folders.find((item) => item.id === doc.folderId);
         const active = doc.id === ui.selectedDocId;
-        const actions = `<button class="tiny-button" type="button" title="复制" data-copy-doc="${doc.id}"><i data-lucide="copy"></i></button>
+        const docId = escapeHtml(doc.id);
+        const actions = `<button class="tiny-button" type="button" title="复制" data-copy-doc="${docId}"><i data-lucide="copy"></i></button>
               <details class="doc-menu" data-doc-menu>
                 <summary class="tiny-button" title="更多操作" aria-label="更多操作"><i data-lucide="more-horizontal"></i></summary>
                 <div class="doc-menu-panel" role="menu">
-                  <button type="button" role="menuitem" data-move-doc-top="${doc.id}"><i data-lucide="arrow-up-to-line"></i><span>置顶</span></button>
-                  <button type="button" role="menuitem" data-move-doc-bottom="${doc.id}"><i data-lucide="arrow-down-to-line"></i><span>置底</span></button>
+                  <button type="button" role="menuitem" data-move-doc-top="${docId}"><i data-lucide="arrow-up-to-line"></i><span>置顶</span></button>
+                  <button type="button" role="menuitem" data-move-doc-bottom="${docId}"><i data-lucide="arrow-down-to-line"></i><span>置底</span></button>
                 </div>
               </details>
-              <button class="tiny-button danger-text" type="button" title="移入垃圾箱" data-delete-doc="${doc.id}"><i data-lucide="trash-2"></i></button>`;
-        return `<article class="doc-item ${active ? "active" : ""}" id="doc-option-${doc.id}" data-doc-id="${doc.id}" draggable="true" role="option" aria-selected="${String(active)}" tabindex="${active || (!ui.selectedDocId && docs.indexOf(doc) === 0) ? "0" : "-1"}">
+              <button class="tiny-button danger-text" type="button" title="移入垃圾箱" data-delete-doc="${docId}"><i data-lucide="trash-2"></i></button>`;
+        return `<article class="doc-item ${active ? "active" : ""}" id="doc-option-${docId}" data-doc-id="${docId}" draggable="true" role="option" aria-selected="${String(active)}" tabindex="${active || (!ui.selectedDocId && docs.indexOf(doc) === 0) ? "0" : "-1"}">
           <div class="doc-title-row">
             <div class="doc-title">${escapeHtml(doc.title || "未命名文档")}</div>
             <span class="doc-actions">
@@ -153,15 +154,16 @@ export function createDocumentRenderer(deps) {
       .map((doc) => {
         const folder = state.folders.find((item) => item.id === doc.folderId);
         const type = getType(doc.type).name;
-        return `<article class="trash-item" data-trash-doc-id="${doc.id}">
+        const docId = escapeHtml(doc.id);
+        return `<article class="trash-item" data-trash-doc-id="${docId}">
           <div class="trash-item-main">
             <strong>${escapeHtml(doc.title || "未命名文档")}</strong>
             <span>${escapeHtml(type)} · ${escapeHtml(folder?.name || "未归档")} · 删除于 ${formatTime(doc.deletedAt)}</span>
             <p>${escapeHtml(String(doc.content || "").replace(/\s+/g, " ").slice(0, 120) || "空白文档")}</p>
           </div>
           <div class="trash-item-actions">
-            <button type="button" data-restore-doc="${doc.id}"><i data-lucide="rotate-ccw"></i><span>恢复</span></button>
-            <button type="button" class="danger-text" data-permanent-delete-doc="${doc.id}"><i data-lucide="trash-2"></i><span>清除</span></button>
+            <button type="button" data-restore-doc="${docId}"><i data-lucide="rotate-ccw"></i><span>恢复</span></button>
+            <button type="button" class="danger-text" data-permanent-delete-doc="${docId}"><i data-lucide="trash-2"></i><span>清除</span></button>
           </div>
         </article>`;
       })

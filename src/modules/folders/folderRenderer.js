@@ -1,4 +1,4 @@
-import { escapeHtml } from "../../utils/helpers.js";
+import { escapeHtml, sanitizeCssColor } from "../../utils/helpers.js";
 
 export function createFolderRenderer(deps) {
   const {
@@ -22,17 +22,19 @@ export function createFolderRenderer(deps) {
         const count = state.docs.filter((doc) => doc.folderId === folder.id).length;
         const isReal = folder.kind === "real";
         const badge = isReal ? "真实" : "标签";
+        const folderId = escapeHtml(folder.id);
+        const color = sanitizeCssColor(folder.color);
         return `<div class="folder-item ${ui.selectedFolderId === folder.id ? "active" : ""}">
-          <button class="folder-main tiny-reset" type="button" data-folder-id="${folder.id}">
-            <span class="folder-color" style="background:${folder.color}"></span>
+          <button class="folder-main tiny-reset" type="button" data-folder-id="${folderId}">
+            <span class="folder-color" style="background:${color}"></span>
             <span>${escapeHtml(folder.name)}</span>
             <small class="folder-kind">${badge}</small>
           </button>
           <span class="folder-actions">
             <span>${count}</span>
-            ${isReal ? `<button class="tiny-button" type="button" title="从真实文件夹重新导入" data-sync-folder="${folder.id}"><i data-lucide="refresh-cw"></i></button>` : ""}
-            <button class="tiny-button" type="button" title="重命名显示名称" data-rename-folder="${folder.id}"><i data-lucide="pencil"></i></button>
-            <button class="tiny-button danger-text" type="button" title="${isReal ? "取消关联" : "删除标签"}" data-delete-folder="${folder.id}"><i data-lucide="x"></i></button>
+            ${isReal ? `<button class="tiny-button" type="button" title="从真实文件夹重新导入" data-sync-folder="${folderId}"><i data-lucide="refresh-cw"></i></button>` : ""}
+            <button class="tiny-button" type="button" title="重命名显示名称" data-rename-folder="${folderId}"><i data-lucide="pencil"></i></button>
+            <button class="tiny-button danger-text" type="button" title="${isReal ? "取消关联" : "删除标签"}" data-delete-folder="${folderId}"><i data-lucide="x"></i></button>
           </span>
         </div>`;
       }),
@@ -55,7 +57,7 @@ export function createFolderRenderer(deps) {
 
   function renderFolderSelect() {
     els.folderSelect.innerHTML = state.folders
-      .map((folder) => `<option value="${folder.id}">${folder.kind === "real" ? "📁" : "#"} ${escapeHtml(folder.name)}</option>`)
+      .map((folder) => `<option value="${escapeHtml(folder.id)}">${folder.kind === "real" ? "📁" : "#"} ${escapeHtml(folder.name)}</option>`)
       .join("");
   }
 

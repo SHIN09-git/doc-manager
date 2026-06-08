@@ -23870,6 +23870,18 @@
   function escapeHtml(value) {
     return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
   }
+  function sanitizeCssColor(value, fallback = "#2d3234") {
+    const color = String(value || "").trim();
+    if (/^#[0-9a-fA-F]{3,8}$/.test(color)) return color;
+    if (/^rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/.test(color)) {
+      return color;
+    }
+    if (/^hsla?\(\s*[\d.]+(?:deg|rad|turn)?\s*,\s*[\d.]+%\s*,\s*[\d.]+%(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)$/.test(color)) {
+      return color;
+    }
+    if (/^[a-zA-Z]+$/.test(color)) return color;
+    return fallback;
+  }
   function stableTextHash(value) {
     let hash = 0;
     const text = String(value || "");
@@ -26780,16 +26792,17 @@ ${doc.content}`.toLowerCase().includes(query);
         const type = getType2(doc.type).name;
         const folder = state2.folders.find((item) => item.id === doc.folderId);
         const active = doc.id === ui2.selectedDocId;
-        const actions = `<button class="tiny-button" type="button" title="\u590D\u5236" data-copy-doc="${doc.id}"><i data-lucide="copy"></i></button>
+        const docId = escapeHtml(doc.id);
+        const actions = `<button class="tiny-button" type="button" title="\u590D\u5236" data-copy-doc="${docId}"><i data-lucide="copy"></i></button>
               <details class="doc-menu" data-doc-menu>
                 <summary class="tiny-button" title="\u66F4\u591A\u64CD\u4F5C" aria-label="\u66F4\u591A\u64CD\u4F5C"><i data-lucide="more-horizontal"></i></summary>
                 <div class="doc-menu-panel" role="menu">
-                  <button type="button" role="menuitem" data-move-doc-top="${doc.id}"><i data-lucide="arrow-up-to-line"></i><span>\u7F6E\u9876</span></button>
-                  <button type="button" role="menuitem" data-move-doc-bottom="${doc.id}"><i data-lucide="arrow-down-to-line"></i><span>\u7F6E\u5E95</span></button>
+                  <button type="button" role="menuitem" data-move-doc-top="${docId}"><i data-lucide="arrow-up-to-line"></i><span>\u7F6E\u9876</span></button>
+                  <button type="button" role="menuitem" data-move-doc-bottom="${docId}"><i data-lucide="arrow-down-to-line"></i><span>\u7F6E\u5E95</span></button>
                 </div>
               </details>
-              <button class="tiny-button danger-text" type="button" title="\u79FB\u5165\u5783\u573E\u7BB1" data-delete-doc="${doc.id}"><i data-lucide="trash-2"></i></button>`;
-        return `<article class="doc-item ${active ? "active" : ""}" id="doc-option-${doc.id}" data-doc-id="${doc.id}" draggable="true" role="option" aria-selected="${String(active)}" tabindex="${active || !ui2.selectedDocId && docs.indexOf(doc) === 0 ? "0" : "-1"}">
+              <button class="tiny-button danger-text" type="button" title="\u79FB\u5165\u5783\u573E\u7BB1" data-delete-doc="${docId}"><i data-lucide="trash-2"></i></button>`;
+        return `<article class="doc-item ${active ? "active" : ""}" id="doc-option-${docId}" data-doc-id="${docId}" draggable="true" role="option" aria-selected="${String(active)}" tabindex="${active || !ui2.selectedDocId && docs.indexOf(doc) === 0 ? "0" : "-1"}">
           <div class="doc-title-row">
             <div class="doc-title">${escapeHtml(doc.title || "\u672A\u547D\u540D\u6587\u6863")}</div>
             <span class="doc-actions">
@@ -26877,15 +26890,16 @@ ${doc.content}`.toLowerCase().includes(query);
       els2.trashModalList.innerHTML = trashDocs.map((doc) => {
         const folder = state2.folders.find((item) => item.id === doc.folderId);
         const type = getType2(doc.type).name;
-        return `<article class="trash-item" data-trash-doc-id="${doc.id}">
+        const docId = escapeHtml(doc.id);
+        return `<article class="trash-item" data-trash-doc-id="${docId}">
           <div class="trash-item-main">
             <strong>${escapeHtml(doc.title || "\u672A\u547D\u540D\u6587\u6863")}</strong>
             <span>${escapeHtml(type)} \xB7 ${escapeHtml(folder?.name || "\u672A\u5F52\u6863")} \xB7 \u5220\u9664\u4E8E ${formatTime(doc.deletedAt)}</span>
             <p>${escapeHtml(String(doc.content || "").replace(/\s+/g, " ").slice(0, 120) || "\u7A7A\u767D\u6587\u6863")}</p>
           </div>
           <div class="trash-item-actions">
-            <button type="button" data-restore-doc="${doc.id}"><i data-lucide="rotate-ccw"></i><span>\u6062\u590D</span></button>
-            <button type="button" class="danger-text" data-permanent-delete-doc="${doc.id}"><i data-lucide="trash-2"></i><span>\u6E05\u9664</span></button>
+            <button type="button" data-restore-doc="${docId}"><i data-lucide="rotate-ccw"></i><span>\u6062\u590D</span></button>
+            <button type="button" class="danger-text" data-permanent-delete-doc="${docId}"><i data-lucide="trash-2"></i><span>\u6E05\u9664</span></button>
           </div>
         </article>`;
       }).join("");
@@ -28184,17 +28198,19 @@ ${doc.content || ""}`);
           const count = state2.docs.filter((doc) => doc.folderId === folder.id).length;
           const isReal = folder.kind === "real";
           const badge = isReal ? "\u771F\u5B9E" : "\u6807\u7B7E";
+          const folderId = escapeHtml(folder.id);
+          const color = sanitizeCssColor(folder.color);
           return `<div class="folder-item ${ui2.selectedFolderId === folder.id ? "active" : ""}">
-          <button class="folder-main tiny-reset" type="button" data-folder-id="${folder.id}">
-            <span class="folder-color" style="background:${folder.color}"></span>
+          <button class="folder-main tiny-reset" type="button" data-folder-id="${folderId}">
+            <span class="folder-color" style="background:${color}"></span>
             <span>${escapeHtml(folder.name)}</span>
             <small class="folder-kind">${badge}</small>
           </button>
           <span class="folder-actions">
             <span>${count}</span>
-            ${isReal ? `<button class="tiny-button" type="button" title="\u4ECE\u771F\u5B9E\u6587\u4EF6\u5939\u91CD\u65B0\u5BFC\u5165" data-sync-folder="${folder.id}"><i data-lucide="refresh-cw"></i></button>` : ""}
-            <button class="tiny-button" type="button" title="\u91CD\u547D\u540D\u663E\u793A\u540D\u79F0" data-rename-folder="${folder.id}"><i data-lucide="pencil"></i></button>
-            <button class="tiny-button danger-text" type="button" title="${isReal ? "\u53D6\u6D88\u5173\u8054" : "\u5220\u9664\u6807\u7B7E"}" data-delete-folder="${folder.id}"><i data-lucide="x"></i></button>
+            ${isReal ? `<button class="tiny-button" type="button" title="\u4ECE\u771F\u5B9E\u6587\u4EF6\u5939\u91CD\u65B0\u5BFC\u5165" data-sync-folder="${folderId}"><i data-lucide="refresh-cw"></i></button>` : ""}
+            <button class="tiny-button" type="button" title="\u91CD\u547D\u540D\u663E\u793A\u540D\u79F0" data-rename-folder="${folderId}"><i data-lucide="pencil"></i></button>
+            <button class="tiny-button danger-text" type="button" title="${isReal ? "\u53D6\u6D88\u5173\u8054" : "\u5220\u9664\u6807\u7B7E"}" data-delete-folder="${folderId}"><i data-lucide="x"></i></button>
           </span>
         </div>`;
         })
@@ -28214,7 +28230,7 @@ ${doc.content || ""}`);
       });
     }
     function renderFolderSelect2() {
-      els2.folderSelect.innerHTML = state2.folders.map((folder) => `<option value="${folder.id}">${folder.kind === "real" ? "\u{1F4C1}" : "#"} ${escapeHtml(folder.name)}</option>`).join("");
+      els2.folderSelect.innerHTML = state2.folders.map((folder) => `<option value="${escapeHtml(folder.id)}">${folder.kind === "real" ? "\u{1F4C1}" : "#"} ${escapeHtml(folder.name)}</option>`).join("");
     }
     return {
       renderFolders: renderFolders2,

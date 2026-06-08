@@ -1,5 +1,30 @@
 # 代码评审记录
 
+## 2026-06-09 前端渲染属性边界 Review
+
+范围：`src/utils/helpers.js`、`src/modules/folders/folderRenderer.js`、`src/modules/documents/documentRenderer.js`、`test/helpers.test.js`。
+
+结论：加固了文档列表与文件夹列表的 HTML 属性渲染边界。文档 ID、文件夹 ID 现在写入 `data-*`、`id`、`option value` 等属性前会先转义；文件夹颜色在写入 `style="background:..."` 前会经过 `sanitizeCssColor()`，只允许安全的 hex、rgb/rgba、hsl/hsla 和简单命名色，异常值回退到默认深灰色。
+
+已确认：
+
+- 正常系统生成的文档 ID、文件夹 ID、文件夹颜色不改变显示和交互。
+- 旧存档或导入数据中若出现带引号、尖括号或恶意 CSS 片段的 ID/颜色，不会直接撕开 HTML 属性。
+- 新增单元测试覆盖危险颜色片段回退。
+
+残余风险：
+
+- 这次只加固当前审阅到的文档/文件夹渲染属性边界；其他使用 `innerHTML` 的模块仍需按同样方式继续逐块审阅。
+
+验证命令：
+```bash
+node --check src/utils/helpers.js
+node --check src/modules/folders/folderRenderer.js
+node --check src/modules/documents/documentRenderer.js
+node --check test/renderingHardening.test.js
+node --test test/helpers.test.js test/renderingHardening.test.js test/documentExport.test.js test/documentManager.test.js test/documentPanelController.test.js
+```
+
 ## 2026-06-09 反馈处理响应公开字段 Review
 
 范围：`server/src/app.js`、`server/tests/commercial-api.test.js`、`ARCHITECTURE.md`、`CHANGELOG.md`、`SECURITY.md`、`TODO.md`。
