@@ -33,6 +33,37 @@ test("CORS_ORIGIN normalizes full urls to origins", () => {
   assert.equal(env.corsOrigin, "https://mowen.example.com");
 });
 
+test("JSON env maps and arrays parse configured values", () => {
+  const env = loadEnv({
+    AI_COST_RATES: JSON.stringify({ default: { prompt_per_1k: 0.01, completion_per_1k: 0.02 } }),
+    PAYMENT_PLAN_PRICE_MAP: JSON.stringify({ price_pro_monthly: "pro" }),
+    MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "credits_100", credits: 100 }]),
+  });
+  assert.deepEqual(env.aiCostRates.default, { prompt_per_1k: 0.01, completion_per_1k: 0.02 });
+  assert.equal(env.paymentPlanPriceMap.price_pro_monthly, "pro");
+  assert.equal(env.manualPaymentPackages[0].id, "credits_100");
+});
+
+test("JSON env maps fail fast on malformed JSON", () => {
+  assert.throws(() => loadEnv({
+    AI_COST_RATES: "{bad-json",
+  }), /AI_COST_RATES must be a valid JSON object/);
+
+  assert.throws(() => loadEnv({
+    PAYMENT_PLAN_PRICE_MAP: "[",
+  }), /PAYMENT_PLAN_PRICE_MAP must be a valid JSON object/);
+});
+
+test("JSON env values reject the wrong container type", () => {
+  assert.throws(() => loadEnv({
+    PAYMENT_PLAN_PRICE_MAP: JSON.stringify(["price_pro_monthly"]),
+  }), /PAYMENT_PLAN_PRICE_MAP must be a JSON object/);
+
+  assert.throws(() => loadEnv({
+    MANUAL_PAYMENT_PACKAGES: JSON.stringify({ id: "credits_100" }),
+  }), /MANUAL_PAYMENT_PACKAGES must be a JSON array/);
+});
+
 test("AI_PROXY_MODE rejects unknown modes", () => {
   assert.throws(() => loadEnv({
     AI_PROXY_MODE: "liv",

@@ -1,5 +1,26 @@
 # 代码评审记录
 
+## 2026-06-09 生产 JSON 环境变量解析 Review
+
+范围：`server/src/config/env.js`、`server/tests/env.test.js`。
+
+结论：修复生产配置 JSON 解析静默降级风险。此前 `AI_COST_RATES`、`PAYMENT_PLAN_PRICE_MAP` 和 `MANUAL_PAYMENT_PACKAGES` 只要 JSON 写错或容器类型填反，就会被悄悄解析成 `{}` 或 `[]`，可能导致支付价格映射、人工充值套餐或成本估算配置在上线后无声失效。现在这些环境变量没填时仍使用默认空值；一旦填写非空内容，就必须是合法 JSON 对象或数组，否则服务启动阶段直接报错。
+
+已确认：
+
+- 未配置这些变量时，本地开发默认行为不变。
+- `AI_COST_RATES` 和 `PAYMENT_PLAN_PRICE_MAP` 必须是 JSON object。
+- `MANUAL_PAYMENT_PACKAGES` 必须是 JSON array。
+- 畸形 JSON 和对象/数组类型填反都会失败，避免后续链路在错误配置下继续启动。
+
+验证命令：
+
+```bash
+node --check server/src/config/env.js
+node --check server/tests/env.test.js
+node --test server/tests/env.test.js
+```
+
 ## 2026-06-09 认证令牌错误反馈 Review
 
 范围：`server/src/app.js`、`server/tests/commercial-api.test.js`。

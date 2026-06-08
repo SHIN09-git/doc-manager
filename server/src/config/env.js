@@ -22,13 +22,13 @@ export function loadEnv(source = process.env) {
     aiBaseUrl: (source.AI_BASE_URL || "https://api.openai.com/v1").replace(/\/+$/, ""),
     aiModel: source.AI_MODEL || "",
     aiRequestTimeoutMs: toNumber(source.AI_REQUEST_TIMEOUT_MS, 60000),
-    aiCostRates: parseJsonMap(source.AI_COST_RATES),
+    aiCostRates: parseJsonMap("AI_COST_RATES", source.AI_COST_RATES),
     aiDailyBudgetCny: toOptionalNumber(source.AI_DAILY_BUDGET_CNY),
     aiMonthlyBudgetCny: toOptionalNumber(source.AI_MONTHLY_BUDGET_CNY),
     requestLogging: source.REQUEST_LOGGING === "true",
     platformOpenAiKey: source.PLATFORM_OPENAI_API_KEY || "",
     paymentWebhookSecret: source.PAYMENT_WEBHOOK_SECRET || "",
-    paymentPlanPriceMap: parseJsonMap(source.PAYMENT_PLAN_PRICE_MAP),
+    paymentPlanPriceMap: parseJsonMap("PAYMENT_PLAN_PRICE_MAP", source.PAYMENT_PLAN_PRICE_MAP),
     paymentCheckoutMode: source.PAYMENT_CHECKOUT_MODE || "disabled",
     paymentCheckoutUrl: source.PAYMENT_CHECKOUT_URL || "",
     paymentSuccessUrl: source.PAYMENT_SUCCESS_URL || "",
@@ -36,7 +36,7 @@ export function loadEnv(source = process.env) {
     manualPaymentReceiverName: source.MANUAL_PAYMENT_RECEIVER_NAME || "",
     manualPaymentWechatQrUrl: source.MANUAL_PAYMENT_WECHAT_QR_URL || "",
     manualPaymentAlipayQrUrl: source.MANUAL_PAYMENT_ALIPAY_QR_URL || "",
-    manualPaymentPackages: parseJsonArray(source.MANUAL_PAYMENT_PACKAGES),
+    manualPaymentPackages: parseJsonArray("MANUAL_PAYMENT_PACKAGES", source.MANUAL_PAYMENT_PACKAGES),
     emailMode: source.EMAIL_MODE || "log",
     emailProvider: source.EMAIL_PROVIDER || "generic-webhook",
     emailFrom: source.EMAIL_FROM || "noreply@mowen.local",
@@ -79,24 +79,30 @@ function toOptionalNumber(value) {
   return Number.isFinite(next) && next > 0 ? next : 0;
 }
 
-function parseJsonMap(value) {
-  if (!value) return {};
+function parseJsonMap(name, value) {
+  if (isBlankEnvValue(value)) return {};
   try {
     const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
   } catch {
-    return {};
+    throw new Error(`${name} must be a valid JSON object`);
   }
+  throw new Error(`${name} must be a JSON object`);
 }
 
-function parseJsonArray(value) {
-  if (!value) return [];
+function parseJsonArray(name, value) {
+  if (isBlankEnvValue(value)) return [];
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed)) return parsed;
   } catch {
-    return [];
+    throw new Error(`${name} must be a valid JSON array`);
   }
+  throw new Error(`${name} must be a JSON array`);
+}
+
+function isBlankEnvValue(value) {
+  return value === undefined || value === null || String(value).trim() === "";
 }
 
 function normalizeCorsOrigin(value) {

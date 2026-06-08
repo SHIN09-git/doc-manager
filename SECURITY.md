@@ -45,6 +45,7 @@ AI 接口配置保存在当前浏览器。
 - 邮箱验证和密码重置的提交阶段会把未知邮箱和错误令牌统一反馈为“无效或已过期”，避免公开认证入口被用来枚举账号。
 - 邮件发送可使用通用 HTTP webhook 或 Resend 适配；`EMAIL_RESEND_API_KEY`、`EMAIL_WEBHOOK_TOKEN` 和 `EMAIL_CALLBACK_TOKEN` 都应作为生产密钥管理，不应提交到仓库或前端代码。
 - 邀请成员时只把邀请码发给目标邮箱对应的用户，接受邀请需要匹配邀请码。
+- 生产 JSON 配置不应依赖静默兜底；`AI_COST_RATES`、`PAYMENT_PLAN_PRICE_MAP` 和 `MANUAL_PAYMENT_PACKAGES` 一旦填写，启动时必须解析为正确的 JSON 对象或数组，避免价格映射、套餐或成本配置无声失效。
 - 支付 webhook 使用 HMAC 签名和时间戳校验，错误签名、过期请求和重复事件会被拒绝或幂等处理。正式接支付渠道时，应通过 `PAYMENT_PLAN_PRICE_MAP` 将渠道价格 ID 映射到内部套餐，不要信任 webhook 中可伪造的原始 `plan` 字段。
 - 支付 webhook 原始 payload 只在后端内部留存用于排查和审计；账单摘要、管理员后台、组织导出和 webhook 响应只返回脱敏摘要，不应把渠道回调原文直接透出给前端。
 - 邮件投递记录的公开 metadata 只保留投递排查必要字段，例如 `delivery_id`、`message_id`、回调状态和回调时间；验证码、重置码、内部验证 ID 或任意 secret 不应出现在管理员后台和组织导出中。

@@ -87,6 +87,8 @@ EMAIL_MODE=log
 
 生产环境必须使用 `EMAIL_MODE=webhook`。开发模式的 `EMAIL_MODE=log` 只会记录邮件投递摘要，不会输出验证码或重置码。
 
+`AI_COST_RATES`、`PAYMENT_PLAN_PRICE_MAP` 和 `MANUAL_PAYMENT_PACKAGES` 是 JSON 环境变量。未配置时会使用默认空对象或空数组；一旦填写，启动时必须解析为正确的 JSON 对象或数组，否则服务会拒绝启动，避免支付价格映射、人工充值套餐或成本估算配置静默失效。
+
 `EMAIL_PROVIDER` 支持：
 
 - `generic-webhook`：沿用项目通用 HTTP webhook，请求体由你自己的邮件服务转发。
