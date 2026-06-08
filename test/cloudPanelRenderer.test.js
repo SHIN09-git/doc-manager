@@ -188,3 +188,26 @@ test("renderCloudManualPaymentMethods follows the selected package and method", 
   assert.match(els.cloudManualPaymentMethods.innerHTML, /https:\/\/example.com\/qr\.png/);
   assert.match(els.cloudManualPaymentMethods.innerHTML, /支付宝/);
 });
+
+test("renderCloudManualPaymentMethods rejects unsafe QR code urls", () => {
+  const { renderer, els } = createHarness({
+    cloud: {
+      billing: {
+        manual_payment: {
+          packages: [
+            { id: "pro", title: "Pro", amount_cny: 29, plan: "pro", duration_days: 30, credits: 0 },
+          ],
+          methods: [
+            { channel: "wechat", label: "微信", qr_url: "javascript:alert(1)" },
+          ],
+        },
+      },
+    },
+  });
+
+  renderer.renderCloudManualPaymentMethods();
+
+  assert.doesNotMatch(els.cloudManualPaymentMethods.innerHTML, /javascript:alert/);
+  assert.doesNotMatch(els.cloudManualPaymentMethods.innerHTML, /<img/i);
+  assert.match(els.cloudManualPaymentMethods.innerHTML, /未配置收款码/);
+});

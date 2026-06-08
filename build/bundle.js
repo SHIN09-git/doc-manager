@@ -23882,6 +23882,17 @@
     if (/^[a-zA-Z]+$/.test(color)) return color;
     return fallback;
   }
+  function sanitizeUrl(value, fallback = "") {
+    const text = String(value || "").trim();
+    if (!text || /[\u0000-\u001F\u007F]/.test(text)) return fallback;
+    try {
+      const parsed = new URL(text, "https://mowen.local/");
+      if (["http:", "https:"].includes(parsed.protocol)) return text;
+    } catch {
+      return fallback;
+    }
+    return fallback;
+  }
   function stableTextHash(value) {
     let hash = 0;
     const text = String(value || "");
@@ -25137,7 +25148,8 @@ ${formatListItems(items)}`;
       const method = methods.find((item) => item.channel === selected) || methods[0] || { channel: selected, label: selected, qr_url: "" };
       const receiver = manual.receiver_name ? `<span>\u6536\u6B3E\u65B9\uFF1A${escapeHtml(manual.receiver_name)}</span>` : "";
       const packageHint = selectedPackage ? `<span>\u672C\u6B21\u5E94\u4ED8\uFF1A\xA5${escapeHtml(selectedPackage.amount_cny ?? 0)} \xB7 ${escapeHtml(formatManualPaymentPackage(selectedPackage))}</span>` : "";
-      const qr = method.qr_url ? `<img src="${escapeHtml(method.qr_url)}" alt="${escapeHtml(method.label || method.channel)} \u6536\u6B3E\u7801">` : `<div class="manual-payment-placeholder">\u672A\u914D\u7F6E\u6536\u6B3E\u7801\uFF0C\u8BF7\u5411\u7BA1\u7406\u5458\u7D22\u53D6\u3002</div>`;
+      const qrUrl = sanitizeUrl(method.qr_url);
+      const qr = qrUrl ? `<img src="${escapeHtml(qrUrl)}" alt="${escapeHtml(method.label || method.channel)} \u6536\u6B3E\u7801">` : `<div class="manual-payment-placeholder">\u672A\u914D\u7F6E\u6536\u6B3E\u7801\uFF0C\u8BF7\u5411\u7BA1\u7406\u5458\u7D22\u53D6\u3002</div>`;
       els2.cloudManualPaymentMethods.innerHTML = `
       <div class="manual-payment-method">
         ${qr}

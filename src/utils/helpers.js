@@ -73,6 +73,18 @@ export function sanitizeCssColor(value, fallback = "#2d3234") {
   return fallback;
 }
 
+export function sanitizeUrl(value, fallback = "") {
+  const text = String(value || "").trim();
+  if (!text || /[\u0000-\u001F\u007F]/.test(text)) return fallback;
+  try {
+    const parsed = new URL(text, "https://mowen.local/");
+    if (["http:", "https:"].includes(parsed.protocol)) return text;
+  } catch {
+    return fallback;
+  }
+  return fallback;
+}
+
 export function stableTextHash(value) {
   let hash = 0;
   const text = String(value || "");

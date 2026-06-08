@@ -1,5 +1,27 @@
 # 代码评审记录
 
+## 2026-06-09 云端收款码 URL 渲染 Review
+
+范围：`src/utils/helpers.js`、`src/modules/cloud/cloudPanelRenderer.js`、`test/helpers.test.js`、`test/cloudPanelRenderer.test.js`。
+
+结论：加固了云端页面人工确认充值收款码的 URL 属性边界。此前收款码地址只做 HTML 转义后写入 `<img src>`；生产配置校验已经要求公开收款码使用 HTTPS，但前端仍应对本地、灰度或异常后端响应做兜底。现在新增 `sanitizeUrl()`，只允许 HTTP(S) 和相对 URL，危险协议或控制字符会回退为空，页面显示“未配置收款码”占位。
+
+已确认：
+
+- `https://...`、本地 `http://127.0.0.1...` 和相对 `assets/qr.png` 仍可展示。
+- `javascript:`、`data:text/html` 和包含控制字符的 URL 不会写入 `img src`。
+- 云端充值方法渲染会在 URL 被拒绝时显示占位说明，不产生损坏图片。
+
+验证命令：
+
+```bash
+node --check src/utils/helpers.js
+node --check src/modules/cloud/cloudPanelRenderer.js
+node --check test/helpers.test.js
+node --check test/cloudPanelRenderer.test.js
+node --test test/helpers.test.js test/cloudPanelRenderer.test.js
+```
+
 ## 2026-06-09 静态发布依赖收集 Review
 
 范围：`scripts/build-static.mjs`、`test/deployScripts.test.js`。

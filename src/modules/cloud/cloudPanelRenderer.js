@@ -4,7 +4,7 @@ import {
   formatManualPaymentPackage,
 } from "./billingFormatters.js";
 import { getFeatureGroups } from "../product/featureCatalog.js";
-import { escapeHtml } from "../../utils/helpers.js";
+import { escapeHtml, sanitizeUrl } from "../../utils/helpers.js";
 
 export function roleLabel(role) {
   const value = String(role || "member");
@@ -190,8 +190,9 @@ export function createCloudPanelRenderer(deps = {}) {
     const method = methods.find((item) => item.channel === selected) || methods[0] || { channel: selected, label: selected, qr_url: "" };
     const receiver = manual.receiver_name ? `<span>收款方：${escapeHtml(manual.receiver_name)}</span>` : "";
     const packageHint = selectedPackage ? `<span>本次应付：¥${escapeHtml(selectedPackage.amount_cny ?? 0)} · ${escapeHtml(formatManualPaymentPackage(selectedPackage))}</span>` : "";
-    const qr = method.qr_url
-      ? `<img src="${escapeHtml(method.qr_url)}" alt="${escapeHtml(method.label || method.channel)} 收款码">`
+    const qrUrl = sanitizeUrl(method.qr_url);
+    const qr = qrUrl
+      ? `<img src="${escapeHtml(qrUrl)}" alt="${escapeHtml(method.label || method.channel)} 收款码">`
       : `<div class="manual-payment-placeholder">未配置收款码，请向管理员索取。</div>`;
     els.cloudManualPaymentMethods.innerHTML = `
       <div class="manual-payment-method">
