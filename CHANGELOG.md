@@ -11,6 +11,7 @@
 - 登录失败、登录限流、邮箱验证/密码重置限流改为先提交失败记录或系统事件，再由调用层抛出错误，避免依赖失败 mutator 的副作用。
 - 支付 webhook 原始 payload 继续内部留存，但账单摘要、管理员后台、组织导出和 webhook 响应只返回脱敏摘要，避免暴露渠道回调原文。
 - 邮件投递记录的公开 metadata 改为白名单字段，管理员后台和组织导出不再透出误写入的 token、reset_token 或任意 secret。
+- 系统事件和最近错误的公开 metadata 增加递归敏感键脱敏，组织导出、管理员后台和错误接口不再透出 token、secret、api_key 等字段原文。
 - 新增 Store 事务回归测试，覆盖 JSON Store 和 PostgreSQL Store 在 mutator 抛错、rollback 和 commit 失败后的回滚语义。
 
 ### 文档

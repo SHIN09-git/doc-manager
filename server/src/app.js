@@ -1416,7 +1416,7 @@ function buildSystemEventErrorItem(item) {
     source_type: "system_event",
     created_at: item.created_at || "",
     message: item.message || "",
-    metadata: item.metadata || {},
+    metadata: publicMetadata(item.metadata),
   };
 }
 
@@ -1428,10 +1428,10 @@ function buildAiUsageErrorItem(item, triageRecord = null) {
     source_type: "ai_usage",
     created_at: item.created_at || "",
     message: item.error || "AI request failed",
-    metadata: {
+    metadata: publicMetadata({
       ...publicUsage(item),
       ...(triageRecord?.metadata || {}),
-    },
+    }),
   };
 }
 
@@ -1796,7 +1796,7 @@ async function adminDashboard(ctx) {
   const feedbacks = data.system_events
     .filter((item) => item.organization_id === organization.id && item.type === "user.feedback")
     .slice(-50)
-    .map((item) => ({ ...item, metadata: { status: "pending", ...(item.metadata || {}) } }));
+    .map((item) => publicSystemEvent(item, { status: "pending" }));
   const errors = buildRecentErrorItems(data, organization.id, 50);
   const orgUserIds = new Set(members.map((item) => item.user_id));
   const plan = getEffectivePlan(organization);
@@ -2047,7 +2047,7 @@ async function exportOrganizationData(ctx, orgId) {
     ops_triage: (data.ops_triage || []).filter((item) => item.organization_id === orgId),
     admin_preferences: (data.admin_preferences || []).filter((item) => item.organization_id === orgId),
     audit_logs: data.audit_logs.filter((item) => item.organization_id === orgId),
-    system_events: data.system_events.filter((item) => item.organization_id === orgId),
+    system_events: data.system_events.filter((item) => item.organization_id === orgId).map(publicSystemEvent),
     email_deliveries: data.email_deliveries.filter((item) => userIds.has(item.user_id)).map(publicEmailDelivery),
     payment_webhooks: data.payment_webhooks.filter((item) => item.organization_id === orgId).map(publicPaymentWebhook),
     manual_payment_orders: data.manual_payment_orders.filter((item) => item.organization_id === orgId).map((item) => publicManualPaymentOrder(item, { admin: true })),
@@ -2315,6 +2315,19 @@ function publicCreditAccount(account = {}) {
   };
 }
 
+function publicSystemEvent(item = {}, metadataDefaults = {}) {
+  return {
+    id: item.id || "",
+    organization_id: item.organization_id || null,
+    user_id: item.user_id || null,
+    level: item.level || "info",
+    type: item.type || "system_event",
+    message: item.message || "",
+    metadata: publicMetadata({ ...metadataDefaults, ...(item.metadata || {}) }),
+    created_at: item.created_at || "",
+  };
+}
+
 function publicEmailDelivery(item) {
   return {
     id: item.id,
@@ -2329,6 +2342,19 @@ function publicEmailDelivery(item) {
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
+}
+
+function publicMetadata(value) {
+  if (Array.isArray(value)) return value.map(publicMetadata);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [
+    key,
+    isSensitiveMetadataKey(key) ? "已隐藏" : publicMetadata(entry),
+  ]));
+}
+
+function isSensitiveMetadataKey(key) {
+  return /(token|secret|password|api[_-]?key|authorization|cookie|signature|credential|encrypted[_-]?key|raw[_-]?secret)/i.test(String(key || ""));
 }
 
 function publicEmailDeliveryMetadata(metadata = {}) {

@@ -867,7 +867,19 @@ test("data export, recent errors, readiness, and account deletion work", async (
     data.system_events.push(
       { id: "evt-global-warning", organization_id: null, user_id: null, level: "warn", type: "global.warning", message: "global", metadata: {}, created_at: now },
       { id: "evt-other-warning", organization_id: other.orgId, user_id: other.userId, level: "warn", type: "other.warning", message: "other", metadata: {}, created_at: now },
-      { id: "evt-owner-warning", organization_id: owner.orgId, user_id: owner.userId, level: "warn", type: "owner.warning", message: "owner", metadata: {}, created_at: now },
+      {
+        id: "evt-owner-warning",
+        organization_id: owner.orgId,
+        user_id: owner.userId,
+        level: "warn",
+        type: "owner.warning",
+        message: "owner",
+        metadata: {
+          token: "secret-system-token",
+          nested: { api_key: "sk-system-secret", keep: "visible" },
+        },
+        created_at: now,
+      },
     );
     data.ai_usage.push({
       id: "use-owner-failed",
@@ -892,6 +904,12 @@ test("data export, recent errors, readiness, and account deletion work", async (
   assert.ok(errors.json.errors.some((item) => item.id === "use-owner-failed" && item.source_type === "ai_usage"));
   assert.equal(errors.json.errors.some((item) => item.id === "evt-global-warning"), false);
   assert.equal(errors.json.errors.some((item) => item.id === "evt-other-warning"), false);
+  const ownerWarning = errors.json.errors.find((item) => item.id === "evt-owner-warning");
+  assert.equal(ownerWarning.metadata.token, "已隐藏");
+  assert.equal(ownerWarning.metadata.nested.api_key, "已隐藏");
+  assert.equal(ownerWarning.metadata.nested.keep, "visible");
+  assert.equal(JSON.stringify(ownerWarning).includes("secret-system-token"), false);
+  assert.equal(JSON.stringify(ownerWarning).includes("sk-system-secret"), false);
 
   const billing = await api("/api/billing/summary", { cookie: owner.cookie });
   assert.equal(billing.status, 200);
@@ -924,6 +942,9 @@ test("data export, recent errors, readiness, and account deletion work", async (
   assert.equal(dashboard.status, 200);
   assert.equal(dashboard.json.organization.name, "灰度团队");
   assert.equal(dashboard.json.feedbacks.length, 2);
+  const dashboardWarning = dashboard.json.recent_errors.find((item) => item.id === "evt-owner-warning");
+  assert.equal(dashboardWarning.metadata.token, "已隐藏");
+  assert.equal(JSON.stringify(dashboardWarning).includes("sk-system-secret"), false);
   const feedbackStatus = await api(`/api/feedback/${dashboard.json.feedbacks[0].id}/status`, {
     method: "POST",
     cookie: owner.cookie,
@@ -985,6 +1006,11 @@ test("data export, recent errors, readiness, and account deletion work", async (
   assert.equal(orgExport.json.api_keys.length, 0);
   assert.equal(orgExport.json.ops_triage.length, 1);
   assert.equal(orgExport.json.admin_preferences.length, 1);
+  const exportedWarning = orgExport.json.system_events.find((item) => item.id === "evt-owner-warning");
+  assert.equal(exportedWarning.metadata.token, "已隐藏");
+  assert.equal(exportedWarning.metadata.nested.api_key, "已隐藏");
+  assert.equal(exportedWarning.metadata.nested.keep, "visible");
+  assert.equal(JSON.stringify(exportedWarning).includes("secret-system-token"), false);
   const deletionRequest = await api(`/api/orgs/${owner.orgId}/deletion-request`, {
     method: "POST",
     cookie: owner.cookie,

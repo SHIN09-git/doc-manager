@@ -1,5 +1,31 @@
 # 代码评审记录
 
+## 2026-06-09 系统事件公开 Metadata Review
+
+范围：`server/src/app.js`、`server/tests/commercial-api.test.js`、`ARCHITECTURE.md`、`CHANGELOG.md`、`SECURITY.md`、`TODO.md`。
+
+结论：加固了 `system_events` 和最近错误的公开 metadata 边界。系统事件仍可保存运营排查所需的结构化信息，但最近错误接口、管理员后台和组织数据导出现在都会通过公开转换器递归隐藏 token、secret、api_key、authorization、cookie、signature 等敏感键。
+
+已确认：
+
+- `/api/ops/recent-errors` 返回的系统事件错误会隐藏敏感 metadata 键。
+- `/api/admin/dashboard` 中的 `recent_errors` 和反馈事件同样走公开转换器。
+- 组织数据导出的 `system_events` 不再返回敏感 metadata 原文。
+- 负责人、备注、优先级、SLA、状态和普通排查字段仍保留，不影响后台跟进。
+- 回归测试向系统事件写入 token 和嵌套 api_key，公开响应均不会包含原始 secret。
+
+残余风险：
+
+- `audit_logs`、`ops_triage` 和其他内部运营表仍应继续审阅公开字段；后续可把同一公开 metadata 转换器继续扩展到审计导出路径。
+- 生产事件写入时仍应避免把真实密钥写入 metadata，脱敏只是最后一道保护。
+
+验证命令：
+
+```bash
+node --check server/src/app.js
+node --test server/tests/commercial-api.test.js
+```
+
 ## 2026-06-09 邮件投递公开字段 Review
 
 范围：`server/src/app.js`、`server/tests/commercial-api.test.js`、`ARCHITECTURE.md`、`CHANGELOG.md`、`SECURITY.md`、`TODO.md`。
