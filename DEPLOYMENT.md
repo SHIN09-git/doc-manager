@@ -89,6 +89,14 @@ EMAIL_MODE=log
 
 `AI_COST_RATES`、`PAYMENT_PLAN_PRICE_MAP` 和 `MANUAL_PAYMENT_PACKAGES` 是 JSON 环境变量。未配置时会使用默认空对象或空数组；一旦填写，启动时必须解析为正确的 JSON 对象或数组，否则服务会拒绝启动，避免支付价格映射、人工充值套餐或成本估算配置静默失效。
 
+如果启用 `PAYMENT_CHECKOUT_MODE=webhook`，生产环境还必须同时配置：
+
+- `PAYMENT_CHECKOUT_URL`：支付服务商创建 checkout 的 HTTPS 地址。
+- `PAYMENT_WEBHOOK_SECRET`：至少 32 位的 webhook 签名密钥。
+- `PAYMENT_PLAN_PRICE_MAP`：把渠道价格 ID 映射到内部 `pro` 或 `team` 套餐。
+
+缺少以上任一项时，生产环境会拒绝启动；运行时也不会创建没有价格 ID 映射的支付链接。
+
 `AI_COST_RATES` 推荐按 provider、model 或 `default` 配置每千 token 单价，例如 `{"gpt-4.1-mini":{"prompt_per_1k":0.001,"completion_per_1k":0.004}}`。后端也兼容旧示例中的 `prompt` / `completion` 和 `*_per_token` 字段，并按每 token 单价换算。
 
 `EMAIL_PROVIDER` 支持：
@@ -364,7 +372,7 @@ POST /api/billing/checkout
 - 前端只传目标 `plan`，实际价格 ID 由后端根据 `PAYMENT_PLAN_PRICE_MAP` 解析。
 - `PAYMENT_CHECKOUT_MODE=disabled` 时，接口返回 `billing_checkout_not_configured`，前端显示友好提示。
 - `PAYMENT_CHECKOUT_MODE=mock` 时，接口返回本地 mock checkout URL，便于灰度演示。
-- `PAYMENT_CHECKOUT_MODE=webhook` 时，必须配置 `PAYMENT_CHECKOUT_URL`。
+- `PAYMENT_CHECKOUT_MODE=webhook` 时，必须配置 `PAYMENT_CHECKOUT_URL`、`PAYMENT_WEBHOOK_SECRET` 和至少一个 `PAYMENT_PLAN_PRICE_MAP` 价格映射；缺少价格映射时，账单摘要不会展示可购买套餐，checkout 接口返回 `billing_checkout_price_not_configured`。
 
 正式接入支付服务商时，前端仍只调用本接口，不直接拼接第三方支付链接。
 

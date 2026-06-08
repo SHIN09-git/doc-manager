@@ -1273,6 +1273,55 @@ test("billing checkout is admin-only and returns configured checkout URLs", asyn
   }
 });
 
+test("webhook checkout rejects missing provider price mapping", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-webhook-checkout-api-"));
+  const checkoutServer = createApp({
+    env: {
+      DATA_DIR: temp,
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+      PAYMENT_CHECKOUT_MODE: "webhook",
+      PAYMENT_CHECKOUT_URL: "https://pay.example.test/checkout",
+    },
+  });
+  await new Promise((resolve) => checkoutServer.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${checkoutServer.address().port}`;
+  try {
+    const registered = await fetch(`${url}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "webhook-checkout@example.com", password: "password123", name: "Webhook Checkout" }),
+    });
+    const registeredJson = await registered.json();
+    const cookie = registered.headers.get("set-cookie") || "";
+    const summary = await fetch(`${url}/api/billing/summary`, {
+      headers: { Cookie: cookie },
+    });
+    const summaryJson = await summary.json();
+    assert.deepEqual(summaryJson.checkout.available_plans, []);
+
+    const rejected = await fetch(`${url}/api/billing/checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ plan: "pro" }),
+    });
+    const rejectedJson = await rejected.json();
+    assert.equal(rejected.status, 503);
+    assert.equal(rejectedJson.error.code, "billing_checkout_price_not_configured");
+
+    const data = await checkoutServer.store.read();
+    assert.ok(data.system_events.some((item) =>
+      item.organization_id === registeredJson.active_organization.id &&
+      item.type === "billing.checkout.invalid_config" &&
+      item.message === "支付价格映射未配置"));
+    assert.equal(data.audit_logs.some((item) => item.action === "billing.checkout.create"), false);
+  } finally {
+    await new Promise((resolve) => checkoutServer.close(resolve));
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 test("payment webhook requires a signed request and is idempotent", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-webhook-api-"));
   const webhookServer = createApp({

@@ -148,6 +148,34 @@ test("production payment webhook checkout requires a configured HTTPS url", () =
   }), /PAYMENT_CHECKOUT_URL must be an HTTPS URL/);
 });
 
+test("production payment webhook checkout requires signed mapped prices", () => {
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    PAYMENT_CHECKOUT_MODE: "webhook",
+    PAYMENT_CHECKOUT_URL: "https://pay.example.com/checkout",
+    PAYMENT_PLAN_PRICE_MAP: JSON.stringify({ price_pro: "pro" }),
+  }), /PAYMENT_WEBHOOK_SECRET must be set/);
+
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    PAYMENT_CHECKOUT_MODE: "webhook",
+    PAYMENT_CHECKOUT_URL: "https://pay.example.com/checkout",
+    PAYMENT_WEBHOOK_SECRET: "w".repeat(40),
+  }), /PAYMENT_PLAN_PRICE_MAP must map provider price ids/);
+
+  const env = loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    PAYMENT_CHECKOUT_MODE: "webhook",
+    PAYMENT_CHECKOUT_URL: "https://pay.example.com/checkout",
+    PAYMENT_WEBHOOK_SECRET: "w".repeat(40),
+    PAYMENT_PLAN_PRICE_MAP: JSON.stringify({ price_pro: "pro", price_team: "team" }),
+  });
+  assert.equal(env.paymentCheckoutMode, "webhook");
+});
+
 test("production optional public urls must use HTTPS when configured", () => {
   const cases = [
     ["PAYMENT_SUCCESS_URL", "http://mowen.example.com/success"],

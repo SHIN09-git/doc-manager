@@ -73,6 +73,21 @@ export function buildProductionChecks(source) {
   add("warn", "MANUAL_PAYMENT_ALIPAY_QR_URL", hasProductionUrl(envSource.MANUAL_PAYMENT_ALIPAY_QR_URL), "configure a public Alipay QR URL if Alipay recharge is offered");
   add("warn", "BACKUP_ENCRYPTION_KEY", isStrongSecret(envSource.BACKUP_ENCRYPTION_KEY), "configure BACKUP_ENCRYPTION_KEY before storing production backups");
   add("warn", "AI key source", Boolean(envSource.PLATFORM_OPENAI_API_KEY || envSource.AI_PROXY_MODE !== "live"), "set PLATFORM_OPENAI_API_KEY or confirm organization API keys will be configured in the admin panel");
+  if (envSource.PAYMENT_CHECKOUT_MODE === "webhook") {
+    const priceMap = parseJsonObject(envSource.PAYMENT_PLAN_PRICE_MAP);
+    add(
+      "error",
+      "PAYMENT_PLAN_PRICE_MAP",
+      hasPaidPaymentPriceMap(priceMap),
+      "PAYMENT_PLAN_PRICE_MAP must map provider price ids to pro/team when webhook checkout is enabled",
+    );
+    add(
+      "error",
+      "PAYMENT_WEBHOOK_SECRET",
+      isStrongSecret(envSource.PAYMENT_WEBHOOK_SECRET),
+      "PAYMENT_WEBHOOK_SECRET must be set before webhook checkout can be used",
+    );
+  }
 
   return checks;
 }
@@ -84,6 +99,16 @@ function parseJsonArray(value) {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+function parseJsonObject(value) {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
   }
 }
 
@@ -101,6 +126,14 @@ function hasProductionUrl(value) {
 function isStrongSecret(value) {
   const raw = String(value || "");
   return raw.length >= 32 && !PLACEHOLDER_RE.test(raw);
+}
+
+function hasPaidPaymentPriceMap(map) {
+  return Object.entries(map || {}).some(([priceId, plan]) => {
+    const normalizedPriceId = String(priceId || "").trim();
+    const normalizedPlan = String(plan || "").trim().toLowerCase();
+    return Boolean(normalizedPriceId) && ["pro", "team"].includes(normalizedPlan);
+  });
 }
 
 function formatCheck(check) {

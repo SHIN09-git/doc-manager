@@ -177,8 +177,17 @@ function validateEnv(env) {
   if (env.aiProxyMode === "live") {
     assertHttpsUrl("AI_BASE_URL", env.aiBaseUrl);
   }
-  if (env.paymentCheckoutMode === "webhook" && !env.paymentCheckoutUrl) {
-    throw new Error("PAYMENT_CHECKOUT_URL is required when PAYMENT_CHECKOUT_MODE=webhook in production");
+  if (env.paymentCheckoutMode === "webhook") {
+    if (!env.paymentCheckoutUrl) {
+      throw new Error("PAYMENT_CHECKOUT_URL is required when PAYMENT_CHECKOUT_MODE=webhook in production");
+    }
+    assertHttpsUrl("PAYMENT_CHECKOUT_URL", env.paymentCheckoutUrl);
+    if (!env.paymentWebhookSecret || env.paymentWebhookSecret.length < 32) {
+      throw new Error("PAYMENT_WEBHOOK_SECRET must be set when PAYMENT_CHECKOUT_MODE=webhook in production");
+    }
+    if (!hasPaidPaymentPriceMap(env.paymentPlanPriceMap)) {
+      throw new Error("PAYMENT_PLAN_PRICE_MAP must map provider price ids to pro/team when PAYMENT_CHECKOUT_MODE=webhook in production");
+    }
   }
   if (env.emailMode === "webhook" && env.emailProvider === "generic-webhook") {
     assertHttpsUrl("EMAIL_WEBHOOK_URL", env.emailWebhookUrl);
@@ -219,4 +228,13 @@ function assertHttpsUrl(name, value) {
 
 function assertOptionalHttpsUrl(name, value) {
   if (String(value || "").trim()) assertHttpsUrl(name, value);
+}
+
+function hasPaidPaymentPriceMap(map) {
+  if (!map || typeof map !== "object") return false;
+  return Object.entries(map).some(([priceId, plan]) => {
+    const normalizedPriceId = String(priceId || "").trim();
+    const normalizedPlan = String(plan || "").trim().toLowerCase();
+    return Boolean(normalizedPriceId) && ["pro", "team"].includes(normalizedPlan);
+  });
 }

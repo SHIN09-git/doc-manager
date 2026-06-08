@@ -1350,6 +1350,17 @@ async function createBillingCheckout(ctx) {
     });
     throw new HttpError(503, "支付升级地址尚未配置，请联系管理员", "billing_checkout_invalid_config");
   }
+  if (ctx.env.paymentCheckoutMode === "webhook" && getMappedCheckoutPlanOptions(ctx.env).length === 0) {
+    await recordSystemEvent(ctx, {
+      organizationId: organization.id,
+      userId: ctx.auth.user.id,
+      level: "error",
+      type: "billing.checkout.invalid_config",
+      message: "支付价格映射未配置",
+      metadata: { plan: checkout.plan },
+    });
+    throw new HttpError(503, "支付价格映射尚未配置，请联系管理员", "billing_checkout_price_not_configured");
+  }
   const checkoutUrl = buildCheckoutUrl(ctx.env, organization, ctx.auth.user, checkout);
   await ctx.store.write((data) => {
     addAudit(data, organization.id, ctx.auth.user.id, "billing.checkout.create", "organization", organization.id, {
@@ -2588,15 +2599,20 @@ function applyTriageMetadata(metadata, triage, userId) {
 }
 
 function getCheckoutPlanOptions(env) {
-  const map = env.paymentPlanPriceMap && typeof env.paymentPlanPriceMap === "object" ? env.paymentPlanPriceMap : {};
-  const mapped = Object.entries(map)
-    .map(([priceId, plan]) => ({ plan: normalizePlan(plan), price_id: String(priceId || "").trim() }))
-    .filter((item) => item.plan && item.plan !== "free" && item.price_id);
+  const mapped = getMappedCheckoutPlanOptions(env);
   if (mapped.length > 0) return mapped;
+  if (env.paymentCheckoutMode === "webhook") return [];
   return [
     { plan: "pro", price_id: "" },
     { plan: "team", price_id: "" },
   ];
+}
+
+function getMappedCheckoutPlanOptions(env) {
+  const map = env.paymentPlanPriceMap && typeof env.paymentPlanPriceMap === "object" ? env.paymentPlanPriceMap : {};
+  return Object.entries(map)
+    .map(([priceId, plan]) => ({ plan: normalizePlan(plan), price_id: String(priceId || "").trim() }))
+    .filter((item) => item.plan && item.plan !== "free" && item.price_id);
 }
 
 function resolveCheckoutSelection(env, body) {
