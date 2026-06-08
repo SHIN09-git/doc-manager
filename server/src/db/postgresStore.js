@@ -90,11 +90,12 @@ export class PostgresStore {
       try {
         await client.query("begin");
         await client.query("select pg_advisory_xact_lock(hashtext('mowen_store_write'))");
-        this.data = await this.loadAll(client);
-        const result = await mutator(this.data);
-        this.data = normalizeData(this.data);
-        await this.saveAllWithClient(client, this.data);
+        const draft = structuredClone(await this.loadAll(client));
+        const result = await mutator(draft);
+        const normalized = normalizeData(draft);
+        await this.saveAllWithClient(client, normalized);
         await client.query("commit");
+        this.data = normalized;
         return result;
       } catch (error) {
         await client.query("rollback").catch(() => null);

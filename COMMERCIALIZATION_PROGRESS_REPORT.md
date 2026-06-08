@@ -1,6 +1,17 @@
 # 商业化施工总结报告
 
-更新时间：2026-06-03
+更新时间：2026-06-09
+
+## 2026-06-09 新增完成：Store 失败写入回滚语义加固
+
+本轮修复 JSON Store 与 PostgreSQL Store 兼容写入层的内存事务语义，避免 mutator 已经修改内存对象后又抛错，导致失败事务中的半截数据被后续读取或下一次保存带出去：
+
+- JSON Store `write()` 改为先复制草稿，在草稿上执行 mutator，成功归一化和保存后才替换内存快照。
+- PostgreSQL Store `write()` 改为在事务中加载草稿，成功 `saveAllWithClient` 并 commit 后才刷新 `this.data`；rollback 后内存快照保持旧状态。
+- 登录失败、登录限流、邮箱验证请求限流和密码重置请求限流不再依赖“mutator 抛错前的副作用”，而是先显式写入失败记录/系统事件，再由调用层抛出对应错误。
+- 新增 Store 事务回归测试，覆盖 JSON Store 和 PostgreSQL Store 在 mutator 抛错后的不污染语义。
+
+这一步解决了兼容快照写入路径里高损失的失败事务污染问题。后续仍建议继续把高频写入拆为表级 repository，并在真实 PostgreSQL 环境补充集成验证。
 
 ## 2026-06-03 新增完成：通用系统事件插入 PostgreSQL 表级写入
 
@@ -103,7 +114,7 @@ git diff --check
 结果：
 
 - 前端与核心单元测试：238 项通过
-- 后端服务与 repository 测试：100 项通过
+- 后端服务与 repository 测试：102 项通过
 - 端到端测试：30 项通过
 - diff 空白检查：通过
 

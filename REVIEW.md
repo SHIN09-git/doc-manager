@@ -1,5 +1,34 @@
 # 代码评审记录
 
+## 2026-06-09 Store 写入失败回滚 Review
+
+范围：`server/src/db/jsonStore.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/store-transaction.test.js`、`server/tests/commercial-api.test.js`。
+
+结论：修复了兼容 Store 写入的内存事务语义问题。JSON Store 和 PostgreSQL Store 现在都会在草稿副本上执行 mutator，只有成功保存/提交后才替换 `this.data`；mutator 抛错时不会把半截用户、事件、登录尝试或其他变更留在内存快照里。
+
+已确认：
+
+- JSON Store 失败 mutator 不会污染后续 read 或下一次成功写入。
+- PostgreSQL Store rollback 后不会保留失败事务中的 draft 数据；成功 commit 后才刷新内存快照。
+- 登录失败和登录限流仍会显式保存 login_attempt/system_events 后返回错误，不再依赖失败 mutator 的副作用。
+- 邮箱验证和密码重置限流仍会显式保存 `email.request.throttled` 事件后返回错误。
+- 回归测试覆盖 Store 级回滚语义；商业 API 测试确认登录限流仍可用。
+
+残余风险：
+
+- PostgreSQL Store 的兼容快照写入仍适合作为过渡层；高频路径仍应继续拆为表级 repository。
+- 当前 PostgreSQL 回滚测试使用 fake client；真实 PostgreSQL 集成验证仍在上线 TODO 中。
+
+验证命令：
+
+```bash
+node --check server/src/db/jsonStore.js
+node --check server/src/db/postgresStore.js
+node --check server/src/app.js
+node --test server/tests/store-transaction.test.js
+node --test server/tests/store-transaction.test.js server/tests/commercial-api.test.js
+```
+
 ## 2026-06-03 系统事件插入 PostgreSQL Repository Review
 
 范围：`server/src/db/repositories/systemEventRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
@@ -1058,7 +1087,7 @@ npm run test:e2e
 结果：
 
 - 前端与核心单元测试：238 项通过
-- 后端服务与 repository 测试：100 项通过
+- 后端服务与 repository 测试：102 项通过
 - 端到端测试：30 项通过
 
 GitHub Actions 已配置基础 CI，自动运行：

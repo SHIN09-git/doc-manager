@@ -297,6 +297,7 @@ P2 第五轮阶段 C 已补充：
 - `writer_profiles`/`writer_versions` 表级 repository，执笔人创建、更新、软删除、版本列表和版本恢复在 PostgreSQL Store 下走独立事务，并保持版本快照和审计日志同事务写入。
 - `ai_usage` 表级写入 repository，AI 调用用量记录与 `ai.chat` 审计日志在 PostgreSQL Store 下同事务插入；AI 超额调用的额度扣减走 `credit_accounts`/`credit_ledger` repository，并在同事务写入扣减审计。
 - `manual_payment_orders` 表级 repository，人工充值订单创建、审核、额度入账和会员开通在 PostgreSQL Store 下走独立事务，并与审计、系统事件保持同事务写入。
+- JSON Store 与 PostgreSQL Store 的兼容 `write()` 都在草稿副本上执行 mutator，成功保存/提交后才刷新内存快照，避免失败事务污染后续读写。
 - Repository 测试覆盖组织隔离、limit、筛选、游标分页、JSON/日期归一和迁移版本跳过重复执行。
 
 仍需继续完成真实支付服务商 SDK、备份恢复演练、剩余系统事件写入 repository 评估、真实 PostgreSQL 集成测试和企业部署增强。
@@ -338,7 +339,7 @@ npm run test:e2e
 当前覆盖：
 
 - 前端与核心单元测试：238 项
-- 后端服务与 repository 测试：100 项
+- 后端服务与 repository 测试：102 项
 - 端到端测试：30 项
 
 重点测试对象：

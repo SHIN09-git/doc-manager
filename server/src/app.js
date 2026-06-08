@@ -305,12 +305,16 @@ async function login(ctx) {
   const password = String(body.password || "");
   const ipHash = hashClientIp(ctx);
   const payload = await ctx.store.write((data) => {
-    assertLoginNotThrottled(data, email, ipHash);
+    const throttleError = getLoginThrottleError(data, email, ipHash);
+    if (throttleError) {
+      addSystemEvent(data, null, null, "warn", "auth.login.throttled", "登录失败次数过多", { email });
+      return { error: throttleError };
+    }
     const user = data.users.find((item) => item.email === email && !item.disabled_at);
     if (!user || !verifyPassword(password, user.password_hash)) {
       recordLoginAttempt(data, email, ipHash, false);
       addSystemEvent(data, null, user?.id || null, "warn", "auth.login.failed", "邮箱或密码不正确", { email });
-      throw new HttpError(401, "邮箱或密码不正确", "invalid_credentials");
+      return { error: new HttpError(401, "邮箱或密码不正确", "invalid_credentials") };
     }
     recordLoginAttempt(data, email, ipHash, true);
     user.last_login_at = new Date().toISOString();
@@ -326,6 +330,7 @@ async function login(ctx) {
     return { user, organizations, organization, membership, session };
   });
 
+  if (payload.error) throw payload.error;
   setSession(ctx.response, ctx.env, payload.session.token);
   sendJson(ctx.response, 200, mePayload(payload.user, payload.organizations, payload.organization, payload.membership));
 }
@@ -359,11 +364,16 @@ async function requestEmailVerification(ctx) {
     const user = data.users.find((item) => item.email === email && !item.disabled_at);
     if (!user) return { token: "" };
     if (user.email_verified_at) return { verified: true, token: "" };
-    assertEmailRequestAllowed(data, email, "email_verification");
+    const throttleError = getEmailRequestThrottleError(data, email, "email_verification");
+    if (throttleError) {
+      addSystemEvent(data, null, null, "warn", "email.request.throttled", "邮件请求过于频繁", { email, template: "email_verification" });
+      return { error: throttleError, token: "" };
+    }
     const verification = createEmailVerification(data, user.id);
     addAudit(data, null, user.id, "auth.email_verification.request", "user", user.id, {});
     return verification;
   });
+  if (payload.error) throw payload.error;
   if (payload.token) {
     await deliverTransactionalEmail(ctx, {
       userId: payload.user_id || ctx.auth?.user?.id || null,
@@ -411,11 +421,16 @@ async function requestPasswordReset(ctx) {
   const payload = await ctx.store.write((data) => {
     const user = data.users.find((item) => item.email === email && !item.disabled_at);
     if (!user) return { token: "" };
-    assertEmailRequestAllowed(data, email, "password_reset");
+    const throttleError = getEmailRequestThrottleError(data, email, "password_reset");
+    if (throttleError) {
+      addSystemEvent(data, null, null, "warn", "email.request.throttled", "邮件请求过于频繁", { email, template: "password_reset" });
+      return { error: throttleError, token: "" };
+    }
     const reset = createPasswordReset(data, user.id);
     addSystemEvent(data, null, user.id, "info", "auth.password_reset.request", "用户请求重置密码", { email });
     return reset;
   });
+  if (payload.error) throw payload.error;
   if (payload.token) {
     await deliverTransactionalEmail(ctx, {
       userId: payload.user_id || null,
@@ -2162,7 +2177,7 @@ function hashClientIp(ctx) {
   return sha256(`${ctx.env.sessionSecret}:${value}`);
 }
 
-function assertLoginNotThrottled(data, email, ipHash) {
+function getLoginThrottleError(data, email, ipHash) {
   const cutoff = Date.now() - LOGIN_FAIL_WINDOW_MS;
   const failures = data.login_attempts.filter((item) =>
     item.email === email &&
@@ -2170,9 +2185,9 @@ function assertLoginNotThrottled(data, email, ipHash) {
     item.success === false &&
     Date.parse(item.created_at) > cutoff);
   if (failures.length >= LOGIN_FAIL_LIMIT) {
-    addSystemEvent(data, null, null, "warn", "auth.login.throttled", "登录失败次数过多", { email });
-    throw new HttpError(429, "登录失败次数过多，请稍后再试", "login_throttled");
+    return new HttpError(429, "登录失败次数过多，请稍后再试", "login_throttled");
   }
+  return null;
 }
 
 function recordLoginAttempt(data, email, ipHash, success) {
@@ -2626,16 +2641,16 @@ function getOrganizationCreditSummary(data, organizationId) {
   };
 }
 
-function assertEmailRequestAllowed(data, email, template) {
+function getEmailRequestThrottleError(data, email, template) {
   const cutoff = Date.now() - EMAIL_REQUEST_WINDOW_MS;
   const recent = data.email_deliveries.filter((item) =>
     item.email === email &&
     item.template === template &&
     Date.parse(item.created_at) > cutoff);
   if (recent.length >= EMAIL_REQUEST_LIMIT) {
-    addSystemEvent(data, null, null, "warn", "email.request.throttled", "邮件请求过于频繁", { email, template });
-    throw new HttpError(429, "邮件请求过于频繁，请稍后再试", "email_request_throttled");
+    return new HttpError(429, "邮件请求过于频繁，请稍后再试", "email_request_throttled");
   }
+  return null;
 }
 
 function normalizePaymentEvent(body, env = {}) {

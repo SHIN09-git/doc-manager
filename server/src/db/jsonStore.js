@@ -57,8 +57,9 @@ export class JsonStore {
   async write(mutator) {
     const run = this.writeQueue.catch(() => null).then(async () => {
       await this.init();
-      const result = await mutator(this.data);
-      this.data = normalizeData(this.data);
+      const draft = structuredClone(this.data);
+      const result = await mutator(draft);
+      this.data = normalizeData(draft);
       await this.save();
       return result;
     });
