@@ -1,5 +1,19 @@
 # 代码评审记录
 
+## 2026-06-09 认证令牌错误反馈 Review
+
+范围：`server/src/app.js`、`server/tests/commercial-api.test.js`。
+
+结论：收紧邮箱验证和密码重置提交阶段的错误反馈。此前请求验证码/重置码阶段已经不会暴露邮箱是否存在，但提交错误 token 时，不存在邮箱会返回 `not_found`，存在邮箱会返回 `invalid_*_token`，可被用来枚举账号。现在未知邮箱和错误 token 统一返回“验证码/重置码无效或已过期”，不改变正常验证和重置成功路径。
+
+验证命令：
+
+```bash
+node --check server/src/app.js
+node --check server/tests/commercial-api.test.js
+node --test server/tests/commercial-api.test.js
+```
+
 ## 2026-06-09 导出文件名边界 Review
 
 范围：`src/utils/helpers.js`、`test/helpers.test.js`。

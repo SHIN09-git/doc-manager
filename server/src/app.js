@@ -397,7 +397,7 @@ async function verifyEmail(ctx) {
   if (!EMAIL_RE.test(email) || !tokenHash) throw new HttpError(400, "请填写邮箱和验证码", "missing_verification_token");
   const payload = await ctx.store.write((data) => {
     const user = data.users.find((item) => item.email === email && !item.disabled_at);
-    if (!user) throw new HttpError(404, "账号不存在", "not_found");
+    if (!user) throw new HttpError(400, "验证码无效或已过期", "invalid_verification_token");
     const verification = data.email_verifications.find((item) =>
       item.user_id === user.id &&
       item.token_hash === tokenHash &&
@@ -455,7 +455,7 @@ async function resetPassword(ctx) {
   if (password.length < 8) throw new HttpError(400, "密码至少需要 8 位", "weak_password");
   await ctx.store.write((data) => {
     const user = data.users.find((item) => item.email === email && !item.disabled_at);
-    if (!user) throw new HttpError(404, "账号不存在", "not_found");
+    if (!user) throw new HttpError(400, "重置码无效或已过期", "invalid_reset_token");
     const reset = data.password_resets.find((item) =>
       item.user_id === user.id &&
       item.token_hash === tokenHash &&

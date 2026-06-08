@@ -136,6 +136,35 @@ test("password reset revokes previous sessions", async () => {
   assert.equal(login.status, 200);
 });
 
+test("verification and reset token errors do not reveal unknown emails", async () => {
+  await register("token-boundary@example.com", { verify: false });
+  const knownVerify = await api("/api/auth/verify-email", {
+    method: "POST",
+    body: { email: "token-boundary@example.com", token: "wrong-token" },
+  });
+  const unknownVerify = await api("/api/auth/verify-email", {
+    method: "POST",
+    body: { email: "missing-token-boundary@example.com", token: "wrong-token" },
+  });
+  assert.equal(knownVerify.status, 400);
+  assert.equal(unknownVerify.status, 400);
+  assert.equal(knownVerify.json.error.code, "invalid_verification_token");
+  assert.equal(unknownVerify.json.error.code, "invalid_verification_token");
+
+  const knownReset = await api("/api/auth/reset-password", {
+    method: "POST",
+    body: { email: "token-boundary@example.com", token: "wrong-token", password: "newpassword123" },
+  });
+  const unknownReset = await api("/api/auth/reset-password", {
+    method: "POST",
+    body: { email: "missing-token-boundary@example.com", token: "wrong-token", password: "newpassword123" },
+  });
+  assert.equal(knownReset.status, 400);
+  assert.equal(unknownReset.status, 400);
+  assert.equal(knownReset.json.error.code, "invalid_reset_token");
+  assert.equal(unknownReset.json.error.code, "invalid_reset_token");
+});
+
 test("production email mode sends through webhook without returning tokens", async () => {
   const emails = [];
   const receiverUrl = "https://mail.example.test/send";
