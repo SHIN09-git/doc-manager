@@ -1,5 +1,31 @@
 # 代码评审记录
 
+## 2026-06-09 审计与导出公开字段 Review
+
+范围：`server/src/app.js`、`server/tests/commercial-api.test.js`、`ARCHITECTURE.md`、`CHANGELOG.md`、`SECURITY.md`、`TODO.md`。
+
+结论：收紧了审计日志、AI 失败跟进记录、后台偏好和数据导出的公开字段边界。`/api/audit`、`/api/me/export` 和 `/api/orgs/:id/export` 现在会通过公开转换器返回 `audit_logs`、`ops_triage` 和 `admin_preferences`，递归隐藏 `metadata` 或 `preferences` 中的 token、secret、api_key、authorization、cookie、signature 等敏感键。
+
+已确认：
+
+- `/api/audit` 返回的审计日志不会透出敏感 metadata 原文。
+- 个人数据导出的 `audit_logs`、`ops_triage` 和 `admin_preferences` 已接入公开转换器。
+- 组织数据导出的 `audit_logs`、`ops_triage` 和 `admin_preferences` 已接入公开转换器。
+- 个人与组织导出的 `ai_usage` 会隐藏原始错误正文，`credit_ledger` 会走公开额度流水格式。
+- 回归测试向审计日志、跟进记录和后台偏好写入敏感键，公开响应均不会包含原始 secret。
+
+残余风险：
+
+- 公开转换器按键名隐藏敏感值，不能识别写在普通备注正文里的密钥；运营人员仍应避免把真实密钥写入备注、筛选名称或普通文本字段。
+- 逻辑备份仍是管理员级完整数据导出，必须依赖备份加密、访问控制和保留周期管理。
+
+验证命令：
+
+```bash
+node --check server/src/app.js
+node --test server/tests/commercial-api.test.js
+```
+
 ## 2026-06-09 系统事件公开 Metadata Review
 
 范围：`server/src/app.js`、`server/tests/commercial-api.test.js`、`ARCHITECTURE.md`、`CHANGELOG.md`、`SECURITY.md`、`TODO.md`。

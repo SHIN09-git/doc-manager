@@ -48,6 +48,7 @@ AI 接口配置保存在当前浏览器。
 - 支付 webhook 原始 payload 只在后端内部留存用于排查和审计；账单摘要、管理员后台、组织导出和 webhook 响应只返回脱敏摘要，不应把渠道回调原文直接透出给前端。
 - 邮件投递记录的公开 metadata 只保留投递排查必要字段，例如 `delivery_id`、`message_id`、回调状态和回调时间；验证码、重置码、内部验证 ID 或任意 secret 不应出现在管理员后台和组织导出中。
 - 系统事件和最近错误的公开 metadata 会递归隐藏 `token`、`secret`、`password`、`api_key`、`authorization`、`cookie`、`signature` 等敏感键；新增运营事件时仍应避免把真实密钥写入事件 metadata。
+- 审计日志、AI 失败跟进记录、后台偏好、个人导出和组织导出同样会通过公开转换器隐藏 `metadata` 或 `preferences` 中的敏感键；生产环境仍不应把密钥、授权头、Cookie 或第三方凭据写入这些运营字段。
 - `npm run server:backup` 会导出云端逻辑备份。生产环境建议配置 `BACKUP_ENCRYPTION_KEY`，生成 `.json.gcm` 加密备份；未配置时仍会生成明文 `.json`，只适合本地开发或受控灰度环境。
 - `npm run server:backup:verify -- <backup-file>` 只做只读结构校验，不会恢复或覆盖数据。校验 `.json.gcm` 需要提供同一 `BACKUP_ENCRYPTION_KEY`。
 - 对象存储上传默认关闭；启用 `BACKUP_OBJECT_STORAGE_MODE=s3-compatible` 后，请使用最小权限 access key，并限制为只允许写入备份前缀。

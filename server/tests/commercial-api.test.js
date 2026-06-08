@@ -921,9 +921,22 @@ test("data export, recent errors, readiness, and account deletion work", async (
   });
   assert.equal(checkoutWarning.status, 503);
 
+  await server.store.write((data) => {
+    const auditLog = data.audit_logs.find((item) =>
+      item.organization_id === owner.orgId && item.action === "organization.update");
+    auditLog.metadata = {
+      token: "secret-audit-token",
+      nested: { api_key: "sk-audit-secret", keep: "visible" },
+    };
+  });
   const audit = await api("/api/audit?action=organization.update", { cookie: owner.cookie });
   assert.equal(audit.status, 200);
   assert.equal(audit.json.audit_logs.length, 1);
+  assert.equal(audit.json.audit_logs[0].metadata.token, "已隐藏");
+  assert.equal(audit.json.audit_logs[0].metadata.nested.api_key, "已隐藏");
+  assert.equal(audit.json.audit_logs[0].metadata.nested.keep, "visible");
+  assert.equal(JSON.stringify(audit.json.audit_logs).includes("secret-audit-token"), false);
+  assert.equal(JSON.stringify(audit.json.audit_logs).includes("sk-audit-secret"), false);
 
   const feedback = await api("/api/feedback", {
     method: "POST",
@@ -1000,12 +1013,46 @@ test("data export, recent errors, readiness, and account deletion work", async (
   const loadedPreferences = await api("/api/admin/preferences", { cookie: owner.cookie });
   assert.equal(loadedPreferences.json.preferences.audit_filters[0].name, "组织变更");
 
+  await server.store.write((data) => {
+    const triage = data.ops_triage.find((item) =>
+      item.organization_id === owner.orgId && item.source_type === "ai_usage");
+    triage.metadata = {
+      ...(triage.metadata || {}),
+      token: "secret-triage-token",
+      nested: { secret: "triage-nested-secret", keep: "visible" },
+    };
+    const preferences = data.admin_preferences.find((item) =>
+      item.organization_id === owner.orgId && item.user_id === owner.userId);
+    preferences.preferences = {
+      ...(preferences.preferences || {}),
+      token: "secret-preference-token",
+      nested: { api_key: "sk-preference-secret", keep: "visible" },
+    };
+  });
+  const ownExportAfterSecurity = await api("/api/me/export", { cookie: owner.cookie });
+  assert.equal(ownExportAfterSecurity.status, 200);
+  assert.equal(JSON.stringify(ownExportAfterSecurity.json.audit_logs).includes("secret-audit-token"), false);
+  assert.equal(JSON.stringify(ownExportAfterSecurity.json.ops_triage).includes("secret-triage-token"), false);
+  assert.equal(JSON.stringify(ownExportAfterSecurity.json.admin_preferences).includes("secret-preference-token"), false);
+
   const orgExport = await api(`/api/orgs/${owner.orgId}/export`, { cookie: owner.cookie });
   assert.equal(orgExport.status, 200);
   assert.equal(orgExport.json.scope, "organization");
   assert.equal(orgExport.json.api_keys.length, 0);
   assert.equal(orgExport.json.ops_triage.length, 1);
   assert.equal(orgExport.json.admin_preferences.length, 1);
+  const exportedAudit = orgExport.json.audit_logs.find((item) => item.action === "organization.update");
+  assert.equal(exportedAudit.metadata.token, "已隐藏");
+  assert.equal(exportedAudit.metadata.nested.api_key, "已隐藏");
+  assert.equal(orgExport.json.ops_triage[0].metadata.token, "已隐藏");
+  assert.equal(orgExport.json.ops_triage[0].metadata.nested.secret, "已隐藏");
+  assert.equal(orgExport.json.ops_triage[0].metadata.nested.keep, "visible");
+  assert.equal(orgExport.json.admin_preferences[0].preferences.token, "已隐藏");
+  assert.equal(orgExport.json.admin_preferences[0].preferences.nested.api_key, "已隐藏");
+  assert.equal(orgExport.json.admin_preferences[0].preferences.nested.keep, "visible");
+  assert.equal(JSON.stringify(orgExport.json).includes("secret-audit-token"), false);
+  assert.equal(JSON.stringify(orgExport.json).includes("secret-triage-token"), false);
+  assert.equal(JSON.stringify(orgExport.json).includes("secret-preference-token"), false);
   const exportedWarning = orgExport.json.system_events.find((item) => item.id === "evt-owner-warning");
   assert.equal(exportedWarning.metadata.token, "已隐藏");
   assert.equal(exportedWarning.metadata.nested.api_key, "已隐藏");

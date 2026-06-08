@@ -15,6 +15,7 @@
 - [x] 脱敏公开支付 webhook 字段，账单摘要、管理员后台、组织导出和 webhook 响应不再返回渠道回调原始 payload。
 - [x] 收紧邮件投递公开字段，管理员后台和组织导出只返回白名单 metadata，避免误写入 token 或 secret 后被公开。
 - [x] 加固系统事件公开 metadata，最近错误、管理员后台和组织导出会递归隐藏 token、secret、api_key 等敏感键。
+- [x] 加固审计日志、AI 失败跟进、后台偏好和数据导出公开字段，`/api/audit`、个人导出和组织导出会隐藏 metadata/preferences 中的敏感键。
 
 ## 2026-06-01 全量审阅发现问题修复记录
 

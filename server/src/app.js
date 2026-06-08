@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { loadEnv } from "./config/env.js";
-import { listPublicCreditLedger } from "./billing/creditLedger.js";
+import { listPublicCreditLedger, publicCreditLedger } from "./billing/creditLedger.js";
 import {
   createManualPaymentHandlers,
   getManualPaymentSummary,
@@ -1378,12 +1378,12 @@ async function auditHistory(ctx) {
       filters: normalizeAuditFiltersFromUrl(ctx.url),
       limit: getQueryLimit(ctx.url, 200, 1000),
     });
-    sendJson(ctx.response, 200, { audit_logs: logs });
+    sendJson(ctx.response, 200, { audit_logs: logs.map(publicAuditLog) });
     return;
   }
   const logs = filterByQuery(data.audit_logs.filter((item) => item.organization_id === organization.id), ctx.url)
     .slice(-getQueryLimit(ctx.url, 200, 1000));
-  sendJson(ctx.response, 200, { audit_logs: logs });
+  sendJson(ctx.response, 200, { audit_logs: logs.map(publicAuditLog) });
 }
 
 async function recentErrors(ctx) {
@@ -1416,7 +1416,7 @@ function buildSystemEventErrorItem(item) {
     source_type: "system_event",
     created_at: item.created_at || "",
     message: item.message || "",
-    metadata: publicMetadata(item.metadata),
+    metadata: publicMetadata(item.metadata || {}),
   };
 }
 
@@ -2015,13 +2015,13 @@ async function exportOwnData(ctx) {
     documents: data.documents.filter((item) => documentIds.has(item.id)),
     writer_profiles: data.writer_profiles.filter((item) => writerIds.has(item.id)),
     writer_versions: data.writer_versions.filter((item) => writerIds.has(item.writer_profile_id)),
-    ai_usage: data.ai_usage.filter((item) => item.user_id === userId),
+    ai_usage: data.ai_usage.filter((item) => item.user_id === userId).map(publicUsage),
     manual_payment_orders: data.manual_payment_orders.filter((item) => item.user_id === userId).map((item) => publicManualPaymentOrder(item, { userId })),
     credit_accounts: data.credit_accounts.filter((item) => item.user_id === userId).map(publicCreditAccount),
-    credit_ledger: data.credit_ledger.filter((item) => item.user_id === userId),
-    ops_triage: (data.ops_triage || []).filter((item) => item.updated_by === userId),
-    admin_preferences: (data.admin_preferences || []).filter((item) => item.user_id === userId),
-    audit_logs: data.audit_logs.filter((item) => item.user_id === userId),
+    credit_ledger: data.credit_ledger.filter((item) => item.user_id === userId).map((item) => publicCreditLedger(item)),
+    ops_triage: (data.ops_triage || []).filter((item) => item.updated_by === userId).map(publicOpsTriage),
+    admin_preferences: (data.admin_preferences || []).filter((item) => item.user_id === userId).map(publicAdminPreference),
+    audit_logs: data.audit_logs.filter((item) => item.user_id === userId).map(publicAuditLog),
   });
 }
 
@@ -2044,15 +2044,15 @@ async function exportOrganizationData(ctx, orgId) {
     writer_profiles: data.writer_profiles.filter((item) => writerIds.has(item.id)),
     writer_versions: data.writer_versions.filter((item) => writerIds.has(item.writer_profile_id)),
     ai_usage: data.ai_usage.filter((item) => item.organization_id === orgId).map(publicUsage),
-    ops_triage: (data.ops_triage || []).filter((item) => item.organization_id === orgId),
-    admin_preferences: (data.admin_preferences || []).filter((item) => item.organization_id === orgId),
-    audit_logs: data.audit_logs.filter((item) => item.organization_id === orgId),
+    ops_triage: (data.ops_triage || []).filter((item) => item.organization_id === orgId).map(publicOpsTriage),
+    admin_preferences: (data.admin_preferences || []).filter((item) => item.organization_id === orgId).map(publicAdminPreference),
+    audit_logs: data.audit_logs.filter((item) => item.organization_id === orgId).map(publicAuditLog),
     system_events: data.system_events.filter((item) => item.organization_id === orgId).map(publicSystemEvent),
     email_deliveries: data.email_deliveries.filter((item) => userIds.has(item.user_id)).map(publicEmailDelivery),
     payment_webhooks: data.payment_webhooks.filter((item) => item.organization_id === orgId).map(publicPaymentWebhook),
     manual_payment_orders: data.manual_payment_orders.filter((item) => item.organization_id === orgId).map((item) => publicManualPaymentOrder(item, { admin: true })),
     credit_accounts: data.credit_accounts.filter((item) => item.organization_id === orgId).map(publicCreditAccount),
-    credit_ledger: data.credit_ledger.filter((item) => item.organization_id === orgId),
+    credit_ledger: data.credit_ledger.filter((item) => item.organization_id === orgId).map((item) => publicCreditLedger(item)),
     api_keys: data.api_keys.filter((item) => item.organization_id === orgId).map(publicApiKey),
   });
 }
@@ -2312,6 +2312,43 @@ function publicCreditAccount(account = {}) {
     user_id: account.user_id || "",
     balance: Number(account.balance || 0),
     updated_at: account.updated_at || "",
+  };
+}
+
+function publicAuditLog(item = {}) {
+  return {
+    id: item.id || "",
+    organization_id: item.organization_id || null,
+    user_id: item.user_id || null,
+    action: item.action || "",
+    target_type: item.target_type || "",
+    target_id: item.target_id || "",
+    metadata: publicMetadata(item.metadata || {}),
+    created_at: item.created_at || "",
+  };
+}
+
+function publicOpsTriage(item = {}) {
+  return {
+    id: item.id || "",
+    organization_id: item.organization_id || null,
+    source_type: item.source_type || "",
+    source_id: item.source_id || "",
+    metadata: publicMetadata(item.metadata),
+    updated_by: item.updated_by || null,
+    created_at: item.created_at || "",
+    updated_at: item.updated_at || "",
+  };
+}
+
+function publicAdminPreference(item = {}) {
+  return {
+    id: item.id || "",
+    organization_id: item.organization_id || null,
+    user_id: item.user_id || null,
+    preferences: publicMetadata(item.preferences || {}),
+    created_at: item.created_at || "",
+    updated_at: item.updated_at || "",
   };
 }
 
