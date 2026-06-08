@@ -51,6 +51,7 @@ AI 接口配置保存在当前浏览器。
 - 反馈状态更新、批量反馈处理、管理员后台反馈列表和组织导出使用同一套公开系统事件转换器，避免处理接口绕过系统事件 metadata 脱敏。
 - 审计日志、AI 失败跟进记录、后台偏好、个人导出和组织导出同样会通过公开转换器隐藏 `metadata` 或 `preferences` 中的敏感键；生产环境仍不应把密钥、授权头、Cookie 或第三方凭据写入这些运营字段。
 - 前端渲染从本地存档、云端同步或导入包读取到的 ID、名称、颜色等字段时，应先转义 HTML 属性并清洗 CSS 值；文档/文件夹/执笔人列表已对文档 ID、文件夹 ID、执笔人 ID 和文件夹颜色做边界加固。
+- 管理后台导出用量和审计 CSV 时，会把以 `=`、`+`、`-`、`@` 或前导空白后的这些字符开头的单元格转为文本，降低电子表格公式注入风险。
 - `npm run server:backup` 会导出云端逻辑备份。生产环境建议配置 `BACKUP_ENCRYPTION_KEY`，生成 `.json.gcm` 加密备份；未配置时仍会生成明文 `.json`，只适合本地开发或受控灰度环境。
 - `npm run server:backup:verify -- <backup-file>` 只做只读结构校验，不会恢复或覆盖数据。校验 `.json.gcm` 需要提供同一 `BACKUP_ENCRYPTION_KEY`。
 - 对象存储上传默认关闭；启用 `BACKUP_OBJECT_STORAGE_MODE=s3-compatible` 后，请使用最小权限 access key，并限制为只允许写入备份前缀。

@@ -9,6 +9,7 @@ export const STATIC_FILE_COPIES = [
   ["styles.css", "styles.css"],
   ["build/bundle.js", "build/bundle.js"],
   ["src/admin/adminPage.js", "src/admin/adminPage.js"],
+  ["src/admin/adminCsv.js", "src/admin/adminCsv.js"],
   ["src/modules/cloud/billingFormatters.js", "src/modules/cloud/billingFormatters.js"],
 ];
 

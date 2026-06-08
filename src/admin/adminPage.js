@@ -4,6 +4,7 @@ import {
   formatManualOrderStatus,
   formatManualPaymentChannel,
 } from "../modules/cloud/billingFormatters.js";
+import { buildCsv } from "./adminCsv.js";
 
 const LOCAL_API_BASE_URL = "http://127.0.0.1:8787/api";
 const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
@@ -1689,21 +1690,9 @@ function exportCsv(fileName, rows) {
     toast("没有可导出的记录", "warn");
     return;
   }
-  const columns = Array.from(rows.reduce((set, row) => {
-    Object.keys(row || {}).forEach((key) => set.add(key));
-    return set;
-  }, new Set()));
-  const csv = [
-    columns.join(","),
-    ...rows.map((row) => columns.map((column) => csvCell(row?.[column])).join(",")),
-  ].join("\n");
+  const csv = buildCsv(rows);
   downloadBlob(fileName, csv, "text/csv;charset=utf-8");
   toast("CSV 已导出");
-}
-
-function csvCell(value) {
-  const text = typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "");
-  return `"${text.replace(/"/g, '""')}"`;
 }
 
 function downloadBlob(fileName, content, type) {

@@ -1,5 +1,33 @@
 # 代码评审记录
 
+## 2026-06-09 管理后台 CSV 导出 Review
+
+范围：`src/admin/adminPage.js`、`src/admin/adminCsv.js`、`scripts/build-static.mjs`、`test/adminCsv.test.js`、`test/deployScripts.test.js`。
+
+结论：修复了管理后台用量与审计 CSV 导出的公式注入风险。后台导出的字段可能来自审计动作、错误摘要、备注或第三方回调摘要；如果文本以 `=`、`+`、`-`、`@` 或前导空白后的这些字符开头，电子表格软件可能把它当作公式执行。现在 CSV 生成逻辑已拆成纯函数模块，单元格与表头都会统一转义，并把疑似公式内容前置单引号作为文本保存。
+
+已确认：
+
+- 用量和审计导出的下载入口仍在 `adminPage.js`，导出内容改由 `buildCsv()` 生成。
+- 前导空格、制表符后的公式样文本会被识别。
+- 普通逗号、引号和对象字段仍会按 CSV 规则加引号并转义。
+- 新增单元测试覆盖公式前缀、列顺序、对象字段和完整 CSV 行。
+- 静态发布清单已补充 `src/admin/adminCsv.js`，部署后的 `admin.html` 不会缺少新依赖。
+
+残余风险：
+
+- 为了安全，负数样文本例如 `-10` 也会按文本导出；这会牺牲一部分电子表格里的自动数值识别，但能避免公式执行边界遗漏。
+
+验证命令：
+
+```bash
+node --check src/admin/adminCsv.js
+node --check src/admin/adminPage.js
+node --check scripts/build-static.mjs
+node --check test/adminCsv.test.js
+node --test test/adminCsv.test.js
+```
+
 ## 2026-06-09 前端渲染属性边界 Review
 
 范围：`src/utils/helpers.js`、`src/modules/folders/folderRenderer.js`、`src/modules/documents/documentRenderer.js`、`src/modules/skills/skillRenderer.js`、`test/helpers.test.js`。
