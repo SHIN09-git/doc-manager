@@ -142,6 +142,7 @@ src/modules/*
 - 最近错误接口、管理员后台和组织数据导出会通过公开转换器返回系统事件。
 - 公开 metadata 会递归隐藏 `token`、`secret`、`password`、`api_key`、`authorization`、`cookie`、`signature` 等敏感键。
 - 负责人、备注、优先级、SLA、状态、任务类型、事件 ID 等运营字段保留，保证后台跟进不受影响。
+- 反馈状态更新和批量处理响应也返回公开系统事件对象，避免同一条反馈在后台列表与处理接口中出现不同的公开字段边界。
 - 审计日志、AI 失败跟进记录和后台偏好在 `/api/audit`、个人导出与组织导出中同样走公开转换器；`audit_logs.metadata`、`ops_triage.metadata` 和 `admin_preferences.preferences` 会复用同一套递归敏感键隐藏规则。
 
 ## 文档链路

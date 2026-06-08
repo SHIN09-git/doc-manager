@@ -1516,7 +1516,7 @@ async function updateFeedbackStatus(ctx, feedbackId) {
     } catch (error) {
       throw mapFeedbackRepositoryError(error);
     }
-    sendJson(ctx.response, 200, { feedback });
+    sendJson(ctx.response, 200, { feedback: publicSystemEvent(feedback) });
     return;
   }
   const feedback = await ctx.store.write((data) => {
@@ -1533,7 +1533,7 @@ async function updateFeedbackStatus(ctx, feedbackId) {
     });
     return item;
   });
-  sendJson(ctx.response, 200, { feedback });
+  sendJson(ctx.response, 200, { feedback: publicSystemEvent(feedback) });
 }
 
 async function updateFeedbackBatchStatus(ctx) {
@@ -1557,7 +1557,7 @@ async function updateFeedbackBatchStatus(ctx) {
     } catch (error) {
       throw mapFeedbackRepositoryError(error);
     }
-    sendJson(ctx.response, 200, { count: feedbacks.length, feedbacks });
+    sendJson(ctx.response, 200, { count: feedbacks.length, feedbacks: feedbacks.map(publicSystemEvent) });
     return;
   }
   const feedbacks = await ctx.store.write((data) => {
@@ -1576,7 +1576,7 @@ async function updateFeedbackBatchStatus(ctx) {
     });
     return updated;
   });
-  sendJson(ctx.response, 200, { count: feedbacks.length, feedbacks });
+  sendJson(ctx.response, 200, { count: feedbacks.length, feedbacks: feedbacks.map(publicSystemEvent) });
 }
 
 async function updateOpsEventTriage(ctx, eventId) {

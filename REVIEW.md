@@ -1,5 +1,28 @@
 # 代码评审记录
 
+## 2026-06-09 反馈处理响应公开字段 Review
+
+范围：`server/src/app.js`、`server/tests/commercial-api.test.js`、`ARCHITECTURE.md`、`CHANGELOG.md`、`SECURITY.md`、`TODO.md`。
+
+结论：修复了反馈处理接口与后台反馈列表公开字段不一致的问题。`/api/feedback/:id/status` 和 `/api/feedback/batch-status` 现在都会返回 `publicSystemEvent()` 转换后的反馈事件，和 `/api/admin/dashboard`、组织导出的反馈/系统事件保持同一套 metadata 脱敏规则。
+
+已确认：
+
+- 单条反馈状态更新会保留 `status`、`assignee`、`sla_at`、`note` 等运营字段。
+- 单条反馈响应会递归隐藏历史 metadata 中的 token 和嵌套 api_key。
+- 批量反馈处理响应同样不会返回敏感 metadata 原文。
+
+残余风险：
+
+- 备注正文中的普通文本不会按内容识别密钥；运营流程仍应要求不要在备注中粘贴真实 token、Cookie 或第三方凭据。
+
+验证命令：
+
+```bash
+node --check server/src/app.js
+node --test server/tests/commercial-api.test.js
+```
+
 ## 2026-06-09 审计与导出公开字段 Review
 
 范围：`server/src/app.js`、`server/tests/commercial-api.test.js`、`ARCHITECTURE.md`、`CHANGELOG.md`、`SECURITY.md`、`TODO.md`。

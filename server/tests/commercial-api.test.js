@@ -955,6 +955,15 @@ test("data export, recent errors, readiness, and account deletion work", async (
   assert.equal(dashboard.status, 200);
   assert.equal(dashboard.json.organization.name, "灰度团队");
   assert.equal(dashboard.json.feedbacks.length, 2);
+  await server.store.write((data) => {
+    const firstFeedback = data.system_events.find((item) =>
+      item.id === dashboard.json.feedbacks[0].id && item.type === "user.feedback");
+    firstFeedback.metadata = {
+      ...(firstFeedback.metadata || {}),
+      token: "secret-feedback-token",
+      nested: { api_key: "sk-feedback-secret", keep: "visible" },
+    };
+  });
   const dashboardWarning = dashboard.json.recent_errors.find((item) => item.id === "evt-owner-warning");
   assert.equal(dashboardWarning.metadata.token, "已隐藏");
   assert.equal(JSON.stringify(dashboardWarning).includes("sk-system-secret"), false);
@@ -968,6 +977,11 @@ test("data export, recent errors, readiness, and account deletion work", async (
   assert.equal(feedbackStatus.json.feedback.metadata.assignee, "ops@example.com");
   assert.equal(feedbackStatus.json.feedback.metadata.sla_at, "2026-05-30");
   assert.equal(feedbackStatus.json.feedback.metadata.note, "先跟进");
+  assert.equal(feedbackStatus.json.feedback.metadata.token, "已隐藏");
+  assert.equal(feedbackStatus.json.feedback.metadata.nested.api_key, "已隐藏");
+  assert.equal(feedbackStatus.json.feedback.metadata.nested.keep, "visible");
+  assert.equal(JSON.stringify(feedbackStatus.json.feedback).includes("secret-feedback-token"), false);
+  assert.equal(JSON.stringify(feedbackStatus.json.feedback).includes("sk-feedback-secret"), false);
   const feedbackBatch = await api("/api/feedback/batch-status", {
     method: "POST",
     cookie: owner.cookie,
@@ -976,6 +990,8 @@ test("data export, recent errors, readiness, and account deletion work", async (
   assert.equal(feedbackBatch.status, 200);
   assert.equal(feedbackBatch.json.count, 2);
   assert.ok(feedbackBatch.json.feedbacks.every((item) => item.metadata.status === "resolved"));
+  assert.equal(JSON.stringify(feedbackBatch.json.feedbacks).includes("secret-feedback-token"), false);
+  assert.equal(JSON.stringify(feedbackBatch.json.feedbacks).includes("sk-feedback-secret"), false);
 
   const triageTarget = dashboard.json.recent_errors.find((item) => item.type === "billing.checkout.not_configured");
   assert.ok(triageTarget?.id);

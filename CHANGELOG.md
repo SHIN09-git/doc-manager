@@ -13,6 +13,7 @@
 - 邮件投递记录的公开 metadata 改为白名单字段，管理员后台和组织导出不再透出误写入的 token、reset_token 或任意 secret。
 - 系统事件和最近错误的公开 metadata 增加递归敏感键脱敏，组织导出、管理员后台和错误接口不再透出 token、secret、api_key 等字段原文。
 - 审计日志、AI 失败跟进记录、后台偏好、个人导出和组织导出统一接入公开转换器，公开响应会递归隐藏 metadata/preferences 中的敏感键。
+- 反馈状态更新和批量处理响应改为返回公开系统事件对象，和后台反馈列表保持相同脱敏规则。
 - 新增 Store 事务回归测试，覆盖 JSON Store 和 PostgreSQL Store 在 mutator 抛错、rollback 和 commit 失败后的回滚语义。
 
 ### 文档
