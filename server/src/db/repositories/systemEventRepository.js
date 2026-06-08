@@ -1,3 +1,5 @@
+import { createId } from "../../utils/crypto.js";
+
 const SYSTEM_EVENT_COLUMNS = [
   "id",
   "organization_id",
@@ -8,6 +10,38 @@ const SYSTEM_EVENT_COLUMNS = [
   "metadata",
   "created_at",
 ];
+
+export async function createSystemEvent(pool, {
+  organizationId = null,
+  userId = null,
+  level = "info",
+  type = "",
+  message = "",
+  metadata = {},
+  now = new Date().toISOString(),
+} = {}) {
+  const normalizedType = String(type || "").trim();
+  if (!normalizedType) throw new Error("type is required");
+  const event = {
+    id: createId("evt"),
+    organization_id: organizationId || null,
+    user_id: userId || null,
+    level: normalizeLevel(level),
+    type: normalizedType.slice(0, 160),
+    message: String(message || "").slice(0, 4000),
+    metadata: normalizeMetadata(metadata),
+    created_at: now,
+  };
+  const result = await pool.query(
+    `
+      insert into system_events (${SYSTEM_EVENT_COLUMNS.join(", ")})
+      values (${SYSTEM_EVENT_COLUMNS.map((_, index) => `$${index + 1}`).join(", ")})
+      returning ${SYSTEM_EVENT_COLUMNS.join(", ")}
+    `,
+    SYSTEM_EVENT_COLUMNS.map((column) => event[column]),
+  );
+  return normalizeSystemEventRow(result.rows[0]);
+}
 
 export async function updateSystemEventMetadata(pool, {
   organizationId,
@@ -30,6 +64,11 @@ export async function updateSystemEventMetadata(pool, {
   const event = result.rows[0] ? normalizeSystemEventRow(result.rows[0]) : null;
   if (!event) throw systemEventRepositoryError("system_event_not_found", "system event not found");
   return event;
+}
+
+function normalizeLevel(level) {
+  const normalized = String(level || "").trim().toLowerCase();
+  return ["info", "warn", "error"].includes(normalized) ? normalized : "info";
 }
 
 function normalizeLevels(levels) {

@@ -1,5 +1,33 @@
 # 代码评审记录
 
+## 2026-06-03 系统事件插入 PostgreSQL Repository Review
+
+范围：`server/src/db/repositories/systemEventRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
+
+结论：本轮没有发现阻断问题。`systemEventRepository` 已从“只支持后台跟进更新”扩展为同时支持系统事件插入；PostgreSQL Store 提供 `createSystemEvent` hook 后，独立运营事件可以直接插入 `system_events`，不再为了单条事件回退整库快照写回。
+
+已确认：
+
+- `createSystemEvent` 会归一化 level、metadata 和时间字段，并返回与历史列表一致的系统事件结构。
+- `recordRequestError` 仍按当前用户、活动组织和请求头解析组织归属；Store 支持 hook 时只插入单条 `http.request.failed`，不会第二次调用整库 `write()`。
+- `AI` 代理失败事件和支付 checkout 配置告警已切到 `recordSystemEvent` helper，Store 支持 hook 时通过 `createSystemEvent` 写入。
+- 业务状态必须同事务写入的链路仍保留原路径，例如邮件投递状态更新、支付 webhook 幂等记录和人工充值订单事件，避免拆分后破坏原子性。
+- Repository 测试覆盖系统事件插入和跟进更新；API 回归测试覆盖 HTTP 500、支付 checkout 告警和 hook 路径不触发额外快照写回。
+
+残余风险：
+
+- 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
+- 邮件/支付回调这类和业务状态绑定的系统事件仍会随原事务写入；后续如继续拆分，应按业务事务边界设计专用 repository，而不是简单把事件单独异步插入。
+
+验证命令：
+```bash
+node --check server\src\db\repositories\systemEventRepository.js
+node --check server\src\db\postgresStore.js
+node --check server\src\app.js
+node --test server\tests\postgres-repository.test.js
+node --test server\tests\commercial-api.test.js
+```
+
 ## 2026-06-03 系统错误事件跟进 PostgreSQL Repository Review
 
 范围：`server/src/db/repositories/systemEventRepository.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/postgres-repository.test.js`、`server/tests/commercial-api.test.js`。
@@ -16,7 +44,7 @@
 残余风险：
 
 - 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
-- 邮件/支付回调未匹配事件、部分平台运行事件仍会写入 `system_events`；后续可继续评估是否需要通用 system event insert repository。
+- 邮件/支付回调等和业务状态绑定的事件仍会随原事务写入 `system_events`；后续可继续评估专用 repository 拆分。
 
 验证命令：
 ```bash
@@ -43,7 +71,7 @@ node --test server\tests\commercial-api.test.js
 残余风险：
 
 - 当前 repository 测试仍是轻量 fake pool，尚未接真实 PostgreSQL 实例跑集成验证。
-- 错误事件本体跟进、邮件/支付回调事件和部分平台运行事件仍会写入或更新 `system_events`，后续可继续拆出更通用的 system event repository。
+- 邮件/支付回调等和业务状态绑定的事件仍会随原事务写入 `system_events`，后续可继续按业务边界拆出专用 repository。
 
 验证命令：
 
@@ -1030,7 +1058,7 @@ npm run test:e2e
 结果：
 
 - 前端与核心单元测试：238 项通过
-- 后端服务与 repository 测试：97 项通过
+- 后端服务与 repository 测试：100 项通过
 - 端到端测试：30 项通过
 
 GitHub Actions 已配置基础 CI，自动运行：

@@ -18,7 +18,7 @@ import {
   reviewManualPaymentOrder as reviewManualPaymentOrderRecord,
 } from "./repositories/manualPaymentRepository.js";
 import { getOpsTriage, upsertOpsTriage } from "./repositories/opsTriageRepository.js";
-import { updateSystemEventMetadata } from "./repositories/systemEventRepository.js";
+import { createSystemEvent as createSystemEventRecord, updateSystemEventMetadata } from "./repositories/systemEventRepository.js";
 import { insertUsageRecord, listUsageByOrganization } from "./repositories/usageRepository.js";
 import {
   createWriterProfile,
@@ -416,6 +416,12 @@ export class PostgresStore {
       });
       return event;
     });
+  }
+
+  async createSystemEvent(options = {}) {
+    return this.repositoryWrite(async (client) => (
+      createSystemEventRecord(client, { ...options, now: new Date().toISOString() })
+    ));
   }
 
   async createFeedback(options = {}) {

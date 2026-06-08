@@ -1200,13 +1200,18 @@ async function chatProxy(ctx) {
       error: error.message || "AI 调用失败",
       created_at: startedAt,
     });
-    await ctx.store.write((data) => {
-      addSystemEvent(data, organization.id, ctx.auth.user.id, "warn", "ai.proxy.failed", error.message || "AI 调用失败", {
+    await recordSystemEvent(ctx, {
+      organizationId: organization.id,
+      userId: ctx.auth.user.id,
+      level: "warn",
+      type: "ai.proxy.failed",
+      message: error.message || "AI 调用失败",
+      metadata: {
         provider,
         model,
         task_type: taskType,
         usage_id: usageRecord.id,
-      });
+      },
     });
     if (error instanceof HttpError) throw error;
     throw new HttpError(502, friendlyAiError(error), "ai_proxy_failed");
@@ -1308,14 +1313,24 @@ async function createBillingCheckout(ctx) {
     throw new HttpError(400, "请选择要升级的有效套餐", "invalid_billing_plan");
   }
   if (ctx.env.paymentCheckoutMode === "disabled") {
-    await ctx.store.write((data) => {
-      addSystemEvent(data, organization.id, ctx.auth.user.id, "warn", "billing.checkout.not_configured", "支付 checkout 尚未配置", { plan: checkout.plan });
+    await recordSystemEvent(ctx, {
+      organizationId: organization.id,
+      userId: ctx.auth.user.id,
+      level: "warn",
+      type: "billing.checkout.not_configured",
+      message: "支付 checkout 尚未配置",
+      metadata: { plan: checkout.plan },
     });
     throw new HttpError(503, "支付升级尚未配置，请联系管理员", "billing_checkout_not_configured");
   }
   if (ctx.env.paymentCheckoutMode !== "mock" && !ctx.env.paymentCheckoutUrl) {
-    await ctx.store.write((data) => {
-      addSystemEvent(data, organization.id, ctx.auth.user.id, "error", "billing.checkout.invalid_config", "支付 checkout 地址未配置", { plan: checkout.plan });
+    await recordSystemEvent(ctx, {
+      organizationId: organization.id,
+      userId: ctx.auth.user.id,
+      level: "error",
+      type: "billing.checkout.invalid_config",
+      message: "支付 checkout 地址未配置",
+      metadata: { plan: checkout.plan },
     });
     throw new HttpError(503, "支付升级地址尚未配置，请联系管理员", "billing_checkout_invalid_config");
   }
@@ -2812,7 +2827,7 @@ function addAudit(data, organizationId, userId, action, targetType, targetId, me
 }
 
 function addSystemEvent(data, organizationId, userId, level, type, message, metadata = {}) {
-  data.system_events.push({
+  const event = {
     id: createId("evt"),
     organization_id: organizationId,
     user_id: userId,
@@ -2821,7 +2836,23 @@ function addSystemEvent(data, organizationId, userId, level, type, message, meta
     message,
     metadata,
     created_at: new Date().toISOString(),
-  });
+  };
+  data.system_events.push(event);
+  return event;
+}
+
+async function recordSystemEvent(ctx, {
+  organizationId = null,
+  userId = null,
+  level = "info",
+  type = "",
+  message = "",
+  metadata = {},
+} = {}) {
+  if (typeof ctx.store.createSystemEvent === "function") {
+    return ctx.store.createSystemEvent({ organizationId, userId, level, type, message, metadata });
+  }
+  return ctx.store.write((data) => addSystemEvent(data, organizationId, userId, level, type, message, metadata));
 }
 
 async function enforceRateLimit(ctx, organizationId) {
@@ -3112,6 +3143,23 @@ function handleError(response, error) {
 async function recordRequestError(store, ctx, request, error) {
   const status = error instanceof HttpError ? error.status : 500;
   if (status < 500) return;
+  if (typeof store.createSystemEvent === "function") {
+    const data = await store.read();
+    const organizationId = resolveRequestErrorOrganizationId(ctx, data);
+    await store.createSystemEvent({
+      organizationId,
+      userId: ctx?.auth?.user?.id || null,
+      level: "error",
+      type: "http.request.failed",
+      message: error.message || "接口异常",
+      metadata: {
+        method: request.method,
+        url: request.url,
+        status,
+      },
+    });
+    return;
+  }
   await store.write((data) => {
     const organizationId = resolveRequestErrorOrganizationId(ctx, data);
     addSystemEvent(data, organizationId, ctx?.auth?.user?.id || null, "error", "http.request.failed", error.message || "接口异常", {

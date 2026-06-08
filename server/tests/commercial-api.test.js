@@ -1290,6 +1290,203 @@ test("unexpected request errors are recorded under the active organization", asy
   }
 });
 
+test("unexpected request errors use system event repository hook when available", async () => {
+  const token = "scoped-error-hook-session-token";
+  const now = new Date().toISOString();
+  const data = normalizeData({
+    users: [{
+      id: "usr_error_hook",
+      email: "error-hook-owner@example.com",
+      name: "Error Hook Owner",
+      password_hash: "",
+      disabled_at: null,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_error_hook",
+      name: "Error Hook Org",
+      slug: "error-hook-org",
+      plan: "free",
+      created_by: "usr_error_hook",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_error_hook",
+      organization_id: "org_error_hook",
+      user_id: "usr_error_hook",
+      role: "owner",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_error_hook",
+      user_id: "usr_error_hook",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+  });
+  let writeCalls = 0;
+  let createdEventOptions = null;
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write() {
+      writeCalls += 1;
+      throw new Error("simulated document write failure");
+    },
+    async createSystemEvent(options) {
+      createdEventOptions = options;
+      const event = {
+        id: "evt_error_hook",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        level: options.level,
+        type: options.type,
+        message: options.message,
+        metadata: options.metadata,
+        created_at: now,
+      };
+      data.system_events.push(event);
+      return event;
+    },
+  };
+  const scopedServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+    },
+    store,
+  });
+  await new Promise((resolve) => scopedServer.listen(0, "127.0.0.1", resolve));
+  const address = scopedServer.address();
+  const scopedBaseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${scopedBaseUrl}/api/documents`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `mowen_session=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({ title: "Broken", content: "body" }),
+    });
+
+    assert.equal(response.status, 500);
+    assert.equal(writeCalls, 1);
+    assert.equal(createdEventOptions.organizationId, "org_error_hook");
+    assert.equal(createdEventOptions.userId, "usr_error_hook");
+    assert.equal(createdEventOptions.type, "http.request.failed");
+    assert.equal(createdEventOptions.metadata.url, "/api/documents");
+  } finally {
+    await new Promise((resolve) => scopedServer.close(resolve));
+  }
+});
+
+test("billing checkout warnings use system event repository hook when available", async () => {
+  const now = new Date().toISOString();
+  const token = `checkout-event-hook-${crypto.randomUUID()}`;
+  const data = normalizeData({
+    users: [{
+      id: "usr_checkout_event",
+      email: "checkout-event@example.com",
+      name: "Checkout Event",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_checkout_event",
+      name: "Checkout Event Org",
+      slug: "checkout-event-org",
+      plan: "free",
+      created_by: "usr_checkout_event",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_checkout_event",
+      organization_id: "org_checkout_event",
+      user_id: "usr_checkout_event",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_checkout_event",
+      user_id: "usr_checkout_event",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+  });
+  let writeCalled = false;
+  const createdEventOptions = [];
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      writeCalled = true;
+      return mutator(data);
+    },
+    async createSystemEvent(options) {
+      createdEventOptions.push(options);
+      const event = {
+        id: `evt_checkout_event_${createdEventOptions.length}`,
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        level: options.level,
+        type: options.type,
+        message: options.message,
+        metadata: options.metadata,
+        created_at: now,
+      };
+      data.system_events.push(event);
+      return event;
+    },
+  };
+  const checkoutServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+      PAYMENT_CHECKOUT_MODE: "disabled",
+    },
+    store,
+  });
+  await new Promise((resolve) => checkoutServer.listen(0, "127.0.0.1", resolve));
+  const address = checkoutServer.address();
+  const checkoutBaseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${checkoutBaseUrl}/api/billing/checkout`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `mowen_session=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({ plan: "pro" }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 503, JSON.stringify(body));
+    assert.equal(writeCalled, false);
+    const checkoutEvent = createdEventOptions.find((item) => item.type === "billing.checkout.not_configured");
+    const requestEvent = createdEventOptions.find((item) => item.type === "http.request.failed");
+    assert.equal(checkoutEvent.organizationId, "org_checkout_event");
+    assert.equal(checkoutEvent.userId, "usr_checkout_event");
+    assert.deepEqual(checkoutEvent.metadata, { plan: "pro" });
+    assert.equal(requestEvent.organizationId, "org_checkout_event");
+    assert.equal(requestEvent.metadata.status, 503);
+  } finally {
+    await new Promise((resolve) => checkoutServer.close(resolve));
+  }
+});
+
 test("ops triage uses repository hook for AI usage when available", async () => {
   const now = new Date().toISOString();
   const token = `ops-repo-${crypto.randomUUID()}`;

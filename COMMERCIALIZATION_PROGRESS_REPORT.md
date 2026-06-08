@@ -2,6 +2,17 @@
 
 更新时间：2026-06-03
 
+## 2026-06-03 新增完成：通用系统事件插入 PostgreSQL 表级写入
+
+本轮继续压缩 `system_events` 的独立运营事件写入，把不需要和业务状态强绑定的系统事件接入表级 repository：
+
+- `systemEventRepository` 新增 `createSystemEvent`，支持直接向 `system_events` 插入归一化事件。
+- PostgreSQL Store 新增 `createSystemEvent` hook，插入后会刷新内存快照；JSON Store 兼容路径不变。
+- `http.request.failed`、`ai.proxy.failed`、`billing.checkout.not_configured` 和 `billing.checkout.invalid_config` 已优先走该 hook。
+- 补充 repository 与 API 回归测试，确认 HTTP 500 归档、AI/支付独立运营事件不会触发额外整库 `write()`。
+
+这一步把“错误跟进”之外的独立系统事件也推进到表级写入。后续剩余 `system_events` 风险主要集中在邮件/支付回调、人工充值等需要和业务状态保持同事务的事件，后续应按业务边界继续拆分，而不是简单异步插入。
+
 ## 2026-06-03 新增完成：系统错误事件跟进 PostgreSQL 表级写入
 
 本轮继续收口独立后台“最近错误”的运营闭环，把系统错误事件本体跟进从兼容快照写回拆到表级 repository：
@@ -11,7 +22,7 @@
 - `/api/ops/events/:id/triage` 命中系统事件时优先走 repository hook；AI 失败记录继续走 `ops_triage`，JSON Store 路径保持原有兼容行为。
 - 补充 repository 与 API 回归测试，确认组织隔离、warn/error 范围限定、not found 错误码和不触发整库 `write()`。
 
-这一步让后台“错误跟进”与“AI 失败跟进”“反馈处理”一样进入表级写入状态。后续剩余的 `system_events` 风险主要集中在邮件/支付回调未匹配事件、少数平台运行事件和未来是否需要通用事件插入 repository。
+这一步让后台“错误跟进”与“AI 失败跟进”“反馈处理”一样进入表级写入状态。后续剩余的 `system_events` 风险主要集中在邮件/支付回调事件和少数平台运行事件。
 
 ## 2026-06-03 新增完成：反馈处理 PostgreSQL 表级写入
 
@@ -92,7 +103,7 @@ git diff --check
 结果：
 
 - 前端与核心单元测试：238 项通过
-- 后端服务与 repository 测试：97 项通过
+- 后端服务与 repository 测试：100 项通过
 - 端到端测试：30 项通过
 - diff 空白检查：通过
 
@@ -395,7 +406,7 @@ Review 后修复：
 
 需要完成：
 
-- 继续评估错误事件本体跟进、邮件/支付回调事件等剩余 `system_events` 写入的增量 SQL 替代方案。
+- 继续评估邮件/支付回调事件等需要和业务状态同事务写入的 `system_events` 增量 SQL 替代方案。
 - 给文档、执笔人、用量、审计等高频表增加分页查询。
 - 增加 PostgreSQL 集成测试。
 - 扩展多版本迁移脚本和回滚演练。

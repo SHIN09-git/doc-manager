@@ -1,5 +1,9 @@
 # TODO
 
+## 真实网站上线 TODO
+
+面向域名部署、生产环境、人工充值、邮件、备份和灰度运营的剩余工作，见 [WEBSITE_LAUNCH_TODO.md](WEBSITE_LAUNCH_TODO.md)。
+
 ## 2026-06-01 全量审阅发现问题修复记录
 
 - [x] 从 `app.js` 拆出 `cloudSessionController`，集中管理云端地址保存、状态刷新、登录、注册、退出、全设备退出、邮箱验证和密码重置。
@@ -44,6 +48,7 @@
 - [x] 补充 `ops_triage` repository 测试和 API 回归测试，确认支持 repository hook 的 Store 不会再走整库 `write()`。
 - [x] 新增 PostgreSQL `feedbackRepository`，用户反馈创建、单条状态流转和批量处理在 PostgreSQL Store 下可走 `system_events` 表级事务。
 - [x] 新增 PostgreSQL `systemEventRepository`，后台最近错误中的系统 warn/error 事件跟进可直接更新 `system_events.metadata` 并写入审计。
+- [x] 扩展 PostgreSQL `systemEventRepository`，HTTP 500、AI 代理失败和支付 checkout 配置告警等独立运营事件可直接插入 `system_events`。
 - [x] 补充系统错误事件 repository 测试和 API hook 回归测试，确认系统事件跟进不再依赖数据库快照写回。
 - [x] 补充反馈 repository 测试和 API hook 回归测试，确认反馈创建、处理和批量处理不再依赖整库快照写回。
 - [x] 从 `app.js` 拆出 `cloudApiClient`，集中管理云端 API 默认地址推导、地址归一化、组织请求头、`credentials: include`、JSON 响应解析和错误负载。
@@ -393,7 +398,7 @@
 - 文档管理、编辑、AI 起草、执笔人构建、PPT 生成、备份和垃圾箱已可用。
 - IndexedDB 已成为主存储。
 - CI 已运行 `npm run check` 和 `npm test`。
-- 最近一次完整验证：238 项前端与核心单元测试通过，97 项后端服务与 repository 测试通过，30 项端到端测试通过。
+- 最近一次完整验证：238 项前端与核心单元测试通过，100 项后端服务与 repository 测试通过，30 项端到端测试通过。
 
 ## 已完成
 

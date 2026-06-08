@@ -241,12 +241,13 @@ Resend 事件映射：
 - AI 失败跟进：`ops_triage`
 - 反馈创建与处理：`system_events` 中的 `user.feedback`
 - 系统错误事件跟进：`system_events.metadata`
+- 独立系统事件插入：`http.request.failed`、`ai.proxy.failed`、支付 checkout 配置告警等 `system_events`
 - 执笔人云端写入：`writer_profiles` / `writer_versions`
 - AI 用量写入：`ai_usage`
 - 额度扣减：`credit_accounts` / `credit_ledger`
 - 人工确认充值：`manual_payment_orders` / `credit_accounts` / `credit_ledger` / `organizations`
 
-JSON Store 行为保持不变。正式高并发部署前仍建议补充真实 PostgreSQL 集成测试，并继续评估邮件/支付回调事件等低频 `system_events` 写入是否需要进一步拆分。
+JSON Store 行为保持不变。正式高并发部署前仍建议补充真实 PostgreSQL 集成测试，并继续评估邮件/支付回调事件等需要和业务状态保持同事务的 `system_events` 写入是否需要进一步拆分。
 
 如需把本地 JSON 数据导入 PostgreSQL：
 

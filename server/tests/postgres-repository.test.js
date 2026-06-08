@@ -19,7 +19,7 @@ import {
   reviewManualPaymentOrder,
 } from "../src/db/repositories/manualPaymentRepository.js";
 import { buildOpsTriageGetQuery, getOpsTriage, upsertOpsTriage } from "../src/db/repositories/opsTriageRepository.js";
-import { updateSystemEventMetadata } from "../src/db/repositories/systemEventRepository.js";
+import { createSystemEvent, updateSystemEventMetadata } from "../src/db/repositories/systemEventRepository.js";
 import { buildUsageHistoryQuery, insertUsageRecord, listUsageByOrganization } from "../src/db/repositories/usageRepository.js";
 import {
   createWriterProfile,
@@ -1068,6 +1068,50 @@ test("ops triage repository inserts a new scoped record", async () => {
     { triage_status: "processing" },
   ]);
   assert.equal(record.updated_by, "usr_ops");
+});
+
+test("system event repository inserts normalized events", async () => {
+  let captured = null;
+  const pool = {
+    async query(text, values) {
+      captured = { text, values };
+      return {
+        rows: [{
+          id: values[0],
+          organization_id: values[1],
+          user_id: values[2],
+          level: values[3],
+          type: values[4],
+          message: values[5],
+          metadata: values[6],
+          created_at: values[7],
+        }],
+      };
+    },
+  };
+
+  const event = await createSystemEvent(pool, {
+    organizationId: "org_ops",
+    userId: "usr_ops",
+    level: "ERROR ",
+    type: " http.request.failed ",
+    message: "request failed",
+    metadata: { url: "/api/documents", status: 500 },
+    now: "2026-05-24T04:30:00.000Z",
+  });
+
+  assert.match(captured.text, /insert into system_events/);
+  assert.match(event.id, /^evt_/);
+  assert.deepEqual(captured.values.slice(1), [
+    "org_ops",
+    "usr_ops",
+    "error",
+    "http.request.failed",
+    "request failed",
+    { url: "/api/documents", status: 500 },
+    "2026-05-24T04:30:00.000Z",
+  ]);
+  assert.deepEqual(event.metadata, { url: "/api/documents", status: 500 });
 });
 
 test("system event repository updates scoped warn or error metadata", async () => {

@@ -6,6 +6,9 @@
 
 ### 工程
 
+- `systemEventRepository` 新增 `createSystemEvent`，独立系统事件可在 PostgreSQL Store 下直接插入 `system_events`，不用回退整库快照写回。
+- `http.request.failed`、`ai.proxy.failed`、`billing.checkout.not_configured` 和 `billing.checkout.invalid_config` 已优先走 `createSystemEvent` hook；JSON Store 兼容路径保持不变。
+- 补充系统事件插入 repository 与 API hook 回归测试，覆盖 HTTP 500 归档、AI/支付独立运营事件和不触发额外快照写回。
 - PostgreSQL Store 新增 `systemEventRepository`，系统错误事件的后台跟进可直接更新 `system_events.metadata`，并与 `ops.error.triage` 审计保持同事务写入。
 - `/api/ops/events/:id/triage` 在 Store 提供 `saveSystemEventTriage` hook 时不再回退整库 `write()`；JSON Store 兼容路径保持不变。
 - 补充系统错误事件 repository 与 API hook 回归测试，覆盖 warn/error 范围限定、组织隔离、not found 错误码和不触发快照写回。
