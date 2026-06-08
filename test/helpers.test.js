@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sanitizeCssColor, sanitizeUrl } from "../src/utils/helpers.js";
+import { sanitizeCssColor, sanitizeFileName, sanitizeUrl } from "../src/utils/helpers.js";
+
+test("sanitizeFileName keeps export names stable and filesystem-safe", () => {
+  assert.equal(sanitizeFileName("工作总结"), "工作总结");
+  assert.equal(sanitizeFileName("  学校\n通知:初稿?.docx  "), "学校 通知_初稿_.docx");
+  assert.equal(sanitizeFileName("...   "), "未命名文档");
+  assert.equal(sanitizeFileName("CON"), "CON_");
+  assert.equal(sanitizeFileName("a".repeat(100)).length, 80);
+});
 
 test("sanitizeCssColor keeps safe colors and rejects attribute-breaking values", () => {
   assert.equal(sanitizeCssColor("#0f766e"), "#0f766e");

@@ -33,8 +33,20 @@ export function describeLengthChange(delta) {
   return delta > 0 ? `增加 ${delta} 字` : `减少 ${Math.abs(delta)} 字`;
 }
 
-export function sanitizeFileName(name) {
-  return String(name || "未命名文档").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
+export function sanitizeFileName(name, fallback = "未命名文档") {
+  const normalize = (value) => String(value ?? "")
+    .replace(/[\u0000-\u001F\u007F]/g, " ")
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[. ]+|[. ]+$/g, "")
+    .slice(0, 80)
+    .replace(/[. ]+$/g, "")
+    .trim();
+  let safe = normalize(name);
+  if (!safe) safe = normalize(fallback) || "未命名文档";
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(safe)) return `${safe}_`;
+  return safe;
 }
 
 export function normalizeHandle(value) {

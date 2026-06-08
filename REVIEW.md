@@ -1,5 +1,19 @@
 # 代码评审记录
 
+## 2026-06-09 导出文件名边界 Review
+
+范围：`src/utils/helpers.js`、`test/helpers.test.js`。
+
+结论：加固了公共 `sanitizeFileName()`。此前文件名只替换 Windows 常见非法字符，仍可能保留控制字符、换行、纯空白、尾随点号/空格和 `CON` 等 Windows 保留设备名；该工具被 Word 导出、执笔人包导出、PPT 导出和真实文件夹写入复用。现在文件名会清除控制字符、折叠空白、移除头尾点号/空格、兜底空名称，并为保留设备名追加后缀。
+
+验证命令：
+
+```bash
+node --check src/utils/helpers.js
+node --check test/helpers.test.js
+node --test test/helpers.test.js
+```
+
 ## 2026-06-09 云端收款码与支付跳转 URL Review
 
 范围：`src/utils/helpers.js`、`src/modules/cloud/cloudPanelRenderer.js`、`src/admin/adminPage.js`、`test/helpers.test.js`、`test/cloudPanelRenderer.test.js`、`e2e/workbench.spec.js`。

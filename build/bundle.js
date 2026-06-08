@@ -23857,8 +23857,12 @@
     if (delta === 0) return "\u65E0\u53D8\u5316";
     return delta > 0 ? `\u589E\u52A0 ${delta} \u5B57` : `\u51CF\u5C11 ${Math.abs(delta)} \u5B57`;
   }
-  function sanitizeFileName(name) {
-    return String(name || "\u672A\u547D\u540D\u6587\u6863").replace(/[\\/:*?"<>|]/g, "_").slice(0, 80);
+  function sanitizeFileName(name, fallback = "\u672A\u547D\u540D\u6587\u6863") {
+    const normalize = (value) => String(value ?? "").replace(/[\u0000-\u001F\u007F]/g, " ").replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().replace(/^[. ]+|[. ]+$/g, "").slice(0, 80).replace(/[. ]+$/g, "").trim();
+    let safe = normalize(name);
+    if (!safe) safe = normalize(fallback) || "\u672A\u547D\u540D\u6587\u6863";
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(safe)) return `${safe}_`;
+    return safe;
   }
   function normalizeHandle(value) {
     return String(value || "").trim().replace(/^@+/, "").replace(/\s+/g, "").replace(/[^\u4e00-\u9fa5A-Za-z0-9_-]/g, "").slice(0, 24);
