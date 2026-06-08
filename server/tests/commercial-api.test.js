@@ -1101,8 +1101,20 @@ test("payment webhook requires a signed request and is idempotent", async () => 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "billing-owner@example.com", password: "password123", name: "Billing" }),
     });
+    const cookie = registered.headers.get("set-cookie") || "";
     const registeredJson = await registered.json();
-    const body = JSON.stringify({ provider: "mockpay", event_id: "evt_1", event_type: "checkout.completed", organization_id: registeredJson.active_organization.id, payload: { price_id: "price_pro" } });
+    const body = JSON.stringify({
+      provider: "mockpay",
+      event_id: "evt_1",
+      event_type: "checkout.completed",
+      organization_id: registeredJson.active_organization.id,
+      raw_secret: "provider-secret-raw",
+      payload: {
+        price_id: "price_pro",
+        customer_email: "secret-customer@example.com",
+        card_last4: "4242",
+      },
+    });
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const signature = signWebhook("shared-secret", timestamp, body);
     const first = await fetch(`${url}/api/webhooks/payments`, {
@@ -1111,6 +1123,13 @@ test("payment webhook requires a signed request and is idempotent", async () => 
       body,
     });
     assert.equal(first.status, 200);
+    const firstJson = await first.json();
+    assert.equal(firstJson.webhook.payload, undefined);
+    assert.equal(firstJson.webhook.summary.price_id, "price_pro");
+    assert.equal(firstJson.webhook.summary.plan, "pro");
+    assert.equal(firstJson.webhook.has_payload, true);
+    assert.equal(JSON.stringify(firstJson.webhook).includes("secret-customer@example.com"), false);
+    assert.equal(JSON.stringify(firstJson.webhook).includes("provider-secret-raw"), false);
     const second = await fetch(`${url}/api/webhooks/payments`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-webhook-timestamp": timestamp, "x-webhook-signature": signature },
@@ -1132,7 +1151,25 @@ test("payment webhook requires a signed request and is idempotent", async () => 
     assert.equal(expired.status, 403);
     const data = await webhookServer.store.read();
     assert.equal(data.payment_webhooks.length, 1);
+    assert.equal(data.payment_webhooks[0].payload.raw_secret, "provider-secret-raw");
+    assert.equal(data.payment_webhooks[0].payload.payload.customer_email, "secret-customer@example.com");
     assert.equal(data.organizations.find((item) => item.id === registeredJson.active_organization.id).plan, "pro");
+    const billing = await fetch(`${url}/api/billing/summary`, { headers: { Cookie: cookie } });
+    assert.equal(billing.status, 200);
+    const billingJson = await billing.json();
+    assert.equal(billingJson.payment_webhooks[0].payload, undefined);
+    assert.equal(billingJson.payment_webhooks[0].summary.price_id, "price_pro");
+    assert.equal(JSON.stringify(billingJson.payment_webhooks).includes("secret-customer@example.com"), false);
+    const dashboard = await fetch(`${url}/api/admin/dashboard`, { headers: { Cookie: cookie } });
+    assert.equal(dashboard.status, 200);
+    const dashboardJson = await dashboard.json();
+    assert.equal(dashboardJson.billing.payment_webhooks[0].payload, undefined);
+    assert.equal(JSON.stringify(dashboardJson.billing.payment_webhooks).includes("provider-secret-raw"), false);
+    const orgExport = await fetch(`${url}/api/orgs/${registeredJson.active_organization.id}/export`, { headers: { Cookie: cookie } });
+    assert.equal(orgExport.status, 200);
+    const orgExportJson = await orgExport.json();
+    assert.equal(orgExportJson.payment_webhooks[0].payload, undefined);
+    assert.equal(JSON.stringify(orgExportJson.payment_webhooks).includes("secret-customer@example.com"), false);
     const forgedBody = JSON.stringify({ provider: "mockpay", event_id: "evt_forged", event_type: "checkout.completed", organization_id: registeredJson.active_organization.id, plan: "team" });
     const forgedTimestamp = Math.floor(Date.now() / 1000).toString();
     const forged = await fetch(`${url}/api/webhooks/payments`, {

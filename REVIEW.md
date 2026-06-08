@@ -1,5 +1,32 @@
 # 代码评审记录
 
+## 2026-06-09 支付 Webhook 公开字段 Review
+
+范围：`server/src/app.js`、`server/tests/commercial-api.test.js`、`ARCHITECTURE.md`、`CHANGELOG.md`、`TODO.md`。
+
+结论：修复了支付 webhook 原始 payload 通过公开管理接口外露的问题。支付渠道回调原文仍保存在内部 `payment_webhooks.payload` 中，便于运营排查和审计；但账单摘要、管理员后台、组织数据导出和 webhook 响应现在都会先经过公开转换器，只返回事件 ID、渠道、事件类型、时间和安全摘要。
+
+已确认：
+
+- `/api/webhooks/payments` 响应不再返回 `payload` 原文。
+- `/api/billing/summary` 不再向 owner/admin 暴露渠道回调原文，只返回 `summary`、`has_payload` 和基础事件字段。
+- `/api/admin/dashboard` 的账单事件同样走脱敏转换。
+- 组织数据导出不再包含支付渠道原始 payload。
+- 内部 Store 仍保留原始 payload，后续排查和审计能力不受影响。
+- 回归测试覆盖邮箱、卡号尾号和 raw secret 等敏感字段不会出现在公开响应中。
+
+残余风险：
+
+- 真实支付渠道接入后仍需要按具体服务商字段继续扩展摘要字段，避免为了运营便利重新把原文透出。
+- 当前 raw payload 仍在内部数据库留存，生产环境应结合数据保留周期和访问权限管理。
+
+验证命令：
+
+```bash
+node --check server/src/app.js
+node --test server/tests/commercial-api.test.js
+```
+
 ## 2026-06-09 Store 写入失败回滚 Review
 
 范围：`server/src/db/jsonStore.js`、`server/src/db/postgresStore.js`、`server/src/app.js`、`server/tests/store-transaction.test.js`、`server/tests/commercial-api.test.js`。

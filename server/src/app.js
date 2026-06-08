@@ -526,7 +526,7 @@ async function paymentWebhook(ctx) {
     });
     return next;
   });
-  sendJson(ctx.response, 200, { webhook: item });
+  sendJson(ctx.response, 200, { webhook: publicPaymentWebhook(item) });
 }
 
 async function emailWebhook(ctx) {
@@ -1286,6 +1286,7 @@ async function billingSummary(ctx) {
     ? data.payment_webhooks
       .filter((item) => item.organization_id === organization.id)
       .slice(-20)
+      .map(publicPaymentWebhook)
     : [];
   const orders = data.manual_payment_orders
     .filter((item) => item.organization_id === organization.id && (canViewOrganization || item.user_id === ctx.auth.user.id))
@@ -1815,7 +1816,7 @@ async function adminDashboard(ctx) {
     ),
     email_deliveries: data.email_deliveries.filter((item) => orgUserIds.has(item.user_id)).slice(-50).map(publicEmailDelivery),
     billing: {
-      payment_webhooks: data.payment_webhooks.filter((item) => item.organization_id === organization.id).slice(-20),
+      payment_webhooks: data.payment_webhooks.filter((item) => item.organization_id === organization.id).slice(-20).map(publicPaymentWebhook),
       manual_orders: data.manual_payment_orders.filter((item) => item.organization_id === organization.id).slice(-50).map((item) => publicManualPaymentOrder(item, { admin: true })),
       manual_payment: getManualPaymentSummary(ctx.env),
       credits: getOrganizationCreditSummary(data, organization.id),
@@ -2048,7 +2049,7 @@ async function exportOrganizationData(ctx, orgId) {
     audit_logs: data.audit_logs.filter((item) => item.organization_id === orgId),
     system_events: data.system_events.filter((item) => item.organization_id === orgId),
     email_deliveries: data.email_deliveries.filter((item) => userIds.has(item.user_id)).map(publicEmailDelivery),
-    payment_webhooks: data.payment_webhooks.filter((item) => item.organization_id === orgId),
+    payment_webhooks: data.payment_webhooks.filter((item) => item.organization_id === orgId).map(publicPaymentWebhook),
     manual_payment_orders: data.manual_payment_orders.filter((item) => item.organization_id === orgId).map((item) => publicManualPaymentOrder(item, { admin: true })),
     credit_accounts: data.credit_accounts.filter((item) => item.organization_id === orgId).map(publicCreditAccount),
     credit_ledger: data.credit_ledger.filter((item) => item.organization_id === orgId),
@@ -2327,6 +2328,29 @@ function publicEmailDelivery(item) {
     metadata: item.metadata || {},
     created_at: item.created_at,
     updated_at: item.updated_at,
+  };
+}
+
+function publicPaymentWebhook(item = {}) {
+  const payload = item.payload && typeof item.payload === "object" ? item.payload : {};
+  const normalized = payload.normalized && typeof payload.normalized === "object" ? payload.normalized : {};
+  const priceId = findPaymentPriceId(payload);
+  return {
+    id: item.id || "",
+    provider: item.provider || "",
+    event_id: item.event_id || "",
+    organization_id: item.organization_id || null,
+    event_type: item.event_type || "",
+    processed_at: item.processed_at || "",
+    created_at: item.created_at || "",
+    has_payload: Object.keys(payload).length > 0,
+    summary: {
+      action: String(normalized.action || ""),
+      event_name: String(normalized.event_name || ""),
+      message: String(normalized.message || ""),
+      plan: String(normalized.plan || ""),
+      price_id: String(priceId || ""),
+    },
   };
 }
 

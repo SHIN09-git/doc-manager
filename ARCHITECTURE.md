@@ -124,6 +124,7 @@ src/modules/*
 - 后端额度流水公开字段集中在 `server/src/billing/creditLedger.js`，接口只返回按组织和权限过滤后的公开字段。
 - 后端人工充值订单列表、提交、审核、套餐解析和凭证公开字段集中在 `server/src/billing/manualPaymentService.js`，`server/src/app.js` 只负责路由装配和复用通用账号/审计依赖。
 - PostgreSQL Store 下人工充值创建、审核、额度入账和会员开通走 `server/src/db/repositories/manualPaymentRepository.js` 与 `creditRepository.js`，并在同事务写入审计和系统事件；JSON Store 兼容路径保持原有快照写入。
+- 支付 webhook 原始 payload 只作为内部排查和审计留存；`/api/billing/summary`、`/api/admin/dashboard`、组织数据导出和 webhook 响应统一通过公开转换器返回摘要字段，不暴露渠道回调原文。
 - `server/src/app.js` 仍负责通用路由和事务依赖装配，但新增账单子能力时应优先放入 `server/src/billing/`，再由路由调用。
 
 ## 文档链路
