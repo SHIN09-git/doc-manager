@@ -1,5 +1,26 @@
 # 代码评审记录
 
+## 2026-06-09 人工充值付费套餐权益 Review
+
+范围：`server/src/billing/manualPaymentService.js`、`server/tests/manual-payment-service.test.js`、`test/deployScripts.test.js`。
+
+结论：修复人工确认充值可被误配置为付费购买免费档的问题。此前人工充值套餐会接受全局套餐枚举中的 `free`，如果生产环境误把 `MANUAL_PAYMENT_PACKAGES` 配成 `plan: "free"`，用户可以提交付款订单，管理员确认后组织套餐反而变为免费档。现在人工充值套餐只要显式填写 `plan`，就必须是 `pro` 或 `team`；`free` 只能作为系统默认档存在，不能作为付费人工充值套餐出售。
+
+已确认：
+
+- 默认 Pro/Team 会员套餐和额度包仍正常返回。
+- `plan: "free"` 的会员、额度或混合套餐会在运行时被剔除。
+- 只包含 `plan: "free"` 的生产人工充值套餐配置无法通过部署自检。
+
+验证命令：
+
+```bash
+node --check server/src/billing/manualPaymentService.js
+node --check server/tests/manual-payment-service.test.js
+node --check test/deployScripts.test.js
+node --test server/tests/manual-payment-service.test.js test/deployScripts.test.js
+```
+
 ## 2026-06-09 人工充值运行时套餐归一化 Review
 
 范围：`server/src/billing/manualPaymentService.js`、`server/tests/manual-payment-service.test.js`。

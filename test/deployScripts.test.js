@@ -79,6 +79,26 @@ test("production checks reject manual payment packages that normalize away", () 
   assert.ok(failedNames.includes("MANUAL_PAYMENT_PACKAGES"));
 });
 
+test("production checks reject manual payment packages for the free plan", () => {
+  const checks = buildProductionChecks({
+    NODE_ENV: "production",
+    STORE_DRIVER: "postgres",
+    DATABASE_URL: "postgres://mowen:secret@db.realhost.test:5432/mowen",
+    SESSION_SECRET: "s".repeat(40),
+    APP_ENCRYPTION_SECRET: "e".repeat(40),
+    APP_URL: "https://mowen.realhost.test/index.html",
+    CORS_ORIGIN: "https://mowen.realhost.test",
+    SESSION_SECURE: "true",
+    EMAIL_MODE: "webhook",
+    EMAIL_PROVIDER: "generic-webhook",
+    EMAIL_WEBHOOK_URL: "https://mail.realhost.test/send",
+    MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "free_month", title: "Free", type: "plan", plan: "free", duration_days: 30, amount_cny: 9 }]),
+    AI_PROXY_MODE: "mock",
+  });
+  const failedNames = checks.filter((item) => item.level === "error" && !item.ok).map((item) => item.name);
+  assert.ok(failedNames.includes("MANUAL_PAYMENT_PACKAGES"));
+});
+
 test("static build manifest includes admin page module dependencies", async () => {
   const copiedSources = new Set((await collectStaticFileCopies()).map(([source]) => source.replace(/\\/g, "/")));
   const adminSource = "src/admin/adminPage.js";

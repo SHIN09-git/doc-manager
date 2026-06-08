@@ -75,7 +75,11 @@ test("manual payment package normalization rejects impossible shapes", () => {
   assert.equal(normalizeManualPaymentPackage({ type: "credits", credits: 100, amount_cny: 0 }, 0), null);
   assert.equal(normalizeManualPaymentPackage({ type: "credits", credits: 100, amount_cny: "abc" }, 0), null);
   assert.equal(normalizeManualPaymentPackage({ type: "credits", credits: "abc", amount_cny: 10 }, 0), null);
+  assert.equal(normalizeManualPaymentPackage({ type: "credits", plan: "free", credits: 100, amount_cny: 10 }, 0), null);
   assert.equal(normalizeManualPaymentPackage({ type: "plan", plan: "pro", amount_cny: 0 }, 0), null);
+  assert.equal(normalizeManualPaymentPackage({ type: "plan", plan: "free", amount_cny: 10 }, 0), null);
+  assert.equal(normalizeManualPaymentPackage({ type: "mixed", plan: "free", credits: 0, amount_cny: 10 }, 0), null);
+  assert.equal(normalizeManualPaymentPackage({ type: "mixed", plan: "free", credits: 100, amount_cny: 10 }, 0), null);
   assert.equal(normalizeManualPaymentPackage({ type: "plan", plan: "enterprise" }, 0), null);
   assert.equal(normalizeManualPaymentPackage({ id: "", credits: 100, amount_cny: 10 }, 0)?.id, "credits_1");
 });

@@ -256,7 +256,8 @@ export function getManualPaymentPackages(env = {}) {
 
 export function normalizeManualPaymentPackage(item, index = 0) {
   if (!item || typeof item !== "object") return null;
-  const plan = normalizePlan(String(item.plan || ""));
+  const rawPlan = String(item.plan || "").trim();
+  const plan = normalizePaidPlan(rawPlan);
   const credits = normalizePositiveInteger(item.credits);
   const durationDays = normalizePositiveInteger(item.duration_days ?? item.durationDays);
   const amountCny = normalizePositiveAmount(item.amount_cny ?? item.amountCny ?? item.amount);
@@ -264,6 +265,7 @@ export function normalizeManualPaymentPackage(item, index = 0) {
   const id = String(item.id || item.package_id || `${type}_${index + 1}`).trim().slice(0, 80);
   if (
     !id
+    || (rawPlan && !plan)
     || amountCny <= 0
     || (type === "plan" && !plan)
     || (type === "credits" && credits <= 0)
@@ -316,8 +318,8 @@ export function publicManualPaymentOrder(order = {}, options = {}) {
   return payload;
 }
 
-function normalizePlan(plan) {
-  return ["free", "pro", "team"].includes(plan) ? plan : "";
+function normalizePaidPlan(plan) {
+  return ["pro", "team"].includes(plan) ? plan : "";
 }
 
 function normalizePositiveAmount(value) {
