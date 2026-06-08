@@ -312,6 +312,41 @@ test("email delivery callbacks require token and update delivery status", async 
   }
 });
 
+test("email delivery public fields redact unsafe metadata", async () => {
+  const owner = await register("email-meta-owner@example.com");
+  await server.store.write((data) => {
+    const delivery = data.email_deliveries.find((item) => item.email === "email-meta-owner@example.com");
+    assert.ok(delivery);
+    delivery.metadata = {
+      ...(delivery.metadata || {}),
+      delivery_id: delivery.id,
+      message_id: "safe-message-id",
+      token: "secret-email-token",
+      reset_token: "secret-reset-token",
+      verification_id: "internal-verification-id",
+      nested: { secret: "nested-secret" },
+    };
+  });
+
+  const dashboard = await api("/api/admin/dashboard", { cookie: owner.cookie });
+  assert.equal(dashboard.status, 200);
+  const dashboardDelivery = dashboard.json.email_deliveries.find((item) => item.email === "email-meta-owner@example.com");
+  assert.ok(dashboardDelivery);
+  assert.equal(dashboardDelivery.metadata.delivery_id, dashboardDelivery.id);
+  assert.equal(dashboardDelivery.metadata.message_id, "safe-message-id");
+  assert.equal(dashboardDelivery.metadata.token, undefined);
+  assert.equal(dashboardDelivery.metadata.reset_token, undefined);
+  assert.equal(dashboardDelivery.metadata.verification_id, undefined);
+  assert.equal(JSON.stringify(dashboardDelivery).includes("secret-email-token"), false);
+
+  const orgExport = await api(`/api/orgs/${owner.orgId}/export`, { cookie: owner.cookie });
+  assert.equal(orgExport.status, 200);
+  const exportedDelivery = orgExport.json.email_deliveries.find((item) => item.email === "email-meta-owner@example.com");
+  assert.ok(exportedDelivery);
+  assert.equal(exportedDelivery.metadata.message_id, "safe-message-id");
+  assert.equal(JSON.stringify(exportedDelivery).includes("nested-secret"), false);
+});
+
 test("login failures are throttled", async () => {
   await register("throttle-owner@example.com");
   for (let i = 0; i < 5; i += 1) {

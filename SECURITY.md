@@ -46,6 +46,7 @@ AI 接口配置保存在当前浏览器。
 - 邀请成员时只把邀请码发给目标邮箱对应的用户，接受邀请需要匹配邀请码。
 - 支付 webhook 使用 HMAC 签名和时间戳校验，错误签名、过期请求和重复事件会被拒绝或幂等处理。正式接支付渠道时，应通过 `PAYMENT_PLAN_PRICE_MAP` 将渠道价格 ID 映射到内部套餐，不要信任 webhook 中可伪造的原始 `plan` 字段。
 - 支付 webhook 原始 payload 只在后端内部留存用于排查和审计；账单摘要、管理员后台、组织导出和 webhook 响应只返回脱敏摘要，不应把渠道回调原文直接透出给前端。
+- 邮件投递记录的公开 metadata 只保留投递排查必要字段，例如 `delivery_id`、`message_id`、回调状态和回调时间；验证码、重置码、内部验证 ID 或任意 secret 不应出现在管理员后台和组织导出中。
 - `npm run server:backup` 会导出云端逻辑备份。生产环境建议配置 `BACKUP_ENCRYPTION_KEY`，生成 `.json.gcm` 加密备份；未配置时仍会生成明文 `.json`，只适合本地开发或受控灰度环境。
 - `npm run server:backup:verify -- <backup-file>` 只做只读结构校验，不会恢复或覆盖数据。校验 `.json.gcm` 需要提供同一 `BACKUP_ENCRYPTION_KEY`。
 - 对象存储上传默认关闭；启用 `BACKUP_OBJECT_STORAGE_MODE=s3-compatible` 后，请使用最小权限 access key，并限制为只允许写入备份前缀。

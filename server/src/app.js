@@ -2325,10 +2325,29 @@ function publicEmailDelivery(item) {
     status: item.status,
     attempts: item.attempts,
     error: item.error ? "已记录错误" : "",
-    metadata: item.metadata || {},
+    metadata: publicEmailDeliveryMetadata(item.metadata),
     created_at: item.created_at,
     updated_at: item.updated_at,
   };
+}
+
+function publicEmailDeliveryMetadata(metadata = {}) {
+  const source = metadata && typeof metadata === "object" ? metadata : {};
+  const safeKeys = [
+    "delivery_id",
+    "message_id",
+    "provider_message_id",
+    "resend_id",
+    "callback_status",
+    "callback_at",
+    "provider_event_id",
+  ];
+  return safeKeys.reduce((payload, key) => {
+    if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
+      payload[key] = source[key];
+    }
+    return payload;
+  }, {});
 }
 
 function publicPaymentWebhook(item = {}) {

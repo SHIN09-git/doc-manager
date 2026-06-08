@@ -127,6 +127,14 @@ src/modules/*
 - 支付 webhook 原始 payload 只作为内部排查和审计留存；`/api/billing/summary`、`/api/admin/dashboard`、组织数据导出和 webhook 响应统一通过公开转换器返回摘要字段，不暴露渠道回调原文。
 - `server/src/app.js` 仍负责通用路由和事务依赖装配，但新增账单子能力时应优先放入 `server/src/billing/`，再由路由调用。
 
+## 云端邮件投递边界
+
+邮箱验证和密码重置邮件由后端生成正文后发送给邮件服务商。内部 `email_deliveries.metadata` 可保存投递排查需要的信息，但对外公开时必须通过白名单转换：
+
+- 管理员后台和组织数据导出只返回 `delivery_id`、`message_id`、服务商消息 ID、回调状态、回调时间和服务商事件 ID 等排查字段。
+- 验证码、重置码、内部验证记录 ID、任意 `token` 或 `secret` 不应进入公开响应。
+- 邮件服务商回调仍通过 `EMAIL_CALLBACK_TOKEN` 鉴权；匹配失败的回调只写系统事件，不创建新的投递记录。
+
 ## 文档链路
 
 文档导入流程：

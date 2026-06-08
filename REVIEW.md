@@ -1,5 +1,30 @@
 # 代码评审记录
 
+## 2026-06-09 邮件投递公开字段 Review
+
+范围：`server/src/app.js`、`server/tests/commercial-api.test.js`、`ARCHITECTURE.md`、`CHANGELOG.md`、`SECURITY.md`、`TODO.md`。
+
+结论：加固了邮件投递记录的公开字段边界。`email_deliveries.metadata` 仍可在内部保存投递排查信息，但 `publicEmailDelivery()` 现在只返回白名单 metadata，避免未来误把验证码、重置码、内部验证 ID 或服务商 secret 透出到管理员后台和组织导出。
+
+已确认：
+
+- 管理员后台邮件投递列表只保留 `delivery_id`、`message_id` 等排查字段。
+- 组织数据导出的 `email_deliveries` 同样走公开转换器。
+- 回归测试向内部 metadata 写入 `token`、`reset_token`、`verification_id` 和嵌套 secret，公开响应均不会包含这些内容。
+- 邮件发送、Resend 适配和回调状态更新仍使用内部记录，不影响投递排查。
+
+残余风险：
+
+- 邮件正文发送给第三方邮件服务商时仍必须包含验证码或重置码，这是业务必需；生产环境需要确保邮件服务商账号、域名和 webhook token 安全。
+- 若未来新增邮件服务商字段，应优先扩展白名单摘要，而不是返回完整 metadata。
+
+验证命令：
+
+```bash
+node --check server/src/app.js
+node --test server/tests/commercial-api.test.js
+```
+
 ## 2026-06-09 支付 Webhook 公开字段 Review
 
 范围：`server/src/app.js`、`server/tests/commercial-api.test.js`、`ARCHITECTURE.md`、`CHANGELOG.md`、`TODO.md`。
