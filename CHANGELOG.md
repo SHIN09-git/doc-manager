@@ -19,6 +19,8 @@
 - 导出与真实文件夹写入使用的文件名清洗逻辑会处理控制字符、纯空白、尾随点号/空格和 Windows 保留设备名。
 - 邮箱验证和密码重置提交阶段统一未知邮箱与错误令牌的反馈，减少公开认证入口的账号枚举风险。
 - 生产 JSON 环境变量解析改为失败即报错：`AI_COST_RATES`、`PAYMENT_PLAN_PRICE_MAP` 和 `MANUAL_PAYMENT_PACKAGES` 填写后必须是合法 JSON 对象或数组，避免支付价格映射、人工充值套餐和成本估算静默失效。
+- AI 成本估算兼容 `prompt` / `completion` 和 `*_per_token` 每 token 单价别名，同时生产示例改用明确的 `prompt_per_1k` / `completion_per_1k` 字段。
+- 部署自检会复用后端人工充值套餐归一化逻辑，`MANUAL_PAYMENT_PACKAGES` 里无法识别或金额无效的套餐不会通过真实网站上线检查。
 - 管理后台用量和审计 CSV 导出新增公式注入防护，疑似公式的单元格会作为文本导出；发布清单同步包含新 CSV 模块，并补充独立单元测试。
 - 静态发布脚本会从后台入口递归收集相对 ESM 依赖，避免后台继续拆模块后部署目录缺少间接依赖。
 - 新增 Store 事务回归测试，覆盖 JSON Store 和 PostgreSQL Store 在 mutator 抛错、rollback 和 commit 失败后的回滚语义。

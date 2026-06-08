@@ -517,6 +517,46 @@ test("AI proxy records usage and enforces request limits", async () => {
   assert.ok(usage.json.usage.estimated_cost > 0);
 });
 
+test("AI cost estimates accept per-token prompt and completion aliases", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-ai-cost-api-"));
+  const costServer = createApp({
+    env: {
+      DATA_DIR: temp,
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+      AI_COST_RATES: JSON.stringify({ default: { prompt: 0.000001, completion: 0.000004 } }),
+    },
+  });
+  await new Promise((resolve) => costServer.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${costServer.address().port}`;
+  try {
+    const registered = await fetch(`${url}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "ai-cost@example.com", password: "password123", name: "Cost" }),
+    });
+    assert.equal(registered.status, 201);
+    const cookie = registered.headers.get("set-cookie") || "";
+
+    const response = await fetch(`${url}/api/ai/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ task_type: "cost_alias", messages: [{ role: "user", content: "estimate this request" }] }),
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+
+    const data = await costServer.store.read();
+    const usage = data.ai_usage.find((item) => item.task_type === "cost_alias");
+    assert.ok(usage);
+    assert.ok(usage.estimated_cost > 0);
+  } finally {
+    await new Promise((resolve) => costServer.close(resolve));
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 test("live AI proxy fails clearly when no API key is configured", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-live-ai-api-"));
   const liveServer = createApp({

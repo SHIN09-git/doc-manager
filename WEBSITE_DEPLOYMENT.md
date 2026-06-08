@@ -174,6 +174,7 @@ npm run build:static
 npm run check
 npm test
 npm run test:e2e
+npm run deploy:check -- server/.env.production
 ```
 
 后端生产模式必须满足：
@@ -190,6 +191,6 @@ npm run test:e2e
 
 1. 把默认云端 API 地址改成线上域名配置，减少用户手填。
 2. 做一个 `/assets` 静态目录，用来放收款码和品牌图片。
-3. 增加部署环境自检脚本，启动前检查关键变量。
+3. 根据真实域名和套餐配置继续扩展部署环境自检规则。
 4. 把 GitHub Actions 增加 `npm run build:static` 检查。
 5. 根据你选择的平台，继续细化 Cloudflare Pages、Vercel、Render 或 VPS 的专门部署文档。

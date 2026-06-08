@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getManualPaymentPackages } from "../server/src/billing/manualPaymentService.js";
 import { loadEnv } from "../server/src/config/env.js";
 
 const PLACEHOLDER_RE = /(replace-with|your-domain|example\.|USER:PASSWORD@HOST|change-this|re_xxx|xxx)/i;
@@ -58,8 +59,16 @@ export function buildProductionChecks(source) {
   add("error", "SESSION_SECURE", envSource.SESSION_SECURE === "true", "SESSION_SECURE should be true behind HTTPS");
   add("error", "EMAIL_MODE", envSource.EMAIL_MODE === "webhook", "EMAIL_MODE should be webhook before public launch");
 
-  const manualPackages = parseJsonArray(envSource.MANUAL_PAYMENT_PACKAGES);
-  add("error", "MANUAL_PAYMENT_PACKAGES", manualPackages.length > 0, "manual recharge packages must be configured for the first paid launch");
+  const configuredManualPackages = parseJsonArray(envSource.MANUAL_PAYMENT_PACKAGES);
+  const manualPackages = configuredManualPackages.length
+    ? getManualPaymentPackages({ manualPaymentPackages: configuredManualPackages })
+    : [];
+  add(
+    "error",
+    "MANUAL_PAYMENT_PACKAGES",
+    manualPackages.length > 0 && manualPackages.every((item) => Number(item.amount_cny || 0) > 0),
+    "manual recharge packages must contain at least one valid paid package for the first paid launch",
+  );
   add("warn", "MANUAL_PAYMENT_WECHAT_QR_URL", hasProductionUrl(envSource.MANUAL_PAYMENT_WECHAT_QR_URL), "configure a public WeChat payment QR URL if WeChat recharge is offered");
   add("warn", "MANUAL_PAYMENT_ALIPAY_QR_URL", hasProductionUrl(envSource.MANUAL_PAYMENT_ALIPAY_QR_URL), "configure a public Alipay QR URL if Alipay recharge is offered");
   add("warn", "BACKUP_ENCRYPTION_KEY", isStrongSecret(envSource.BACKUP_ENCRYPTION_KEY), "configure BACKUP_ENCRYPTION_KEY before storing production backups");

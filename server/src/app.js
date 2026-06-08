@@ -3126,11 +3126,28 @@ function resolveEstimatedUsageCost(env, usage) {
   const rate = resolveAiCostRate(env, usage.provider, usage.model);
   if (!rate) return 0;
   if (typeof rate === "number") return roundCost((Number(usage.total_tokens || 0) / 1000) * rate);
-  const promptRate = Number(rate.prompt_per_1k ?? rate.input_per_1k ?? rate.per_1k ?? 0);
-  const completionRate = Number(rate.completion_per_1k ?? rate.output_per_1k ?? rate.per_1k ?? promptRate);
+  const promptRate = resolveRatePer1k(rate, ["prompt_per_1k", "input_per_1k", "per_1k"], ["prompt_per_token", "input_per_token", "prompt", "input"]);
+  const completionRate = resolveRatePer1k(
+    rate,
+    ["completion_per_1k", "output_per_1k", "per_1k"],
+    ["completion_per_token", "output_per_token", "completion", "output"],
+    promptRate,
+  );
   const promptCost = (Number(usage.prompt_tokens || 0) / 1000) * (Number.isFinite(promptRate) ? promptRate : 0);
   const completionCost = (Number(usage.completion_tokens || 0) / 1000) * (Number.isFinite(completionRate) ? completionRate : 0);
   return roundCost(promptCost + completionCost);
+}
+
+function resolveRatePer1k(rate, perThousandKeys, perTokenKeys, fallback = 0) {
+  for (const key of perThousandKeys) {
+    const value = Number(rate[key]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  for (const key of perTokenKeys) {
+    const value = Number(rate[key]);
+    if (Number.isFinite(value) && value > 0) return value * 1000;
+  }
+  return fallback;
 }
 
 function resolveAiCostRate(env, provider, model) {

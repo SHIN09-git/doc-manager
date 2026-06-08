@@ -28,7 +28,7 @@ test("production checks accept APP_BASE_URL alias when required launch fields ar
     EMAIL_MODE: "webhook",
     EMAIL_PROVIDER: "generic-webhook",
     EMAIL_WEBHOOK_URL: "https://mail.realhost.test/send",
-    MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "pro_month", title: "Pro", amount_cny: 29 }]),
+    MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "pro_month", title: "Pro", type: "plan", plan: "pro", duration_days: 30, amount_cny: 29 }]),
     MANUAL_PAYMENT_WECHAT_QR_URL: "https://mowen.realhost.test/wechat.png",
     MANUAL_PAYMENT_ALIPAY_QR_URL: "https://mowen.realhost.test/alipay.png",
     BACKUP_ENCRYPTION_KEY: "b".repeat(40),
@@ -56,6 +56,26 @@ test("production checks reject placeholder launch configuration", () => {
   assert.ok(failedNames.includes("DATABASE_URL"));
   assert.ok(failedNames.includes("SESSION_SECRET"));
   assert.ok(failedNames.includes("APP_URL"));
+  assert.ok(failedNames.includes("MANUAL_PAYMENT_PACKAGES"));
+});
+
+test("production checks reject manual payment packages that normalize away", () => {
+  const checks = buildProductionChecks({
+    NODE_ENV: "production",
+    STORE_DRIVER: "postgres",
+    DATABASE_URL: "postgres://mowen:secret@db.realhost.test:5432/mowen",
+    SESSION_SECRET: "s".repeat(40),
+    APP_ENCRYPTION_SECRET: "e".repeat(40),
+    APP_URL: "https://mowen.realhost.test/index.html",
+    CORS_ORIGIN: "https://mowen.realhost.test",
+    SESSION_SECURE: "true",
+    EMAIL_MODE: "webhook",
+    EMAIL_PROVIDER: "generic-webhook",
+    EMAIL_WEBHOOK_URL: "https://mail.realhost.test/send",
+    MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "empty_credits", title: "Empty", type: "credits", credits: 0, amount_cny: 29 }]),
+    AI_PROXY_MODE: "mock",
+  });
+  const failedNames = checks.filter((item) => item.level === "error" && !item.ok).map((item) => item.name);
   assert.ok(failedNames.includes("MANUAL_PAYMENT_PACKAGES"));
 });
 

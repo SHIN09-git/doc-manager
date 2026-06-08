@@ -1,5 +1,29 @@
 # 代码评审记录
 
+## 2026-06-09 AI 成本配置与人工充值自检 Review
+
+范围：`server/src/app.js`、`scripts/verify-production.mjs`、`server/env.production.example`、`server/tests/commercial-api.test.js`、`test/deployScripts.test.js`。
+
+结论：修复两处生产配置契约漂移。此前生产环境示例里的 `AI_COST_RATES` 使用 `prompt` / `completion` 字段，但后端成本估算只识别 `prompt_per_1k` / `completion_per_1k` 等字段，照示例配置会导致成本估算为 0。现在后端优先识别 `*_per_1k`，同时兼容 `prompt` / `completion` 和 `*_per_token` 作为每 token 单价别名；生产示例已改为清晰的 `prompt_per_1k` / `completion_per_1k`。另外，部署自检不再只检查 `MANUAL_PAYMENT_PACKAGES` 是非空数组，而是复用后端人工充值套餐归一化逻辑，确保配置里至少有一个有效付费套餐。
+
+已确认：
+
+- 使用生产示例的每 token 别名也能写入非零 `estimated_cost`。
+- 新的生产示例使用明确的每千 token 单价字段。
+- `MANUAL_PAYMENT_PACKAGES` 中无法归一化的套餐不会通过上线自检。
+- 自检仍允许合法的 Pro 会员或额度包套餐通过。
+
+验证命令：
+
+```bash
+node --check server/src/app.js
+node --check scripts/verify-production.mjs
+node --check server/tests/commercial-api.test.js
+node --check test/deployScripts.test.js
+node --test server/tests/commercial-api.test.js
+node --test test/deployScripts.test.js
+```
+
 ## 2026-06-09 生产 JSON 环境变量解析 Review
 
 范围：`server/src/config/env.js`、`server/tests/env.test.js`。

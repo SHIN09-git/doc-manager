@@ -89,6 +89,8 @@ EMAIL_MODE=log
 
 `AI_COST_RATES`、`PAYMENT_PLAN_PRICE_MAP` 和 `MANUAL_PAYMENT_PACKAGES` 是 JSON 环境变量。未配置时会使用默认空对象或空数组；一旦填写，启动时必须解析为正确的 JSON 对象或数组，否则服务会拒绝启动，避免支付价格映射、人工充值套餐或成本估算配置静默失效。
 
+`AI_COST_RATES` 推荐按 provider、model 或 `default` 配置每千 token 单价，例如 `{"gpt-4.1-mini":{"prompt_per_1k":0.001,"completion_per_1k":0.004}}`。后端也兼容旧示例中的 `prompt` / `completion` 和 `*_per_token` 字段，并按每 token 单价换算。
+
 `EMAIL_PROVIDER` 支持：
 
 - `generic-webhook`：沿用项目通用 HTTP webhook，请求体由你自己的邮件服务转发。
@@ -392,6 +394,8 @@ MANUAL_PAYMENT_WECHAT_QR_URL=https://example.com/wechat-qr.png
 MANUAL_PAYMENT_ALIPAY_QR_URL=https://example.com/alipay-qr.png
 MANUAL_PAYMENT_PACKAGES=[{"id":"credits_1000","title":"1000 点 AI 额度","type":"credits","amount_cny":50,"credits":1000},{"id":"pro_month","title":"Pro 月度会员","type":"plan","amount_cny":29,"plan":"pro","duration_days":30}]
 ```
+
+`npm run deploy:check -- server/.env.production` 会检查人工充值套餐能否被后端识别，并要求至少存在一个金额大于 0 的有效套餐。
 
 人工确认版适合微信/支付宝扫码收款、灰度售卖和小规模运营。正式商业化支付仍建议后续接入渠道签名、自动回调、退款与对账。
 
