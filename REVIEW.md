@@ -1,5 +1,26 @@
 # 代码评审记录
 
+## 2026-06-09 人工充值运行时套餐归一化 Review
+
+范围：`server/src/billing/manualPaymentService.js`、`server/tests/manual-payment-service.test.js`。
+
+结论：修复人工确认充值套餐在运行时接受坏配置的风险。此前部署自检已经会拒绝无效 `MANUAL_PAYMENT_PACKAGES`，但后端运行时的套餐归一化仍会把非数字金额带成 `NaN`，也会允许金额为 0 的会员或额度包进入可选套餐列表。现在运行时要求套餐金额必须是有限正数，额度和周期也会先归一为有限正整数；非数字额度、零金额或非数字金额的套餐会直接被剔除，避免用户提交免费开通、NaN 金额或无法核对的充值订单。
+
+已确认：
+
+- 默认人工充值套餐仍正常返回。
+- 合法自定义混合包、额度包仍按原契约归一化。
+- 零金额、非数字金额、非数字额度和无效会员套餐会被拒绝。
+- 运行时归一化与部署自检使用同一套有效套餐判断，降低配置上线后行为漂移。
+
+验证命令：
+
+```bash
+node --check server/src/billing/manualPaymentService.js
+node --check server/tests/manual-payment-service.test.js
+node --test server/tests/manual-payment-service.test.js
+```
+
 ## 2026-06-09 AI 成本配置与人工充值自检 Review
 
 范围：`server/src/app.js`、`scripts/verify-production.mjs`、`server/env.production.example`、`server/tests/commercial-api.test.js`、`test/deployScripts.test.js`。

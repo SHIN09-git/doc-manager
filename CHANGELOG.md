@@ -21,6 +21,7 @@
 - 生产 JSON 环境变量解析改为失败即报错：`AI_COST_RATES`、`PAYMENT_PLAN_PRICE_MAP` 和 `MANUAL_PAYMENT_PACKAGES` 填写后必须是合法 JSON 对象或数组，避免支付价格映射、人工充值套餐和成本估算静默失效。
 - AI 成本估算兼容 `prompt` / `completion` 和 `*_per_token` 每 token 单价别名，同时生产示例改用明确的 `prompt_per_1k` / `completion_per_1k` 字段。
 - 部署自检会复用后端人工充值套餐归一化逻辑，`MANUAL_PAYMENT_PACKAGES` 里无法识别或金额无效的套餐不会通过真实网站上线检查。
+- 人工充值运行时套餐归一化同步收紧，零金额、非数字金额或非数字额度的套餐不会进入用户可提交订单列表。
 - 管理后台用量和审计 CSV 导出新增公式注入防护，疑似公式的单元格会作为文本导出；发布清单同步包含新 CSV 模块，并补充独立单元测试。
 - 静态发布脚本会从后台入口递归收集相对 ESM 依赖，避免后台继续拆模块后部署目录缺少间接依赖。
 - 新增 Store 事务回归测试，覆盖 JSON Store 和 PostgreSQL Store 在 mutator 抛错、rollback 和 commit 失败后的回滚语义。

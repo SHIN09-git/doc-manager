@@ -257,12 +257,18 @@ export function getManualPaymentPackages(env = {}) {
 export function normalizeManualPaymentPackage(item, index = 0) {
   if (!item || typeof item !== "object") return null;
   const plan = normalizePlan(String(item.plan || ""));
-  const credits = Math.max(0, Math.floor(Number(item.credits || 0)));
-  const durationDays = Math.max(0, Math.floor(Number(item.duration_days || item.durationDays || 0)));
-  const amountCny = Math.max(0, Number(item.amount_cny ?? item.amountCny ?? item.amount ?? 0));
+  const credits = normalizePositiveInteger(item.credits);
+  const durationDays = normalizePositiveInteger(item.duration_days ?? item.durationDays);
+  const amountCny = normalizePositiveAmount(item.amount_cny ?? item.amountCny ?? item.amount);
   const type = ["plan", "credits", "mixed"].includes(item.type) ? item.type : plan && credits ? "mixed" : plan ? "plan" : "credits";
   const id = String(item.id || item.package_id || `${type}_${index + 1}`).trim().slice(0, 80);
-  if (!id || (type === "plan" && !plan) || (type === "credits" && credits <= 0) || (type === "mixed" && !plan && credits <= 0)) return null;
+  if (
+    !id
+    || amountCny <= 0
+    || (type === "plan" && !plan)
+    || (type === "credits" && credits <= 0)
+    || (type === "mixed" && !plan && credits <= 0)
+  ) return null;
   return {
     id,
     title: String(item.title || item.name || id).trim().slice(0, 120) || id,
@@ -312,6 +318,16 @@ export function publicManualPaymentOrder(order = {}, options = {}) {
 
 function normalizePlan(plan) {
   return ["free", "pro", "team"].includes(plan) ? plan : "";
+}
+
+function normalizePositiveAmount(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function normalizePositiveInteger(value) {
+  const amount = Math.floor(Number(value));
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
 }
 
 function assertDependency(fn, name) {

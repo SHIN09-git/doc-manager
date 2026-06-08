@@ -72,8 +72,12 @@ test("manual payment package resolution and payment channel normalization are st
 
 test("manual payment package normalization rejects impossible shapes", () => {
   assert.equal(normalizeManualPaymentPackage({ type: "credits", credits: 0 }, 0), null);
+  assert.equal(normalizeManualPaymentPackage({ type: "credits", credits: 100, amount_cny: 0 }, 0), null);
+  assert.equal(normalizeManualPaymentPackage({ type: "credits", credits: 100, amount_cny: "abc" }, 0), null);
+  assert.equal(normalizeManualPaymentPackage({ type: "credits", credits: "abc", amount_cny: 10 }, 0), null);
+  assert.equal(normalizeManualPaymentPackage({ type: "plan", plan: "pro", amount_cny: 0 }, 0), null);
   assert.equal(normalizeManualPaymentPackage({ type: "plan", plan: "enterprise" }, 0), null);
-  assert.equal(normalizeManualPaymentPackage({ id: "", credits: 100 }, 0)?.id, "credits_1");
+  assert.equal(normalizeManualPaymentPackage({ id: "", credits: 100, amount_cny: 10 }, 0)?.id, "credits_1");
 });
 
 test("public manual payment orders only expose proof text to admins or the payer", () => {
