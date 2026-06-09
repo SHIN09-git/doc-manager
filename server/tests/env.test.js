@@ -133,6 +133,30 @@ test("production live AI mode requires an HTTPS AI base url", () => {
   }), /AI_BASE_URL must be an HTTPS URL/);
 });
 
+test("production live AI mode requires an explicit key source", () => {
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    AI_PROXY_MODE: "live",
+  }), /PLATFORM_OPENAI_API_KEY or ALLOW_ORGANIZATION_AI_KEYS=true/);
+
+  const platformKeyEnv = loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    AI_PROXY_MODE: "live",
+    PLATFORM_OPENAI_API_KEY: "sk-production-key",
+  });
+  assert.equal(platformKeyEnv.platformOpenAiKey, "sk-production-key");
+
+  const organizationKeyEnv = loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    AI_PROXY_MODE: "live",
+    ALLOW_ORGANIZATION_AI_KEYS: "true",
+  });
+  assert.equal(organizationKeyEnv.allowOrganizationAiKeys, true);
+});
+
 test("production payment webhook checkout requires a configured HTTPS url", () => {
   assert.throws(() => loadEnv({
     ...PRODUCTION_ENV,

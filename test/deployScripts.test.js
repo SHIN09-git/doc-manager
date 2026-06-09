@@ -123,6 +123,45 @@ test("production checks reject webhook checkout without signed price mapping", (
   assert.ok(failedNames.includes("PAYMENT_WEBHOOK_SECRET"));
 });
 
+test("production checks require an explicit live AI key source", () => {
+  const checks = buildProductionChecks({
+    NODE_ENV: "production",
+    STORE_DRIVER: "postgres",
+    DATABASE_URL: "postgres://mowen:secret@db.realhost.test:5432/mowen",
+    SESSION_SECRET: "s".repeat(40),
+    APP_ENCRYPTION_SECRET: "e".repeat(40),
+    APP_URL: "https://mowen.realhost.test/index.html",
+    CORS_ORIGIN: "https://mowen.realhost.test",
+    SESSION_SECURE: "true",
+    EMAIL_MODE: "webhook",
+    EMAIL_PROVIDER: "generic-webhook",
+    EMAIL_WEBHOOK_URL: "https://mail.realhost.test/send",
+    MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "pro_month", title: "Pro", type: "plan", plan: "pro", duration_days: 30, amount_cny: 29 }]),
+    AI_PROXY_MODE: "live",
+  });
+  const failedNames = checks.filter((item) => item.level === "error" && !item.ok).map((item) => item.name);
+  assert.ok(failedNames.includes("loadEnv"));
+  assert.ok(failedNames.includes("AI key source"));
+
+  const organizationKeyChecks = buildProductionChecks({
+    NODE_ENV: "production",
+    STORE_DRIVER: "postgres",
+    DATABASE_URL: "postgres://mowen:secret@db.realhost.test:5432/mowen",
+    SESSION_SECRET: "s".repeat(40),
+    APP_ENCRYPTION_SECRET: "e".repeat(40),
+    APP_URL: "https://mowen.realhost.test/index.html",
+    CORS_ORIGIN: "https://mowen.realhost.test",
+    SESSION_SECURE: "true",
+    EMAIL_MODE: "webhook",
+    EMAIL_PROVIDER: "generic-webhook",
+    EMAIL_WEBHOOK_URL: "https://mail.realhost.test/send",
+    MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "pro_month", title: "Pro", type: "plan", plan: "pro", duration_days: 30, amount_cny: 29 }]),
+    AI_PROXY_MODE: "live",
+    ALLOW_ORGANIZATION_AI_KEYS: "true",
+  });
+  assert.deepEqual(organizationKeyChecks.filter((item) => item.level === "error" && !item.ok), []);
+});
+
 test("static build manifest includes admin page module dependencies", async () => {
   const copiedSources = new Set((await collectStaticFileCopies()).map(([source]) => source.replace(/\\/g, "/")));
   const adminSource = "src/admin/adminPage.js";

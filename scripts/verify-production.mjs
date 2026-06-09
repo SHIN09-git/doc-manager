@@ -72,7 +72,12 @@ export function buildProductionChecks(source) {
   add("warn", "MANUAL_PAYMENT_WECHAT_QR_URL", hasProductionUrl(envSource.MANUAL_PAYMENT_WECHAT_QR_URL), "configure a public WeChat payment QR URL if WeChat recharge is offered");
   add("warn", "MANUAL_PAYMENT_ALIPAY_QR_URL", hasProductionUrl(envSource.MANUAL_PAYMENT_ALIPAY_QR_URL), "configure a public Alipay QR URL if Alipay recharge is offered");
   add("warn", "BACKUP_ENCRYPTION_KEY", isStrongSecret(envSource.BACKUP_ENCRYPTION_KEY), "configure BACKUP_ENCRYPTION_KEY before storing production backups");
-  add("warn", "AI key source", Boolean(envSource.PLATFORM_OPENAI_API_KEY || envSource.AI_PROXY_MODE !== "live"), "set PLATFORM_OPENAI_API_KEY or confirm organization API keys will be configured in the admin panel");
+  add(
+    "error",
+    "AI key source",
+    Boolean(envSource.PLATFORM_OPENAI_API_KEY || envSource.AI_PROXY_MODE !== "live" || envSource.ALLOW_ORGANIZATION_AI_KEYS === "true"),
+    "set PLATFORM_OPENAI_API_KEY or ALLOW_ORGANIZATION_AI_KEYS=true when AI_PROXY_MODE=live",
+  );
   if (envSource.PAYMENT_CHECKOUT_MODE === "webhook") {
     const priceMap = parseJsonObject(envSource.PAYMENT_PLAN_PRICE_MAP);
     add(

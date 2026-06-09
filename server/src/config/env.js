@@ -27,6 +27,7 @@ export function loadEnv(source = process.env) {
     aiMonthlyBudgetCny: toOptionalNumber(source.AI_MONTHLY_BUDGET_CNY),
     requestLogging: source.REQUEST_LOGGING === "true",
     platformOpenAiKey: source.PLATFORM_OPENAI_API_KEY || "",
+    allowOrganizationAiKeys: source.ALLOW_ORGANIZATION_AI_KEYS === "true",
     paymentWebhookSecret: source.PAYMENT_WEBHOOK_SECRET || "",
     paymentPlanPriceMap: parseJsonMap("PAYMENT_PLAN_PRICE_MAP", source.PAYMENT_PLAN_PRICE_MAP),
     paymentCheckoutMode: source.PAYMENT_CHECKOUT_MODE || "disabled",
@@ -176,6 +177,9 @@ function validateEnv(env) {
   }
   if (env.aiProxyMode === "live") {
     assertHttpsUrl("AI_BASE_URL", env.aiBaseUrl);
+    if (!env.platformOpenAiKey && !env.allowOrganizationAiKeys) {
+      throw new Error("PLATFORM_OPENAI_API_KEY or ALLOW_ORGANIZATION_AI_KEYS=true is required when AI_PROXY_MODE=live in production");
+    }
   }
   if (env.paymentCheckoutMode === "webhook") {
     if (!env.paymentCheckoutUrl) {
