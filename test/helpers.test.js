@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createId, sanitizeCssColor, sanitizeFileName, sanitizeUrl } from "../src/utils/helpers.js";
+import {
+  copyTextToClipboard,
+  createId,
+  sanitizeCssColor,
+  sanitizeFileName,
+  sanitizeUrl,
+} from "../src/utils/helpers.js";
 
 test("createId falls back when Web Crypto is unavailable", () => {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
@@ -43,4 +49,55 @@ test("sanitizeUrl allows web and relative urls while rejecting unsafe protocols"
   assert.equal(sanitizeUrl("javascript:alert(1)"), "");
   assert.equal(sanitizeUrl("data:text/html,<script>alert(1)</script>"), "");
   assert.equal(sanitizeUrl("https://example.com/\u0000bad"), "");
+});
+
+test("copyTextToClipboard prefers the Clipboard API", async () => {
+  const writes = [];
+  const copied = await copyTextToClipboard("邀请口令", {
+    navigator: {
+      clipboard: {
+        writeText: async (value) => writes.push(value),
+      },
+    },
+  });
+
+  assert.equal(copied, true);
+  assert.deepEqual(writes, ["邀请口令"]);
+});
+
+test("copyTextToClipboard falls back to a temporary textarea", async () => {
+  const calls = [];
+  const textarea = {
+    value: "",
+    style: {},
+    setAttribute: (name, value) => calls.push(["setAttribute", name, value]),
+    select: () => calls.push(["select"]),
+    setSelectionRange: (start, end) => calls.push(["range", start, end]),
+    remove: () => calls.push(["remove"]),
+  };
+  const document = {
+    body: {
+      appendChild: (node) => calls.push(["append", node.value]),
+    },
+    createElement: (tag) => {
+      assert.equal(tag, "textarea");
+      return textarea;
+    },
+    execCommand: (command) => {
+      calls.push(["exec", command]);
+      return command === "copy";
+    },
+  };
+
+  const copied = await copyTextToClipboard("复制内容", {
+    navigator: { clipboard: { writeText: async () => { throw new Error("blocked"); } } },
+    document,
+  });
+
+  assert.equal(copied, true);
+  assert.deepEqual(calls.map((item) => item[0]), ["setAttribute", "append", "select", "range", "exec", "remove"]);
+});
+
+test("copyTextToClipboard reports failure when no copy path is available", async () => {
+  assert.equal(await copyTextToClipboard("x", { navigator: {}, document: null }), false);
 });

@@ -4,7 +4,7 @@ import {
   formatManualOrderStatus,
   formatManualPaymentChannel,
 } from "../modules/cloud/billingFormatters.js";
-import { sanitizeUrl } from "../utils/helpers.js";
+import { copyTextToClipboard, sanitizeUrl } from "../utils/helpers.js";
 import { buildCsv } from "./adminCsv.js";
 
 const LOCAL_API_BASE_URL = "http://127.0.0.1:8787/api";
@@ -1682,8 +1682,8 @@ async function copyJson(value, message) {
 }
 
 async function copyText(text, message) {
-  await navigator.clipboard?.writeText(text);
-  toast(message);
+  const copied = await copyTextToClipboard(text);
+  toast(copied ? message : "复制失败，请手动复制", copied ? "info" : "warn");
 }
 
 function exportCsv(fileName, rows) {

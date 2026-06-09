@@ -97,6 +97,37 @@ export function sanitizeUrl(value, fallback = "") {
   return fallback;
 }
 
+export async function copyTextToClipboard(text, env = {}) {
+  const value = String(text ?? "");
+  const nav = env.navigator || globalThis.navigator;
+  const doc = env.document || globalThis.document;
+  try {
+    if (nav?.clipboard?.writeText) {
+      await nav.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Fall through to the textarea copy path below.
+  }
+  if (!doc?.createElement || !doc.body?.appendChild || !doc.execCommand) return false;
+  const textarea = doc.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  doc.body.appendChild(textarea);
+  textarea.select?.();
+  textarea.setSelectionRange?.(0, textarea.value.length);
+  try {
+    return Boolean(doc.execCommand("copy"));
+  } catch {
+    return false;
+  } finally {
+    textarea.remove?.();
+  }
+}
+
 export function stableTextHash(value) {
   let hash = 0;
   const text = String(value || "");
