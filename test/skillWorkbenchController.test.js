@@ -87,7 +87,8 @@ function createHarness(options = {}) {
       calls.push(`cancel:${key}`);
       return true;
     },
-    clipboard: () => ({ writeText: (text) => calls.push(`copy:${text}`) }),
+    documentRef: options.documentRef || (() => globalThis.document),
+    clipboard: options.clipboard || (() => ({ writeText: (text) => calls.push(`copy:${text}`) })),
     createInputEvent: () => ({ type: "input", bubbles: true }),
   });
   return { controller, state, ui, els, events, toasts, calls };
@@ -161,14 +162,26 @@ test("invokeFromCard inserts an @handle into the generation prompt and opens gen
   assert.equal(harness.toasts.at(-1).message, "已插入 @notice，可继续补充生成要求");
 });
 
-test("copyHandleFromCard writes the mention to clipboard", () => {
+test("copyHandleFromCard writes the mention to clipboard", async () => {
   const harness = createHarness();
 
-  const mention = harness.controller.copyHandleFromCard("skill-1");
+  const mention = await harness.controller.copyHandleFromCard("skill-1");
 
   assert.equal(mention, "@notice");
   assert.deepEqual(harness.calls, ["copy:@notice"]);
   assert.equal(harness.toasts.at(-1).message, "已复制 @notice");
+});
+
+test("copyHandleFromCard warns when the mention cannot be copied", async () => {
+  const harness = createHarness({
+    clipboard: () => ({ writeText: async () => { throw new Error("blocked"); } }),
+    documentRef: () => null,
+  });
+
+  const mention = await harness.controller.copyHandleFromCard("skill-1");
+
+  assert.equal(mention, "@notice");
+  assert.deepEqual(harness.toasts.at(-1), { message: "复制失败，请手动复制调用名", type: "warn" });
 });
 
 test("saveMarkdownEdits stores summary and clears dirty state", () => {

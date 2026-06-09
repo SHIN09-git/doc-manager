@@ -1,5 +1,5 @@
 import { EVENTS } from "../../core/eventBus.js";
-import { clone, normalizeHandle, now } from "../../utils/helpers.js";
+import { clone, copyTextToClipboard, normalizeHandle, now } from "../../utils/helpers.js";
 
 export function createSkillWorkbenchController(deps = {}) {
   const {
@@ -86,38 +86,16 @@ export function createSkillWorkbenchController(deps = {}) {
     return mention;
   }
 
-  function copyHandleFromCard(skillId) {
+  async function copyHandleFromCard(skillId) {
     const skill = state.styles.find((item) => item.id === skillId);
     if (!skill) return "";
     const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
-    try {
-      const result = clipboard()?.writeText?.(mention);
-      if (result?.catch) result.catch(() => fallbackCopyText(mention));
-    } catch {
-      fallbackCopyText(mention);
-    }
-    toast(`已复制 ${mention}`);
+    const copied = await copyTextToClipboard(mention, {
+      navigator: { clipboard: clipboard() },
+      document: documentRef(),
+    });
+    toast(copied ? `已复制 ${mention}` : "复制失败，请手动复制调用名", copied ? "info" : "warn");
     return mention;
-  }
-
-  function fallbackCopyText(text) {
-    const doc = documentRef();
-    if (!doc?.createElement || !doc?.body) return false;
-    const input = doc.createElement("textarea");
-    input.value = text;
-    input.setAttribute("readonly", "");
-    input.style.position = "fixed";
-    input.style.left = "-9999px";
-    doc.body.appendChild(input);
-    input.select();
-    try {
-      doc.execCommand?.("copy");
-    } catch {
-      // Clipboard fallback is best effort only.
-    } finally {
-      input.remove();
-    }
-    return true;
   }
 
   function toggleEnabledFromCard(skillId, enabled) {

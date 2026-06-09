@@ -45,6 +45,7 @@
 - [x] 加固通用 ID 生成兼容性：`createId()` 改为通过 `globalThis.crypto` 检测 Web Crypto，避免缺失全局 `crypto` 的浏览器或测试环境在初始化、导入、同步等路径抛出 `ReferenceError`。
 - [x] 加固管理后台复制操作：新增通用 `copyTextToClipboard()`，Clipboard API 不可用或被浏览器拦截时会降级到临时文本框复制；仍失败时提示管理员手动复制，不再误报“已复制”。
 - [x] 重写网站上线总控清单：按当前缺口、P0/P1/P2 优先级、你需要准备的资源、我可继续施工的事项和最短上线顺序整理 `WEBSITE_LAUNCH_TODO.md`。
+- [x] 统一执笔人卡片调用名复制逻辑：复用 `copyTextToClipboard()`，Clipboard API 失败且无法降级时提示手动复制，不再无条件显示复制成功。
 
 ## 2026-06-01 全量审阅发现问题修复记录
 

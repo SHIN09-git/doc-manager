@@ -23897,6 +23897,35 @@
     }
     return fallback;
   }
+  async function copyTextToClipboard(text, env2 = {}) {
+    const value = String(text ?? "");
+    const nav = env2.navigator || globalThis.navigator;
+    const doc = env2.document || globalThis.document;
+    try {
+      if (nav?.clipboard?.writeText) {
+        await nav.clipboard.writeText(value);
+        return true;
+      }
+    } catch {
+    }
+    if (!doc?.createElement || !doc.body?.appendChild || !doc.execCommand) return false;
+    const textarea = doc.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    doc.body.appendChild(textarea);
+    textarea.select?.();
+    textarea.setSelectionRange?.(0, textarea.value.length);
+    try {
+      return Boolean(doc.execCommand("copy"));
+    } catch {
+      return false;
+    } finally {
+      textarea.remove?.();
+    }
+  }
   function stableTextHash(value) {
     let hash = 0;
     const text = String(value || "");
@@ -38692,36 +38721,16 @@ ${mention} ` : `${mention} `;
       toast2(`\u5DF2\u63D2\u5165 ${mention}\uFF0C\u53EF\u7EE7\u7EED\u8865\u5145\u751F\u6210\u8981\u6C42`);
       return mention;
     }
-    function copyHandleFromCard(skillId) {
+    async function copyHandleFromCard(skillId) {
       const skill = state2.styles.find((item) => item.id === skillId);
       if (!skill) return "";
       const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
-      try {
-        const result2 = clipboard()?.writeText?.(mention);
-        if (result2?.catch) result2.catch(() => fallbackCopyText(mention));
-      } catch {
-        fallbackCopyText(mention);
-      }
-      toast2(`\u5DF2\u590D\u5236 ${mention}`);
+      const copied = await copyTextToClipboard(mention, {
+        navigator: { clipboard: clipboard() },
+        document: documentRef()
+      });
+      toast2(copied ? `\u5DF2\u590D\u5236 ${mention}` : "\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u590D\u5236\u8C03\u7528\u540D", copied ? "info" : "warn");
       return mention;
-    }
-    function fallbackCopyText(text) {
-      const doc = documentRef();
-      if (!doc?.createElement || !doc?.body) return false;
-      const input = doc.createElement("textarea");
-      input.value = text;
-      input.setAttribute("readonly", "");
-      input.style.position = "fixed";
-      input.style.left = "-9999px";
-      doc.body.appendChild(input);
-      input.select();
-      try {
-        doc.execCommand?.("copy");
-      } catch {
-      } finally {
-        input.remove();
-      }
-      return true;
     }
     function toggleEnabledFromCard(skillId, enabled) {
       const skill = updateBuildState(skillId, { enabled });
