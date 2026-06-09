@@ -2125,16 +2125,19 @@ async function deleteOwnAccount(ctx) {
     const user = data.users.find((item) => item.id === ctx.auth.user.id);
     if (!user) throw new HttpError(404, "账号不存在", "not_found");
     const removedMemberships = data.memberships.filter((item) => item.user_id === user.id);
-    const ownerPromotions = preserveOrganizationOwnersOnAccountDelete(data, user.id);
+    const ownershipResult = preserveOrganizationOwnersOnAccountDelete(data, user.id);
     user.disabled_at = now;
     user.updated_at = now;
     data.memberships = data.memberships.filter((item) => item.user_id !== user.id);
     data.sessions = data.sessions.filter((session) => session.user_id !== user.id);
+    const archivedResources = archiveEmptyOrganizationsOnAccountDelete(data, user.id, ownershipResult.emptyOrganizationIds, now);
     data.api_keys = data.api_keys.map((key) => key.user_id === user.id ? { ...key, disabled_at: key.disabled_at || now, updated_at: now } : key);
     addAudit(data, null, user.id, "auth.account.delete", "user", user.id, {
       removed_memberships: removedMemberships.length,
       removed_organization_ids: removedMemberships.map((item) => item.organization_id).slice(0, 50),
-      promoted_owner_membership_ids: ownerPromotions.map((item) => item.id).slice(0, 50),
+      promoted_owner_membership_ids: ownershipResult.promotions.map((item) => item.id).slice(0, 50),
+      archived_empty_organization_ids: ownershipResult.emptyOrganizationIds.slice(0, 50),
+      archived_empty_organization_resources: archivedResources,
     });
   });
   ctx.response.setHeader("Set-Cookie", clearSessionCookie(SESSION_COOKIE, { secure: ctx.env.sessionSecure }));
@@ -2144,12 +2147,17 @@ async function deleteOwnAccount(ctx) {
 function preserveOrganizationOwnersOnAccountDelete(data, userId) {
   const ownerMemberships = data.memberships.filter((item) => item.user_id === userId && item.role === "owner");
   const promotions = [];
+  const emptyOrganizationIds = [];
   const blockedOrganizations = [];
   ownerMemberships.forEach((ownerMembership) => {
     const remainingMembers = data.memberships.filter((item) =>
       item.organization_id === ownerMembership.organization_id &&
       item.user_id !== userId);
-    if (!remainingMembers.length || remainingMembers.some((item) => item.role === "owner")) return;
+    if (!remainingMembers.length) {
+      emptyOrganizationIds.push(ownerMembership.organization_id);
+      return;
+    }
+    if (remainingMembers.some((item) => item.role === "owner")) return;
     const nextOwner = remainingMembers.find((item) => item.role === "admin");
     if (!nextOwner) {
       blockedOrganizations.push(ownerMembership.organization_id);
@@ -2167,7 +2175,47 @@ function preserveOrganizationOwnersOnAccountDelete(data, userId) {
       organization_ids: blockedOrganizations.slice(0, 50),
     });
   }
-  return promotions;
+  return { promotions, emptyOrganizationIds };
+}
+
+function archiveEmptyOrganizationsOnAccountDelete(data, userId, organizationIds, now) {
+  const organizationIdSet = new Set(organizationIds);
+  const totals = { documents: 0, writers: 0, api_keys: 0, invitations: 0 };
+  if (!organizationIdSet.size) return totals;
+  const byOrganization = new Map([...organizationIdSet].map((id) => [id, { documents: 0, writers: 0, api_keys: 0, invitations: 0 }]));
+  data.documents.forEach((document) => {
+    if (!organizationIdSet.has(document.organization_id) || document.deleted_at) return;
+    document.deleted_at = now;
+    document.updated_at = now;
+    totals.documents += 1;
+    byOrganization.get(document.organization_id).documents += 1;
+  });
+  data.writer_profiles.forEach((writer) => {
+    if (!organizationIdSet.has(writer.organization_id) || writer.deleted_at) return;
+    writer.deleted_at = now;
+    writer.updated_at = now;
+    totals.writers += 1;
+    byOrganization.get(writer.organization_id).writers += 1;
+  });
+  data.api_keys.forEach((key) => {
+    if (!organizationIdSet.has(key.organization_id) || key.disabled_at) return;
+    key.disabled_at = now;
+    key.updated_at = now;
+    totals.api_keys += 1;
+    byOrganization.get(key.organization_id).api_keys += 1;
+  });
+  data.organization_invitations.forEach((invitation) => {
+    if (!organizationIdSet.has(invitation.organization_id) || invitation.accepted_at || invitation.revoked_at) return;
+    invitation.revoked_at = now;
+    totals.invitations += 1;
+    byOrganization.get(invitation.organization_id).invitations += 1;
+  });
+  data.organizations.forEach((organization) => {
+    if (!organizationIdSet.has(organization.id)) return;
+    organization.updated_at = now;
+    addAudit(data, organization.id, userId, "organization.empty.archive_on_account_delete", "organization", organization.id, byOrganization.get(organization.id));
+  });
+  return totals;
 }
 
 async function resolveAuth(request, store) {

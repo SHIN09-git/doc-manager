@@ -1015,6 +1015,60 @@ test("account deletion preserves organization owner continuity", async () => {
     item.role === "owner"));
 });
 
+test("account deletion archives active resources when an organization becomes empty", async () => {
+  const owner = await register("delete-empty-org-owner@example.com");
+  const document = await api("/api/documents", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { title: "Orphan draft", content: "will be archived" },
+  });
+  assert.equal(document.status, 201);
+  const writer = await api("/api/writers", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { name: "归档测试执笔人", handle: "archive_writer", category: "公文写作", summary_md: "测试", skill_json: { name: "归档测试" } },
+  });
+  assert.equal(writer.status, 201);
+  const key = await api("/api/api-keys", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { provider: "openai-compatible", api_key: "sk-empty-org-secret" },
+  });
+  assert.equal(key.status, 201);
+  const invitation = await api(`/api/orgs/${owner.orgId}/invitations`, {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { email: "delete-empty-org-invitee@example.com", role: "member" },
+  });
+  assert.equal(invitation.status, 201);
+
+  const deleted = await api("/api/me", { method: "DELETE", cookie: owner.cookie });
+  assert.equal(deleted.status, 204);
+
+  const data = await server.store.read();
+  assert.ok(data.documents.find((item) => item.id === document.json.document.id).deleted_at);
+  assert.ok(data.writer_profiles.find((item) => item.id === writer.json.writer.id).deleted_at);
+  assert.ok(data.api_keys.find((item) => item.id === key.json.api_key.id).disabled_at);
+  assert.ok(data.organization_invitations.find((item) => item.id === invitation.json.invitation.id).revoked_at);
+  const deleteAudit = data.audit_logs.find((item) => item.action === "auth.account.delete" && item.user_id === owner.userId);
+  assert.deepEqual(deleteAudit.metadata.archived_empty_organization_ids, [owner.orgId]);
+  assert.deepEqual(deleteAudit.metadata.archived_empty_organization_resources, {
+    documents: 1,
+    writers: 1,
+    api_keys: 1,
+    invitations: 1,
+  });
+  const archiveAudit = data.audit_logs.find((item) =>
+    item.action === "organization.empty.archive_on_account_delete" &&
+    item.organization_id === owner.orgId);
+  assert.deepEqual(archiveAudit.metadata, {
+    documents: 1,
+    writers: 1,
+    api_keys: 1,
+    invitations: 1,
+  });
+});
+
 test("operator role can view operations data without mutating the organization", async () => {
   const owner = await register("operator-owner@example.com");
   const operator = await register("operator-viewer@example.com");
