@@ -994,6 +994,7 @@ test("operator role can view operations data without mutating the organization",
       package_id: "credits_1000",
       payment_channel: "alipay",
       payer_note: "operator proof",
+      proof_text: "operator-hidden-proof",
     },
   });
   assert.equal(manualOrder.status, 201);
@@ -1025,6 +1026,9 @@ test("operator role can view operations data without mutating the organization",
   const dashboard = await api("/api/admin/dashboard", { cookie: operator.cookie, headers: operatorHeaders });
   assert.equal(dashboard.status, 200);
   assert.ok(dashboard.json.members.some((item) => item.role === "operator"));
+  const dashboardManualOrder = dashboard.json.billing.manual_orders.find((item) => item.id === manualOrder.json.order.id);
+  assert.ok(dashboardManualOrder);
+  assert.equal(Object.hasOwn(dashboardManualOrder, "proof_text"), false);
   const usage = await api("/api/usage/history?task_type=operator_view", { cookie: operator.cookie, headers: operatorHeaders });
   assert.equal(usage.status, 200);
   assert.ok(usage.json.usage.some((item) => item.id === "use-operator-owned"));
@@ -1037,7 +1041,14 @@ test("operator role can view operations data without mutating the organization",
   const billing = await api("/api/billing/summary", { cookie: operator.cookie, headers: operatorHeaders });
   assert.equal(billing.status, 200);
   assert.equal(billing.json.checkout.enabled, false);
-  assert.ok(billing.json.manual_orders.some((item) => item.id === manualOrder.json.order.id && item.proof_text === ""));
+  const billingManualOrder = billing.json.manual_orders.find((item) => item.id === manualOrder.json.order.id);
+  assert.ok(billingManualOrder);
+  assert.equal(Object.hasOwn(billingManualOrder, "proof_text"), false);
+  const listedManualOrders = await api("/api/billing/manual-orders", { cookie: operator.cookie, headers: operatorHeaders });
+  assert.equal(listedManualOrders.status, 200);
+  const listedManualOrder = listedManualOrders.json.orders.find((item) => item.id === manualOrder.json.order.id);
+  assert.ok(listedManualOrder);
+  assert.equal(Object.hasOwn(listedManualOrder, "proof_text"), false);
   const keys = await api("/api/api-keys", { cookie: operator.cookie, headers: operatorHeaders });
   assert.equal(keys.status, 200);
   assert.ok(keys.json.api_keys.some((item) => item.key_hint));

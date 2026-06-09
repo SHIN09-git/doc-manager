@@ -25,17 +25,18 @@ export function createManualPaymentHandlers(options = {}) {
 
   async function listManualPaymentOrders(ctx) {
     const { data, organization, membership } = await loadOrg(ctx);
-    const isAdmin = viewerRoles.has(membership.role);
+    const canViewOrders = viewerRoles.has(membership.role);
+    const canViewProof = adminRoles.has(membership.role);
     const orders = data.manual_payment_orders
-      .filter((item) => item.organization_id === organization.id && (isAdmin || item.user_id === ctx.auth.user.id))
+      .filter((item) => item.organization_id === organization.id && (canViewOrders || item.user_id === ctx.auth.user.id))
       .slice(-100);
     sendJson(ctx.response, 200, {
-      orders: orders.map((item) => publicManualPaymentOrder(item, { admin: isAdmin, userId: ctx.auth.user.id })),
+      orders: orders.map((item) => publicManualPaymentOrder(item, { admin: canViewProof, userId: ctx.auth.user.id })),
       credits: publicCreditAccount(getCreditAccount(data, organization.id, ctx.auth.user.id)),
       credit_ledger: listPublicCreditLedger(data, {
         organizationId: organization.id,
         userId: ctx.auth.user.id,
-        isAdmin,
+        isAdmin: canViewOrders,
         limit: 100,
       }),
       manual_payment: getManualPaymentSummary(ctx.env),

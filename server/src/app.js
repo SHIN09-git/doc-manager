@@ -1307,6 +1307,7 @@ async function billingSummary(ctx) {
   const { data, organization, membership } = await loadOrg(ctx);
   const canManageBilling = ADMIN_ROLES.has(membership.role);
   const canViewOrganization = ADMIN_VIEW_ROLES.has(membership.role);
+  const canViewManualPaymentProof = ADMIN_ROLES.has(membership.role);
   const today = todayKey();
   const usage = data.ai_usage.filter((item) =>
     item.organization_id === organization.id &&
@@ -1341,7 +1342,7 @@ async function billingSummary(ctx) {
     usage: summarizeUsage(usage),
     budget: summarizeUsageBudget(usage, monthUsage, ctx.env),
     payment_webhooks: webhooks,
-    manual_orders: orders.map((item) => publicManualPaymentOrder(item, { admin: canViewOrganization, userId: ctx.auth.user.id })),
+    manual_orders: orders.map((item) => publicManualPaymentOrder(item, { admin: canViewManualPaymentProof, userId: ctx.auth.user.id })),
     credit_ledger: creditLedger,
     checkout: {
       mode: ctx.env.paymentCheckoutMode,
@@ -1829,6 +1830,7 @@ async function adminDashboard(ctx) {
   const { data, organization, membership } = await loadOrg(ctx);
   if (!ADMIN_VIEW_ROLES.has(membership.role)) throw new HttpError(403, "只有后台成员可以查看管理汇总", "forbidden");
   const today = todayKey();
+  const canViewManualPaymentProof = ADMIN_ROLES.has(membership.role);
   const members = data.memberships
     .filter((item) => item.organization_id === organization.id)
     .map((item) => ({ ...item, user: publicUser(data.users.find((user) => user.id === item.user_id) || {}) }));
@@ -1860,7 +1862,7 @@ async function adminDashboard(ctx) {
     email_deliveries: data.email_deliveries.filter((item) => orgUserIds.has(item.user_id)).slice(-50).map(publicEmailDelivery),
     billing: {
       payment_webhooks: data.payment_webhooks.filter((item) => item.organization_id === organization.id).slice(-20).map(publicPaymentWebhook),
-      manual_orders: data.manual_payment_orders.filter((item) => item.organization_id === organization.id).slice(-50).map((item) => publicManualPaymentOrder(item, { admin: true })),
+      manual_orders: data.manual_payment_orders.filter((item) => item.organization_id === organization.id).slice(-50).map((item) => publicManualPaymentOrder(item, { admin: canViewManualPaymentProof })),
       manual_payment: getManualPaymentSummary(ctx.env),
       credits: getOrganizationCreditSummary(data, organization.id),
       credit_ledger: listPublicCreditLedger(data, { organizationId: organization.id, isAdmin: true, limit: 100 }),
