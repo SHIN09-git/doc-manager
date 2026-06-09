@@ -40,7 +40,7 @@ function createHarness(overrides = {}) {
 }
 
 test("persist writes the current selection to IndexedDB and clears legacy storage", async () => {
-  const { controller, calls, state } = createHarness();
+  const { controller, calls, state, ui } = createHarness();
 
   await controller.persist();
 
@@ -51,10 +51,11 @@ test("persist writes the current selection to IndexedDB and clears legacy storag
   assert.equal(calls[1][0], "write-bootstrap");
   assert.equal(calls[1][2], "indexedDB");
   assert.deepEqual(calls[2], ["clear-legacy"]);
+  assert.equal(ui.storageMode, "indexedDB");
 });
 
 test("persist falls back to localStorage when IndexedDB writes fail", async () => {
-  const { controller, calls } = createHarness({
+  const { controller, calls, ui } = createHarness({
     writeWorkspaceState: async () => {
       throw new Error("quota");
     },
@@ -67,6 +68,7 @@ test("persist falls back to localStorage when IndexedDB writes fail", async () =
   assert.ok(legacyWrite);
   const bootstrapWrite = calls.find(([type, _snapshot, mode]) => type === "write-bootstrap" && mode === "localStorage");
   assert.ok(bootstrapWrite);
+  assert.equal(ui.storageMode, "localStorage");
 });
 
 test("fallback storage failure shows a clear user-facing error", () => {
@@ -86,6 +88,20 @@ test("fallback storage failure shows a clear user-facing error", () => {
   ]);
 });
 
+test("fallback storage requires both snapshot and bootstrap writes", () => {
+  const snapshotMissing = createHarness({
+    writeLegacyLocalStorageState: () => false,
+  });
+  assert.equal(snapshotMissing.controller.tryLocalStorageFallback({ docs: [] }), false);
+  assert.equal(snapshotMissing.calls.at(-1)[0], "toast");
+
+  const bootstrapMissing = createHarness({
+    writeStorageBootstrap: () => false,
+  });
+  assert.equal(bootstrapMissing.controller.tryLocalStorageFallback({ docs: [] }), false);
+  assert.equal(bootstrapMissing.calls.at(-1)[0], "toast");
+});
+
 test("hydrateState prefers explicit localStorage fallback bootstrap data", async () => {
   const legacy = {
     selectedFolderId: "all",
@@ -103,7 +119,9 @@ test("hydrateState prefers explicit localStorage fallback bootstrap data", async
   assert.equal(state.selectedDocId, "legacy-doc");
   assert.equal(ui.selectedFolderId, "all");
   assert.equal(ui.selectedDocId, "legacy-doc");
-  assert.equal(els.storageLabel.textContent, "本机文档库（IndexedDB）");
+  assert.equal(ui.storageMode, "localStorage");
+  assert.equal(els.storageLabel.textContent, "本机文档库（localStorage 兜底）");
+  assert.match(els.storageLabel.title, /localStorage 兜底/);
 });
 
 test("loadState migrates legacy localStorage data when IndexedDB is empty", async () => {
@@ -119,6 +137,23 @@ test("loadState migrates legacy localStorage data when IndexedDB is empty", asyn
   assert.equal(calls[0][0], "write-indexeddb");
   assert.equal(calls[1][0], "write-bootstrap");
   assert.equal(calls[2][0], "clear-legacy");
+});
+
+test("loadState keeps localStorage mode when legacy migration fails", async () => {
+  const legacy = { docs: [{ id: "doc-old", title: "旧文档" }], folders: [] };
+  const { controller, ui } = createHarness({
+    readWorkspaceState: async () => null,
+    readLegacyLocalStorageState: () => legacy,
+    writeWorkspaceState: async () => {
+      throw new Error("quota");
+    },
+  });
+
+  const loaded = await controller.loadState();
+
+  assert.deepEqual(loaded, legacy);
+  assert.equal(ui.storageMode, "localStorage");
+  assert.match(controller.getStorageRootLocation(), /localStorage 兜底/);
 });
 
 test("location helpers keep document, writer, training, API, and download paths consistent", () => {

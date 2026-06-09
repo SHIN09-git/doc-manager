@@ -24118,6 +24118,7 @@
         await writeWorkspaceState2(snapshot);
         writeStorageBootstrap2(snapshot);
         clearLegacyLocalStorageState2();
+        ui2.storageMode = "indexedDB";
       }).catch((error) => {
         logger.error?.("\u4FDD\u5B58\u5DE5\u4F5C\u53F0\u6570\u636E\u5931\u8D25", error);
         tryLocalStorageFallback(snapshot);
@@ -24130,7 +24131,8 @@
       ui2.selectedFolderId = state2.selectedFolderId || "all";
       ui2.selectedDocId = state2.selectedDocId || null;
       if (els2.storageLabel) {
-        els2.storageLabel.textContent = "\u672C\u673A\u6587\u6863\u5E93\uFF08IndexedDB\uFF09";
+        els2.storageLabel.textContent = getStorageBackendLabel();
+        els2.storageLabel.title = `\u5B58\u50A8\u4F4D\u7F6E\uFF1A${getStorageRootLocation2()}`;
       }
       return state2;
     }
@@ -24138,11 +24140,17 @@
       const bootstrap = readStorageBootstrap2();
       if (shouldPreferLocalStorageFallback2(bootstrap)) {
         const fallback = readLegacyLocalStorageState2();
-        if (fallback) return fallback;
+        if (fallback) {
+          ui2.storageMode = "localStorage";
+          return fallback;
+        }
       }
       try {
         const indexedDbState = await readWorkspaceState2();
-        if (indexedDbState) return indexedDbState;
+        if (indexedDbState) {
+          ui2.storageMode = "indexedDB";
+          return indexedDbState;
+        }
       } catch (error) {
         logger.warn?.("\u8BFB\u53D6 IndexedDB \u5DE5\u4F5C\u53F0\u6570\u636E\u5931\u8D25\uFF0C\u5C06\u5C1D\u8BD5\u65E7 localStorage \u6570\u636E", error);
       }
@@ -24152,25 +24160,35 @@
           await writeWorkspaceState2(legacy);
           writeStorageBootstrap2(legacy);
           clearLegacyLocalStorageState2();
+          ui2.storageMode = "indexedDB";
         } catch (error) {
+          ui2.storageMode = "localStorage";
           logger.warn?.("\u8FC1\u79FB\u65E7 localStorage \u6570\u636E\u5230 IndexedDB \u5931\u8D25\uFF0C\u6682\u65F6\u7EE7\u7EED\u4F7F\u7528\u65E7\u6570\u636E", error);
         }
         return legacy;
       }
+      ui2.storageMode = "indexedDB";
       return {};
     }
     function tryLocalStorageFallback(snapshot) {
       try {
-        writeLegacyLocalStorageState2(snapshot);
-        writeStorageBootstrap2(snapshot, "localStorage");
+        const wroteSnapshot = writeLegacyLocalStorageState2(snapshot);
+        const wroteBootstrap = writeStorageBootstrap2(snapshot, "localStorage");
+        if (!wroteSnapshot || !wroteBootstrap) {
+          throw new Error("localStorage unavailable");
+        }
+        ui2.storageMode = "localStorage";
         return true;
       } catch (error) {
         toast2("\u672C\u673A\u5B58\u50A8\u7A7A\u95F4\u4E0D\u8DB3\uFF0C\u90E8\u5206\u6700\u65B0\u66F4\u6539\u53EF\u80FD\u65E0\u6CD5\u4FDD\u5B58\u3002\u8BF7\u5BFC\u51FA\u5907\u4EFD\u6216\u51CF\u5C11\u5927\u578B\u6837\u672C\u6587\u4EF6\u3002", "error");
         return false;
       }
     }
+    function getStorageBackendLabel() {
+      return ui2.storageMode === "localStorage" ? "\u672C\u673A\u6587\u6863\u5E93\uFF08localStorage \u515C\u5E95\uFF09" : "\u672C\u673A\u6587\u6863\u5E93\uFF08IndexedDB\uFF09";
+    }
     function getStorageRootLocation2() {
-      return "\u672C\u673A\u6D4F\u89C8\u5668\u5B58\u50A8 / \u6479\u6587\u62DF\u7B14\u5DE5\u4F5C\u53F0";
+      return ui2.storageMode === "localStorage" ? "\u672C\u673A\u6D4F\u89C8\u5668\u5B58\u50A8 / \u6479\u6587\u62DF\u7B14\u5DE5\u4F5C\u53F0\uFF08localStorage \u515C\u5E95\uFF09" : "\u672C\u673A\u6D4F\u89C8\u5668\u5B58\u50A8 / \u6479\u6587\u62DF\u7B14\u5DE5\u4F5C\u53F0";
     }
     function getFolderLocation2(folder) {
       if (folder?.kind === "real") {
@@ -24200,6 +24218,7 @@
       hydrateState: hydrateState2,
       loadState,
       tryLocalStorageFallback,
+      getStorageBackendLabel,
       getStorageRootLocation: getStorageRootLocation2,
       getFolderLocation: getFolderLocation2,
       getDocumentLocation: getDocumentLocation2,

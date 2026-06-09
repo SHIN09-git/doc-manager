@@ -36,6 +36,7 @@ export function createWorkspacePersistenceController({
         await writeWorkspaceState(snapshot);
         writeStorageBootstrap(snapshot);
         clearLegacyLocalStorageState();
+        ui.storageMode = "indexedDB";
       })
       .catch((error) => {
         logger.error?.("保存工作台数据失败", error);
@@ -50,7 +51,8 @@ export function createWorkspacePersistenceController({
     ui.selectedFolderId = state.selectedFolderId || "all";
     ui.selectedDocId = state.selectedDocId || null;
     if (els.storageLabel) {
-      els.storageLabel.textContent = "本机文档库（IndexedDB）";
+      els.storageLabel.textContent = getStorageBackendLabel();
+      els.storageLabel.title = `存储位置：${getStorageRootLocation()}`;
     }
     return state;
   }
@@ -59,12 +61,18 @@ export function createWorkspacePersistenceController({
     const bootstrap = readStorageBootstrap();
     if (shouldPreferLocalStorageFallback(bootstrap)) {
       const fallback = readLegacyLocalStorageState();
-      if (fallback) return fallback;
+      if (fallback) {
+        ui.storageMode = "localStorage";
+        return fallback;
+      }
     }
 
     try {
       const indexedDbState = await readWorkspaceState();
-      if (indexedDbState) return indexedDbState;
+      if (indexedDbState) {
+        ui.storageMode = "indexedDB";
+        return indexedDbState;
+      }
     } catch (error) {
       logger.warn?.("读取 IndexedDB 工作台数据失败，将尝试旧 localStorage 数据", error);
     }
@@ -75,19 +83,26 @@ export function createWorkspacePersistenceController({
         await writeWorkspaceState(legacy);
         writeStorageBootstrap(legacy);
         clearLegacyLocalStorageState();
+        ui.storageMode = "indexedDB";
       } catch (error) {
+        ui.storageMode = "localStorage";
         logger.warn?.("迁移旧 localStorage 数据到 IndexedDB 失败，暂时继续使用旧数据", error);
       }
       return legacy;
     }
 
+    ui.storageMode = "indexedDB";
     return {};
   }
 
   function tryLocalStorageFallback(snapshot) {
     try {
-      writeLegacyLocalStorageState(snapshot);
-      writeStorageBootstrap(snapshot, "localStorage");
+      const wroteSnapshot = writeLegacyLocalStorageState(snapshot);
+      const wroteBootstrap = writeStorageBootstrap(snapshot, "localStorage");
+      if (!wroteSnapshot || !wroteBootstrap) {
+        throw new Error("localStorage unavailable");
+      }
+      ui.storageMode = "localStorage";
       return true;
     } catch (error) {
       toast("本机存储空间不足，部分最新更改可能无法保存。请导出备份或减少大型样本文件。", "error");
@@ -95,8 +110,16 @@ export function createWorkspacePersistenceController({
     }
   }
 
+  function getStorageBackendLabel() {
+    return ui.storageMode === "localStorage"
+      ? "本机文档库（localStorage 兜底）"
+      : "本机文档库（IndexedDB）";
+  }
+
   function getStorageRootLocation() {
-    return "本机浏览器存储 / 摹文拟笔工作台";
+    return ui.storageMode === "localStorage"
+      ? "本机浏览器存储 / 摹文拟笔工作台（localStorage 兜底）"
+      : "本机浏览器存储 / 摹文拟笔工作台";
   }
 
   function getFolderLocation(folder) {
@@ -133,6 +156,7 @@ export function createWorkspacePersistenceController({
     hydrateState,
     loadState,
     tryLocalStorageFallback,
+    getStorageBackendLabel,
     getStorageRootLocation,
     getFolderLocation,
     getDocumentLocation,
