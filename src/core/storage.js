@@ -9,11 +9,12 @@ import { now } from "../utils/helpers.js";
 
 export function openWorkspaceDb() {
   return new Promise((resolve, reject) => {
-    if (!window.indexedDB) {
+    const indexedDb = getIndexedDb();
+    if (!indexedDb) {
       reject(new Error("当前浏览器不支持 IndexedDB"));
       return;
     }
-    const request = indexedDB.open(WORKSPACE_DB_NAME, 1);
+    const request = indexedDb.open(WORKSPACE_DB_NAME, 1);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(WORKSPACE_STORE_NAME)) {
@@ -58,13 +59,24 @@ export async function writeWorkspaceState(snapshot) {
 
 export function openHandleDb() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(HANDLE_DB_NAME, 1);
+    const indexedDb = getIndexedDb();
+    if (!indexedDb) {
+      reject(new Error("当前浏览器不支持 IndexedDB，无法保存真实文件夹授权"));
+      return;
+    }
+    const request = indexedDb.open(HANDLE_DB_NAME, 1);
     request.onupgradeneeded = () => {
-      request.result.createObjectStore(HANDLE_STORE_NAME);
+      if (!request.result.objectStoreNames.contains(HANDLE_STORE_NAME)) {
+        request.result.createObjectStore(HANDLE_STORE_NAME);
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+}
+
+function getIndexedDb() {
+  return globalThis.indexedDB || globalThis.window?.indexedDB || null;
 }
 
 export async function saveDirectoryHandle(folderId, handle) {

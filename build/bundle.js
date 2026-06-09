@@ -23909,11 +23909,12 @@
   // src/core/storage.js
   function openWorkspaceDb() {
     return new Promise((resolve, reject2) => {
-      if (!window.indexedDB) {
+      const indexedDb = getIndexedDb();
+      if (!indexedDb) {
         reject2(new Error("\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u652F\u6301 IndexedDB"));
         return;
       }
-      const request = indexedDB.open(WORKSPACE_DB_NAME, 1);
+      const request = indexedDb.open(WORKSPACE_DB_NAME, 1);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(WORKSPACE_STORE_NAME)) {
@@ -23955,13 +23956,23 @@
   }
   function openHandleDb() {
     return new Promise((resolve, reject2) => {
-      const request = indexedDB.open(HANDLE_DB_NAME, 1);
+      const indexedDb = getIndexedDb();
+      if (!indexedDb) {
+        reject2(new Error("\u5F53\u524D\u6D4F\u89C8\u5668\u4E0D\u652F\u6301 IndexedDB\uFF0C\u65E0\u6CD5\u4FDD\u5B58\u771F\u5B9E\u6587\u4EF6\u5939\u6388\u6743"));
+        return;
+      }
+      const request = indexedDb.open(HANDLE_DB_NAME, 1);
       request.onupgradeneeded = () => {
-        request.result.createObjectStore(HANDLE_STORE_NAME);
+        if (!request.result.objectStoreNames.contains(HANDLE_STORE_NAME)) {
+          request.result.createObjectStore(HANDLE_STORE_NAME);
+        }
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject2(request.error);
     });
+  }
+  function getIndexedDb() {
+    return globalThis.indexedDB || globalThis.window?.indexedDB || null;
   }
   async function saveDirectoryHandle(folderId, handle) {
     const db = await openHandleDb();
