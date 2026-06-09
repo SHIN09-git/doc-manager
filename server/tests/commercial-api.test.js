@@ -720,7 +720,7 @@ test("live AI proxy fails clearly when no API key is configured", async () => {
     const response = await fetch(`${url}/api/ai/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
-      body: JSON.stringify({ task_type: "live_missing_key", messages: [{ role: "user", content: "hello" }] }),
+      body: JSON.stringify({ task_type: "live_missing_key", model: "gpt-test", messages: [{ role: "user", content: "hello" }] }),
     });
     const json = await response.json();
     assert.equal(response.status, 400);
@@ -730,6 +730,42 @@ test("live AI proxy fails clearly when no API key is configured", async () => {
     assert.equal(data.ai_usage[0].status, "failed");
     assert.equal(data.ai_usage[0].error, "请先配置组织接口 API Key");
     assert.ok(data.system_events.some((item) => item.type === "ai.proxy.failed" && item.metadata?.usage_id === data.ai_usage[0].id));
+  } finally {
+    await new Promise((resolve) => liveServer.close(resolve));
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("live AI proxy rejects requests without a concrete model", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-live-ai-model-"));
+  const liveServer = createApp({
+    env: {
+      DATA_DIR: temp,
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "live",
+    },
+  });
+  await new Promise((resolve) => liveServer.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${liveServer.address().port}`;
+  try {
+    const registered = await fetch(`${url}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "live-ai-model@example.com", password: "password123", name: "Live AI Model" }),
+    });
+    const cookie = registered.headers.get("set-cookie") || "";
+    const response = await fetch(`${url}/api/ai/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ task_type: "live_missing_model", messages: [{ role: "user", content: "hello" }] }),
+    });
+    const json = await response.json();
+    assert.equal(response.status, 400);
+    assert.equal(json.error.code, "missing_ai_model");
+    const data = await liveServer.store.read();
+    assert.equal(data.ai_usage.length, 0);
+    assert.equal(data.rate_limits.length, 0);
   } finally {
     await new Promise((resolve) => liveServer.close(resolve));
     await rm(temp, { recursive: true, force: true });

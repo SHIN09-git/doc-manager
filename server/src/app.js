@@ -1203,7 +1203,7 @@ async function chatProxy(ctx) {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   if (messages.length === 0) throw new HttpError(400, "messages 不能为空", "missing_messages");
   const provider = String(body.provider || "openai-compatible");
-  const model = String(body.model || ctx.env.aiModel || "default").trim();
+  const model = resolveAiModel(body.model, ctx.env);
   const taskType = String(body.task_type || "chat").slice(0, 80);
   const promptTokens = estimateTokens(messages.map((item) => item.content || "").join("\n"));
   const quotaDecision = await enforceRateLimit(ctx, organization.id);
@@ -3102,6 +3102,13 @@ async function enforceRateLimit(ctx, organizationId) {
     });
     return { source, plan, user_limited: userLimited, org_limited: orgLimited };
   });
+}
+
+function resolveAiModel(requestedModel, env) {
+  const model = String(requestedModel || env.aiModel || "").trim();
+  if (model) return model;
+  if (env.aiProxyMode === "mock") return "mock";
+  throw new HttpError(400, "请先配置 AI 模型", "missing_ai_model");
 }
 
 function getPlanLimits(plan, env) {
