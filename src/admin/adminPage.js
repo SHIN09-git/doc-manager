@@ -6,6 +6,7 @@ import {
 } from "../modules/cloud/billingFormatters.js";
 import { copyTextToClipboard, sanitizeUrl } from "../utils/helpers.js";
 import { buildCsv } from "./adminCsv.js";
+import { triggerDownload } from "./adminDownload.js";
 
 const LOCAL_API_BASE_URL = "http://127.0.0.1:8787/api";
 const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
@@ -1101,12 +1102,12 @@ async function clearAuditFilters() {
 
 function exportAuditFilters() {
   if (!state.savedAuditFilters.length) return toast("没有可导出的审计筛选", "warn");
-  downloadBlob(
+  const downloaded = downloadBlob(
     `mowen-audit-filters-${new Date().toISOString().slice(0, 10)}.json`,
     JSON.stringify({ audit_filters: state.savedAuditFilters }, null, 2),
     "application/json;charset=utf-8",
   );
-  toast("审计筛选已导出");
+  if (downloaded) toast("审计筛选已导出");
 }
 
 async function copyUsage(button) {
@@ -1160,8 +1161,9 @@ async function exportOrganizationData() {
   if (!orgId) return toast("没有可导出的组织", "warn");
   await withLoading(els.adminExportOrgBtn, "导出中", async () => {
     const data = await apiRequest(`/orgs/${orgId}/export`, { method: "GET" });
-    downloadBlob(`mowen-org-export-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
-    toast("组织数据已导出");
+    if (downloadBlob(`mowen-org-export-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8")) {
+      toast("组织数据已导出");
+    }
   });
 }
 
@@ -1692,20 +1694,15 @@ function exportCsv(fileName, rows) {
     return;
   }
   const csv = buildCsv(rows);
-  downloadBlob(fileName, csv, "text/csv;charset=utf-8");
-  toast("CSV 已导出");
+  if (downloadBlob(fileName, csv, "text/csv;charset=utf-8")) {
+    toast("CSV 已导出");
+  }
 }
 
 function downloadBlob(fileName, content, type) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = fileName;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const downloaded = triggerDownload(fileName, content, type);
+  if (!downloaded) toast("下载失败，请检查浏览器下载权限后重试", "warn");
+  return downloaded;
 }
 
 async function withLoading(button, label, fn) {
