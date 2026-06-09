@@ -82,7 +82,7 @@ function createHarness(options = {}) {
     getPanelElement: () => ({ getBoundingClientRect: () => ({ left: 0, top: 0, width: 600, height: 400 }) }),
     createIcons: () => {},
     clipboard: () => options.clipboard || { writeText: async () => {} },
-    documentRef: () => documentState,
+    documentRef: options.documentRef || (() => documentState),
     setTimeoutRef: (callback) => callback(),
   });
   return {
@@ -119,6 +119,44 @@ test("formatDocument trims line edges and collapses extra blank lines", () => {
   assert.equal(harness.editor.value, "第一行\n\n第二行");
   assert.equal(harness.undoCount, 1);
   assert.deepEqual(harness.saved, [true]);
+});
+
+test("copyText reports success only when content is copied", async () => {
+  const writes = [];
+  const harness = createHarness({
+    getSelectionOrLine: () => ({ start: 0, end: 4, text: "正文片段" }),
+    clipboard: { writeText: async (text) => writes.push(text) },
+  });
+
+  const copied = await harness.controller.copyText();
+
+  assert.equal(copied, true);
+  assert.deepEqual(writes, ["正文片段"]);
+  assert.deepEqual(harness.toasts.at(-1), { message: "已复制内容", type: "info" });
+});
+
+test("copyText warns when clipboard and fallback copy both fail", async () => {
+  const harness = createHarness({
+    getSelectionOrLine: () => ({ start: 0, end: 4, text: "正文片段" }),
+    clipboard: { writeText: async () => { throw new Error("blocked"); } },
+    documentRef: () => null,
+  });
+
+  const copied = await harness.controller.copyText();
+
+  assert.equal(copied, false);
+  assert.deepEqual(harness.toasts.at(-1), { message: "复制失败，请手动复制选中内容", type: "warn" });
+});
+
+test("copyText warns when there is no selected content", async () => {
+  const harness = createHarness({
+    getSelectionOrLine: () => ({ start: 0, end: 0, text: "   " }),
+  });
+
+  const copied = await harness.controller.copyText();
+
+  assert.equal(copied, false);
+  assert.deepEqual(harness.toasts.at(-1), { message: "没有可复制的内容", type: "warn" });
 });
 
 test("deleteText removes the current selection and saves the editor", () => {

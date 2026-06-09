@@ -1,3 +1,5 @@
+import { copyTextToClipboard } from "../../utils/helpers.js";
+
 export function createEditorContextMenuController(deps = {}) {
   const {
     state,
@@ -125,21 +127,12 @@ export function createEditorContextMenuController(deps = {}) {
       toast("没有可复制的内容", "warn");
       return false;
     }
-    try {
-      await clipboard()?.writeText(selection.text);
-    } catch {
-      const doc = documentRef();
-      const helper = doc.createElement("textarea");
-      helper.value = selection.text;
-      helper.style.position = "fixed";
-      helper.style.opacity = "0";
-      doc.body.appendChild(helper);
-      helper.select();
-      doc.execCommand("copy");
-      helper.remove();
-    }
-    toast("已复制内容");
-    return true;
+    const copied = await copyTextToClipboard(selection.text, {
+      navigator: { clipboard: clipboard() },
+      document: documentRef(),
+    });
+    toast(copied ? "已复制内容" : "复制失败，请手动复制选中内容", copied ? "info" : "warn");
+    return copied;
   }
 
   function deleteText() {

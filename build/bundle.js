@@ -27640,21 +27640,12 @@ ${doc.content}`.toLowerCase().includes(query);
         toast2("\u6CA1\u6709\u53EF\u590D\u5236\u7684\u5185\u5BB9", "warn");
         return false;
       }
-      try {
-        await clipboard()?.writeText(selection.text);
-      } catch {
-        const doc = documentRef();
-        const helper = doc.createElement("textarea");
-        helper.value = selection.text;
-        helper.style.position = "fixed";
-        helper.style.opacity = "0";
-        doc.body.appendChild(helper);
-        helper.select();
-        doc.execCommand("copy");
-        helper.remove();
-      }
-      toast2("\u5DF2\u590D\u5236\u5185\u5BB9");
-      return true;
+      const copied = await copyTextToClipboard(selection.text, {
+        navigator: { clipboard: clipboard() },
+        document: documentRef()
+      });
+      toast2(copied ? "\u5DF2\u590D\u5236\u5185\u5BB9" : "\u590D\u5236\u5931\u8D25\uFF0C\u8BF7\u624B\u52A8\u590D\u5236\u9009\u4E2D\u5185\u5BB9", copied ? "info" : "warn");
+      return copied;
     }
     function deleteText() {
       const selection = getSelectionOrLine2();
