@@ -2126,7 +2126,12 @@ function enforceTrustedOrigin(ctx) {
   if (!UNSAFE_METHODS.has(ctx.request.method)) return;
   if (ctx.auth?.source !== "cookie") return;
   const requestOrigin = readRequestOrigin(ctx.request);
-  if (!requestOrigin) return;
+  if (!requestOrigin) {
+    if (ctx.env.nodeEnv === "production") {
+      throw new HttpError(403, "请求来源缺失，请从工作台页面重试", "missing_origin");
+    }
+    return;
+  }
   if (!isTrustedOrigin(ctx.env, requestOrigin)) {
     throw new HttpError(403, "请求来源不可信，请从工作台页面重试", "untrusted_origin");
   }

@@ -18,6 +18,7 @@
 - 云端人工充值收款码图片地址和独立后台支付升级跳转新增 URL 白名单过滤，危险协议会回退为占位或拒绝打开。
 - 导出与真实文件夹写入使用的文件名清洗逻辑会处理控制字符、纯空白、尾随点号/空格和 Windows 保留设备名。
 - 邮箱验证和密码重置提交阶段统一未知邮箱与错误令牌的反馈，减少公开认证入口的账号枚举风险。
+- 生产环境下 Cookie 认证的写请求必须带可信 `Origin` 或 `Referer`，缺失来源会返回 `missing_origin`；Bearer 调用保持可用于脚本和服务端集成。
 - 生产 JSON 环境变量解析改为失败即报错：`AI_COST_RATES`、`PAYMENT_PLAN_PRICE_MAP` 和 `MANUAL_PAYMENT_PACKAGES` 填写后必须是合法 JSON 对象或数组，避免支付价格映射、人工充值套餐和成本估算静默失效。
 - AI 成本估算兼容 `prompt` / `completion` 和 `*_per_token` 每 token 单价别名，同时生产示例改用明确的 `prompt_per_1k` / `completion_per_1k` 字段。
 - 部署自检会复用后端人工充值套餐归一化逻辑，`MANUAL_PAYMENT_PACKAGES` 里无法识别或金额无效的套餐不会通过真实网站上线检查。

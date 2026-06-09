@@ -37,6 +37,7 @@ AI 接口配置保存在当前浏览器。
 
 - 设置强 `APP_ENCRYPTION_SECRET` 和 `SESSION_SECRET`，长度不少于 32 个字符。
 - 设置明确的 `CORS_ORIGIN`，不要在生产环境使用通配来源。
+- 生产环境下，Cookie 认证的 `POST`、`PUT`、`PATCH`、`DELETE` 请求必须带可信 `Origin` 或 `Referer`；脚本、运维工具和服务端集成应改用 `Authorization: Bearer <session-token>`。
 - 根据部署方式选择 `STORE_DRIVER=json` 或 `STORE_DRIVER=postgres`；生产多人环境应迁移到数据库。
 - 定期备份云端数据，尤其是文档、执笔人、版本和审计日志。
 - 云端敏感管理操作要求邮箱验证。

@@ -451,6 +451,66 @@ test("cookie authenticated writes reject untrusted browser origins", async () =>
   assert.equal(bearerAllowed.status, 201);
 });
 
+test("production cookie authenticated writes require an explicit trusted origin", async () => {
+  const restoreFetch = installFetchMock(async (url) => {
+    if (url !== "https://mail.example.test/send") return null;
+    return new Response("{}", { status: 202, headers: { "Content-Type": "application/json" } });
+  });
+  const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-origin-prod-api-"));
+  const originServer = createApp({
+    env: {
+      NODE_ENV: "production",
+      DATA_DIR: temp,
+      APP_ENCRYPTION_SECRET: "production-encryption-secret-with-enough-length",
+      SESSION_SECRET: "production-session-secret-with-enough-length",
+      SESSION_SECURE: "true",
+      APP_URL: "https://mowen.example.com/index.html",
+      CORS_ORIGIN: "https://mowen.example.com",
+      EMAIL_MODE: "webhook",
+      EMAIL_WEBHOOK_URL: "https://mail.example.test/send",
+      AI_PROXY_MODE: "mock",
+    },
+  });
+  await new Promise((resolve) => originServer.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${originServer.address().port}`;
+  try {
+    const registered = await fetch(`${url}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "origin-prod@example.com", password: "password123", name: "Origin Prod" }),
+    });
+    const cookie = registered.headers.get("set-cookie") || "";
+    const token = extractSessionToken(cookie);
+    const missingOrigin = await fetch(`${url}/api/documents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ title: "Missing origin", content: "blocked" }),
+    });
+    const missingOriginJson = await missingOrigin.json();
+    assert.equal(missingOrigin.status, 403);
+    assert.equal(missingOriginJson.error.code, "missing_origin");
+
+    const trustedOrigin = await fetch(`${url}/api/documents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie, Origin: "https://mowen.example.com" },
+      body: JSON.stringify({ title: "Trusted origin", content: "allowed" }),
+    });
+    assert.equal(trustedOrigin.status, 201);
+    assert.equal(trustedOrigin.headers.get("access-control-allow-origin"), "https://mowen.example.com");
+
+    const bearer = await fetch(`${url}/api/documents`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ title: "Bearer", content: "allowed" }),
+    });
+    assert.equal(bearer.status, 201);
+  } finally {
+    restoreFetch();
+    await new Promise((resolve) => originServer.close(resolve));
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 test("writers keep versions and support restore", async () => {
   const owner = await register("writer-owner@example.com");
   const created = await api("/api/writers", {
