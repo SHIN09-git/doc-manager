@@ -149,6 +149,29 @@ test("getBuildResult summarizes rule counts and test status", () => {
   });
 });
 
+test("getBuildResult reads the multi-case test overall status", () => {
+  const harness = createHarness();
+
+  const result = harness.controller.getBuildResult(
+    { examples: [{}] },
+    { version: 4 },
+    {
+      qualityReport: { confidence: "high" },
+      testReport: JSON.stringify({
+        overall_result: {
+          passed: true,
+          score: 92,
+        },
+      }),
+    },
+  );
+
+  assert.equal(result.version, 4);
+  assert.equal(result.confidence, "high");
+  assert.equal(result.passed, true);
+  assert.equal(result.sampleCount, 1);
+});
+
 test("invokeFromCard inserts an @handle into the generation prompt and opens generation tab", () => {
   const harness = createHarness({ promptValue: "请起草" });
 

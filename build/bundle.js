@@ -25532,11 +25532,17 @@ ${formatListItems(items)}`;
   }
 
   // src/modules/cloud/cloudSyncController.js
-  function parseJsonSafely(text, fallback = {}) {
+  function parseSkillJsonForUpload(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return { ok: true, value: {} };
     try {
-      return JSON.parse(text);
-    } catch {
-      return fallback;
+      const value = JSON.parse(extractJsonObject(raw) || raw);
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return { ok: false, error: "\u89C4\u5219 JSON \u9876\u5C42\u5FC5\u987B\u662F\u5BF9\u8C61" };
+      }
+      return { ok: true, value };
+    } catch (error) {
+      return { ok: false, error: error.message || "JSON \u89E3\u6790\u5931\u8D25" };
     }
   }
   function createCloudSyncController(deps = {}) {
@@ -25723,6 +25729,11 @@ ${formatListItems(items)}`;
         toast2("\u8BF7\u5148\u9009\u62E9\u8981\u540C\u6B65\u7684\u6267\u7B14\u4EBA", "warn");
         return null;
       }
+      const parsedSkillJson = parseSkillJsonForUpload(style.skillJson);
+      if (!parsedSkillJson.ok) {
+        toast2(`\u6267\u7B14\u4EBA\u89C4\u5219 JSON \u65E0\u6CD5\u89E3\u6790\uFF0C\u8BF7\u5148\u4FEE\u6B63\u540E\u518D\u540C\u6B65\u4E91\u7AEF\uFF1A${parsedSkillJson.error}`, "warn");
+        return null;
+      }
       return withLoading2(els2.cloudSaveWriterBtn, "\u540C\u6B65\u4E2D", async () => {
         const payload = {
           name: style.name || "\u672A\u547D\u540D\u6267\u7B14\u4EBA",
@@ -25731,7 +25742,7 @@ ${formatListItems(items)}`;
           description: style.description || "",
           enabled: style.enabled !== false,
           summary_md: style.summary || "",
-          skill_json: parseJsonSafely(style.skillJson || "{}", {}),
+          skill_json: parsedSkillJson.value,
           quality_report: style.qualityReport || {},
           expected_version: style.cloudVersion || void 0
         };
@@ -38720,7 +38731,7 @@ ${JSON.stringify(payload, null, 2)}`
         candidateRuleCount: (aggregationData.candidate_rules || qualityReport.candidate_rules || []).length || 0,
         privacyCount: (aggregationData.privacy_findings || qualityReport.privacy_filter_notes || []).length || 0,
         caseSpecificCount: (aggregationData.case_specific_exclusions || qualityReport.excluded_case_specific_items || []).length || 0,
-        passed: parsedTestReport.passed ?? parsedTestReport.check_report?.passed ?? null,
+        passed: parsedTestReport.overall_result?.passed ?? parsedTestReport.passed ?? parsedTestReport.check_report?.passed ?? null,
         sampleCount: (style.examples || []).length
       };
     }

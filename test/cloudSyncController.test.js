@@ -241,6 +241,28 @@ test("cloudSaveCurrentWriter uploads the selected writer and keeps parsed skill 
   assert.match(harness.toasts.at(-1).message, /执笔人已同步到云端/);
 });
 
+test("cloudSaveCurrentWriter blocks invalid skill json before overwriting the cloud writer", async () => {
+  const harness = createHarness({
+    state: {
+      styles: [{
+        id: "style-1",
+        name: "会议纪要",
+        handle: "meeting",
+        skillJson: "{\"style_rules\":",
+      }],
+    },
+    ui: { selectedSkillCardId: "style-1" },
+  });
+
+  const result = await harness.controller.cloudSaveCurrentWriter();
+
+  assert.equal(result, null);
+  assert.equal(harness.requests.length, 0);
+  assert.deepEqual(harness.calls, []);
+  assert.match(harness.toasts.at(-1).message, /规则 JSON 无法解析/);
+  assert.equal(harness.toasts.at(-1).type, "warn");
+});
+
 test("cloudPullWriters upserts writers, maps versions, and selects an editing writer", async () => {
   const harness = createHarness({
     state: {

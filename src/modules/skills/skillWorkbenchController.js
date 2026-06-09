@@ -66,7 +66,10 @@ export function createSkillWorkbenchController(deps = {}) {
       candidateRuleCount: (aggregationData.candidate_rules || qualityReport.candidate_rules || []).length || 0,
       privacyCount: (aggregationData.privacy_findings || qualityReport.privacy_filter_notes || []).length || 0,
       caseSpecificCount: (aggregationData.case_specific_exclusions || qualityReport.excluded_case_specific_items || []).length || 0,
-      passed: parsedTestReport.passed ?? parsedTestReport.check_report?.passed ?? null,
+      passed: parsedTestReport.overall_result?.passed
+        ?? parsedTestReport.passed
+        ?? parsedTestReport.check_report?.passed
+        ?? null,
       sampleCount: (style.examples || []).length,
     };
   }

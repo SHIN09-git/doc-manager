@@ -1,10 +1,17 @@
 import { EVENTS } from "../../core/eventBus.js";
+import { extractJsonObject } from "../../utils/formatters.js";
 
-function parseJsonSafely(text, fallback = {}) {
+function parseSkillJsonForUpload(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return { ok: true, value: {} };
   try {
-    return JSON.parse(text);
-  } catch {
-    return fallback;
+    const value = JSON.parse(extractJsonObject(raw) || raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { ok: false, error: "规则 JSON 顶层必须是对象" };
+    }
+    return { ok: true, value };
+  } catch (error) {
+    return { ok: false, error: error.message || "JSON 解析失败" };
   }
 }
 
@@ -194,6 +201,11 @@ export function createCloudSyncController(deps = {}) {
       toast("请先选择要同步的执笔人", "warn");
       return null;
     }
+    const parsedSkillJson = parseSkillJsonForUpload(style.skillJson);
+    if (!parsedSkillJson.ok) {
+      toast(`执笔人规则 JSON 无法解析，请先修正后再同步云端：${parsedSkillJson.error}`, "warn");
+      return null;
+    }
     return withLoading(els.cloudSaveWriterBtn, "同步中", async () => {
       const payload = {
         name: style.name || "未命名执笔人",
@@ -202,7 +214,7 @@ export function createCloudSyncController(deps = {}) {
         description: style.description || "",
         enabled: style.enabled !== false,
         summary_md: style.summary || "",
-        skill_json: parseJsonSafely(style.skillJson || "{}", {}),
+        skill_json: parsedSkillJson.value,
         quality_report: style.qualityReport || {},
         expected_version: style.cloudVersion || undefined,
       };
