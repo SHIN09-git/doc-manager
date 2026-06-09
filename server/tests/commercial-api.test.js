@@ -209,6 +209,62 @@ test("production email mode sends through webhook without returning tokens", asy
   }
 });
 
+test("registration survives verification email delivery failure", async () => {
+  const receiverUrl = "https://mail.example.test/send";
+  const restoreFetch = installFetchMock(async (url) => {
+    if (url !== receiverUrl) return null;
+    return new Response("mail service down", { status: 503 });
+  });
+  const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-register-email-failure-api-"));
+  const emailServer = createApp({
+    env: {
+      NODE_ENV: "production",
+      DATA_DIR: temp,
+      APP_ENCRYPTION_SECRET: "production-encryption-secret-with-enough-length",
+      SESSION_SECRET: "production-session-secret-with-enough-length",
+      SESSION_SECURE: "true",
+      APP_URL: "https://mowen.example.com/index.html",
+      CORS_ORIGIN: "https://mowen.example.com",
+      EMAIL_MODE: "webhook",
+      EMAIL_WEBHOOK_URL: receiverUrl,
+      AI_PROXY_MODE: "mock",
+    },
+  });
+  await new Promise((resolve) => emailServer.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${emailServer.address().port}`;
+  try {
+    const response = await fetch(`${url}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "email-failure@example.com", password: "password123", name: "Email Failure" }),
+    });
+    const json = await response.json();
+    const cookie = response.headers.get("set-cookie") || "";
+    assert.equal(response.status, 201, JSON.stringify(json));
+    assert.equal(json.authenticated, true);
+    assert.equal(json.email_delivery.status, "failed");
+    assert.equal(json.email_delivery.code, "email_delivery_failed");
+    assert.match(cookie, /mowen_session=/);
+
+    const me = await fetch(`${url}/api/me`, { headers: { Cookie: cookie } });
+    const meJson = await me.json();
+    assert.equal(me.status, 200);
+    assert.equal(meJson.authenticated, true);
+    assert.equal(meJson.user.email, "email-failure@example.com");
+
+    const data = await emailServer.store.read();
+    assert.ok(data.users.some((item) => item.email === "email-failure@example.com" && !item.disabled_at));
+    const delivery = data.email_deliveries.find((item) => item.email === "email-failure@example.com");
+    assert.equal(delivery.status, "failed");
+    assert.equal(delivery.attempts, 3);
+    assert.ok(data.system_events.some((item) => item.type === "email.delivery.failed" && item.metadata.delivery_id === delivery.id));
+  } finally {
+    restoreFetch();
+    await new Promise((resolve) => emailServer.close(resolve));
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 test("production email mode can send through Resend adapter", async () => {
   const emails = [];
   const receiverUrl = "https://api.resend.test/emails";

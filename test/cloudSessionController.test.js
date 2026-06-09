@@ -166,6 +166,23 @@ test("cloudLogin and cloudRegister submit credentials and refresh cloud summarie
   assert.equal(harness.calls.filter((item) => item[0] === "billing").length, 2);
 });
 
+test("cloudRegister warns when verification email delivery fails after account creation", async () => {
+  const harness = createHarness({
+    responses: {
+      "/auth/register": {
+        user: { email: "owner@example.com" },
+        organization: { id: "org-1" },
+        email_delivery: { status: "failed" },
+      },
+    },
+  });
+
+  await harness.controller.cloudRegister();
+
+  assert.equal(harness.toasts.at(-1).message, "云端账号已创建，但验证邮件暂时未发出，请稍后点击发送验证码。");
+  assert.equal(harness.toasts.at(-1).type, "warn");
+});
+
 test("logout actions reset local cloud session", async () => {
   const harness = createHarness({
     state: { cloud: { authenticated: true, user: { email: "owner@example.com" }, members: [{ id: "m1" }], billing: { plan: "pro" } } },

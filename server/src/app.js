@@ -286,15 +286,25 @@ async function register(ctx) {
   });
 
   setSession(ctx.response, ctx.env, payload.session.token);
-  await deliverTransactionalEmail(ctx, {
-    userId: payload.user.id,
-    email: payload.user.email,
-    template: "email_verification",
-    token: payload.verification.token,
-    metadata: { verification_id: payload.verification.id },
-  });
+  let emailDelivery = { status: "sent" };
+  try {
+    await deliverTransactionalEmail(ctx, {
+      userId: payload.user.id,
+      email: payload.user.email,
+      template: "email_verification",
+      token: payload.verification.token,
+      metadata: { verification_id: payload.verification.id },
+    });
+  } catch (error) {
+    emailDelivery = {
+      status: "failed",
+      code: error?.code || "email_delivery_failed",
+      message: "账号已创建，但验证邮件暂时未发出，请稍后在云端页面重新发送验证码。",
+    };
+  }
   sendJson(ctx.response, 201, {
     ...mePayload(payload.user, [payload.organization], payload.organization, payload.membership),
+    email_delivery: emailDelivery,
     email_verification_token: exposeDevelopmentToken(ctx.env, payload.verification.token),
   });
 }

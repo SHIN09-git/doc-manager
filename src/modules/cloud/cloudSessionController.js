@@ -123,7 +123,11 @@ export function createCloudSessionController(deps = {}) {
       await refreshCloudBilling({ silent: true });
       persist();
       renderCloudPanel();
-      toast(`云端账号已创建：${getCloudSettingsLocation()}`);
+      if (data.email_delivery?.status === "failed") {
+        toast("云端账号已创建，但验证邮件暂时未发出，请稍后点击发送验证码。", "warn");
+      } else {
+        toast(`云端账号已创建：${getCloudSettingsLocation()}`);
+      }
       return data;
     });
   }

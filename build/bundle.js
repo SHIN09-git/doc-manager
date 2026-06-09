@@ -25310,7 +25310,11 @@ ${formatListItems(items)}`;
         await refreshCloudBilling({ silent: true });
         persist2();
         renderCloudPanel2();
-        toast2(`\u4E91\u7AEF\u8D26\u53F7\u5DF2\u521B\u5EFA\uFF1A${getCloudSettingsLocation2()}`);
+        if (data.email_delivery?.status === "failed") {
+          toast2("\u4E91\u7AEF\u8D26\u53F7\u5DF2\u521B\u5EFA\uFF0C\u4F46\u9A8C\u8BC1\u90AE\u4EF6\u6682\u65F6\u672A\u53D1\u51FA\uFF0C\u8BF7\u7A0D\u540E\u70B9\u51FB\u53D1\u9001\u9A8C\u8BC1\u7801\u3002", "warn");
+        } else {
+          toast2(`\u4E91\u7AEF\u8D26\u53F7\u5DF2\u521B\u5EFA\uFF1A${getCloudSettingsLocation2()}`);
+        }
         return data;
       });
     }
