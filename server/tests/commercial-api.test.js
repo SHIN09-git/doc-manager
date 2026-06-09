@@ -467,6 +467,13 @@ test("cookie authenticated writes reject untrusted browser origins", async () =>
     body: { title: "Bearer", content: "api client" },
   });
   assert.equal(bearerAllowed.status, 201);
+
+  const lowercaseBearerAllowed = await api("/api/documents", {
+    method: "POST",
+    headers: { Origin: "https://evil.example", Authorization: `bearer ${token}` },
+    body: { title: "Lowercase Bearer", content: "api client" },
+  });
+  assert.equal(lowercaseBearerAllowed.status, 201);
 });
 
 test("production cookie authenticated writes require an explicit trusted origin", async () => {

@@ -2140,7 +2140,7 @@ function getSessionToken(request) {
 
 function getSessionTokenDetails(request) {
   const auth = String(request.headers.authorization || "");
-  if (auth.startsWith("Bearer ")) return { token: auth.slice(7).trim(), source: "bearer" };
+  if (auth.toLowerCase().startsWith("bearer ")) return { token: auth.slice(7).trim(), source: "bearer" };
   return { token: parseCookies(request.headers.cookie).get(SESSION_COOKIE) || "", source: "cookie" };
 }
 

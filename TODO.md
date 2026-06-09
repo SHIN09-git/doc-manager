@@ -35,6 +35,7 @@
 - [x] 优化静态发布清单，后台页面的相对 ESM 依赖改为递归收集，避免新增后台模块后 `dist/admin.html` 缺文件。
 - [x] 加固邮件投递回调状态机，已失败或已退信的投递不会被后续乱序 `opened` / `delivered` 回调覆盖为成功态，忽略的回调会写入系统事件和安全 metadata。
 - [x] 加固 AI 超额额度扣减契约，JSON Store 与 PostgreSQL Store 都会返回扣减结果；余额并发变化导致扣减失败时接口返回 `credit_spend_failed`，不再静默放行免费调用。
+- [x] 修复 Bearer 会话认证大小写兼容问题，`Authorization: bearer <token>` 会按标准作为脚本/API 会话识别，并继续绕过生产 Cookie 写请求的 Origin 门禁。
 
 ## 2026-06-01 全量审阅发现问题修复记录
 
