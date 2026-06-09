@@ -35694,18 +35694,15 @@ ${String(ex)}`);
     const cases = Array.isArray(result2.test_cases) ? result2.test_cases.map(normalizeTestCase) : [normalizeLegacyTestCase(result2)];
     const legacyReport = result2.check_report || result2.report || result2;
     const derived = deriveOverallResult(cases, legacyReport);
-    const overall = {
-      ...derived,
-      ...result2.overall_result && typeof result2.overall_result === "object" ? result2.overall_result : {}
-    };
+    const reported = result2.overall_result && typeof result2.overall_result === "object" ? result2.overall_result : {};
     const normalizedOverall = {
-      passed: overall.passed !== false,
-      score: Number(overall.score || 0),
-      must_rule_miss_count: Number(overall.must_rule_miss_count || 0),
-      privacy_leak_count: Number(overall.privacy_leak_count || 0),
-      case_specific_leak_count: Number(overall.case_specific_leak_count || 0),
-      fabrication_risk_count: Number(overall.fabrication_risk_count || 0),
-      save_allowed: overall.save_allowed !== false
+      passed: derived.passed !== false && reported.passed !== false,
+      score: Number(reported.score ?? derived.score ?? 0),
+      must_rule_miss_count: Math.max(Number(derived.must_rule_miss_count || 0), Number(reported.must_rule_miss_count || 0)),
+      privacy_leak_count: Math.max(Number(derived.privacy_leak_count || 0), Number(reported.privacy_leak_count || 0)),
+      case_specific_leak_count: Math.max(Number(derived.case_specific_leak_count || 0), Number(reported.case_specific_leak_count || 0)),
+      fabrication_risk_count: Math.max(Number(derived.fabrication_risk_count || 0), Number(reported.fabrication_risk_count || 0)),
+      save_allowed: derived.save_allowed !== false && reported.save_allowed !== false
     };
     if (normalizedOverall.privacy_leak_count > 0 || normalizedOverall.case_specific_leak_count > 0 || normalizedOverall.fabrication_risk_count > 0 || normalizedOverall.must_rule_miss_count > 0) {
       normalizedOverall.passed = false;
@@ -35876,10 +35873,19 @@ ${item.test_document_markdown || ""}`).join("\n\n").trim(),
   }
   function deriveOverallResult(cases, legacyReport = {}) {
     const issueText = JSON.stringify(legacyReport);
-    const mustMiss = coerceArray(legacyReport.rule_misses).length;
-    const privacyLeaks = coerceArray(legacyReport.privacy_risks).length;
-    const caseLeaks = coerceArray(legacyReport.case_specific_leaks).length;
-    const fabricationRisks = /编造|杜撰|自行补全|虚构/.test(issueText) ? 1 : 0;
+    const mustMiss = coerceArray(legacyReport.rule_misses).length + countIssueCases(
+      cases,
+      (item, text) => item.case_id === "normal_test" && item.passed === false || /硬规则|必须|must|未命中|漏命中|未遵守/.test(text)
+    );
+    const privacyLeaks = coerceArray(legacyReport.privacy_risks).length + countIssueCases(cases, (_item, text) => /隐私|敏感|泄露|泄漏|手机号|电话|身份证|邮箱|学号|账号|住址|地址/.test(text));
+    const caseLeaks = coerceArray(legacyReport.case_specific_leaks).length + countIssueCases(
+      cases,
+      (item, text) => item.case_id === "leakage_test" && item.passed === false || /复用样本|样本.*人名|样本.*地点|活动名|个案|一次性|临时安排|具体安排|特定人物|特定地点/.test(text)
+    );
+    const fabricationRisks = (/编造|杜撰|自行补全|虚构/.test(issueText) ? 1 : 0) + countIssueCases(
+      cases,
+      (item, text) => item.case_id === "missing_fact_test" && item.passed === false || /编造|杜撰|自行补全|自行补足|虚构|未使用.*占位符|没有.*占位符|缺少.*占位符/.test(text)
+    );
     const averageScore = cases.length ? Math.round(cases.reduce((sum, item) => sum + Number(item.score || 0), 0) / cases.length) : 0;
     return {
       passed: cases.every((item) => item.passed) && mustMiss === 0 && privacyLeaks === 0 && caseLeaks === 0 && fabricationRisks === 0,
@@ -35890,6 +35896,12 @@ ${item.test_document_markdown || ""}`).join("\n\n").trim(),
       fabrication_risk_count: fabricationRisks,
       save_allowed: mustMiss === 0 && privacyLeaks === 0 && caseLeaks === 0 && fabricationRisks === 0
     };
+  }
+  function countIssueCases(cases, predicate) {
+    return coerceArray(cases).filter((item) => {
+      const issueText = coerceArray(item.issues).join(" ");
+      return predicate(item, issueText);
+    }).length;
   }
   function isReusableExpressionSafe(expression, aggregationData) {
     const text = String(expression || "").trim();

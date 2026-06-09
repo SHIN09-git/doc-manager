@@ -210,3 +210,29 @@ test("normalizeTestResult blocks saving on leaks and fabrication risks", () => {
   assert.equal(result.report.overall_result.save_allowed, false);
   assert.equal(result.report.overall_result.passed, false);
 });
+
+test("normalizeTestResult derives save-blocking risks from failed test cases", () => {
+  const result = normalizeTestResult({
+    test_cases: [
+      { case_id: "normal_test", passed: false, score: 70, issues: ["硬规则未命中"] },
+      { case_id: "missing_fact_test", passed: false, score: 60, issues: ["缺少事实时没有使用占位符"] },
+      { case_id: "leakage_test", passed: false, score: 50, issues: ["复用样本文档中的活动名和手机号"] },
+    ],
+    overall_result: {
+      passed: true,
+      score: 88,
+      must_rule_miss_count: 0,
+      privacy_leak_count: 0,
+      case_specific_leak_count: 0,
+      fabrication_risk_count: 0,
+      save_allowed: true,
+    },
+  });
+
+  assert.equal(result.report.overall_result.passed, false);
+  assert.equal(result.report.overall_result.save_allowed, false);
+  assert.equal(result.report.overall_result.must_rule_miss_count, 1);
+  assert.equal(result.report.overall_result.fabrication_risk_count, 1);
+  assert.equal(result.report.overall_result.case_specific_leak_count, 1);
+  assert.equal(result.report.overall_result.privacy_leak_count, 1);
+});
