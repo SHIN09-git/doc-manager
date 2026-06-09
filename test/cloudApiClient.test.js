@@ -81,7 +81,7 @@ test("cloud api client sends organization header and parses successful responses
 test("cloud api client surfaces server errors with status and payload", async () => {
   const client = createCloudApiClient({
     state: { cloud: { apiBaseUrl: "https://api.example.com/api" } },
-    fetchImpl: async () => response("{\"error\":{\"message\":\"需要登录\"}}", { ok: false, status: 401, statusText: "Unauthorized" }),
+    fetchImpl: async () => response("{\"error\":{\"message\":\"需要登录\",\"code\":\"unauthorized\",\"details\":{\"retry\":false}}}", { ok: false, status: 401, statusText: "Unauthorized" }),
     defaultCloudApiBaseUrl: "https://fallback.example/api",
   });
 
@@ -90,7 +90,9 @@ test("cloud api client surfaces server errors with status and payload", async ()
     (error) => {
       assert.equal(error.message, "需要登录");
       assert.equal(error.status, 401);
-      assert.deepEqual(error.payload, { error: { message: "需要登录" } });
+      assert.equal(error.code, "unauthorized");
+      assert.deepEqual(error.details, { retry: false });
+      assert.deepEqual(error.payload, { error: { message: "需要登录", code: "unauthorized", details: { retry: false } } });
       return true;
     },
   );

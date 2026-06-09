@@ -24750,7 +24750,15 @@ ${formatListItems(items)}`;
     async function cloudDeleteAccount() {
       if (!windowRef?.confirm?.("\u786E\u5B9A\u5220\u9664\u4E91\u7AEF\u8D26\u53F7\u5417\uFF1F\u8FD9\u4F1A\u9000\u51FA\u4E91\u7AEF\u5E76\u505C\u7528\u5F53\u524D\u8D26\u53F7\u3002")) return false;
       return withLoading2(els2.cloudDeleteAccountBtn, "\u5220\u9664\u4E2D", async () => {
-        await cloudRequest2("/me", { method: "DELETE" });
+        try {
+          await cloudRequest2("/me", { method: "DELETE" });
+        } catch (error) {
+          if (isOrganizationOwnerRequiredError(error)) {
+            toast2(formatOrganizationOwnerRequiredMessage(error), "warn");
+            return false;
+          }
+          throw error;
+        }
         state2.cloud = {
           ...state2.cloud || {},
           authenticated: false,
@@ -24768,6 +24776,14 @@ ${formatListItems(items)}`;
         toast2("\u4E91\u7AEF\u8D26\u53F7\u5DF2\u5220\u9664\uFF0C\u672C\u5730\u6570\u636E\u4ECD\u4FDD\u7559", "warn");
         return true;
       });
+    }
+    function isOrganizationOwnerRequiredError(error) {
+      return error?.code === "organization_owner_required" || error?.payload?.error?.code === "organization_owner_required";
+    }
+    function formatOrganizationOwnerRequiredMessage(error) {
+      const details = error?.details || error?.payload?.error?.details || {};
+      const count = Array.isArray(details.organization_ids) ? details.organization_ids.length : 0;
+      return count > 0 ? `\u8D26\u53F7\u4ECD\u662F ${count} \u4E2A\u7EC4\u7EC7\u7684\u552F\u4E00\u6240\u6709\u8005\uFF0C\u8BF7\u5148\u628A\u6240\u6709\u8005\u4EA4\u63A5\u7ED9\u7EC4\u7EC7\u7BA1\u7406\u5458\uFF0C\u6216\u5148\u5904\u7406\u7EC4\u7EC7\u6210\u5458\u540E\u518D\u5220\u9664\u3002` : "\u8D26\u53F7\u4ECD\u662F\u90E8\u5206\u7EC4\u7EC7\u7684\u552F\u4E00\u6240\u6709\u8005\uFF0C\u8BF7\u5148\u628A\u6240\u6709\u8005\u4EA4\u63A5\u7ED9\u7EC4\u7EC7\u7BA1\u7406\u5458\uFF0C\u6216\u5148\u5904\u7406\u7EC4\u7EC7\u6210\u5458\u540E\u518D\u5220\u9664\u3002";
     }
     function openStandaloneAdminPage() {
       if (!["owner", "admin", "operator"].includes(state2.cloud?.membership?.role || "")) {
@@ -24894,6 +24910,8 @@ ${formatListItems(items)}`;
         const error = new Error(message);
         error.status = response.status;
         error.payload = data;
+        error.code = data?.error?.code || "";
+        error.details = data?.error?.details || null;
         throw error;
       }
       return data;

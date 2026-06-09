@@ -39,6 +39,14 @@ function httpError(status, message = "failed") {
   return error;
 }
 
+function codedHttpError(status, message, code, details = null) {
+  const error = httpError(status, message);
+  error.code = code;
+  error.details = details;
+  error.payload = { error: { code, message, details } };
+  return error;
+}
+
 function createHarness(options = {}) {
   const state = {
     cloud: {
@@ -220,6 +228,31 @@ test("cloudDeleteAccount confirms, deletes remote account, and clears stale bill
   const cancelled = createHarness({ confirm: false });
   assert.equal(await cancelled.controller.cloudDeleteAccount(), false);
   assert.deepEqual(cancelled.requests, []);
+});
+
+test("cloudDeleteAccount keeps the session when organization owner handoff is required", async () => {
+  const harness = createHarness({
+    responses: {
+      "/me": codedHttpError(
+        409,
+        "账号仍是部分组织的唯一所有者",
+        "organization_owner_required",
+        { organization_ids: ["org-1", "org-2"] },
+      ),
+    },
+  });
+
+  assert.equal(await harness.controller.cloudDeleteAccount(), false);
+
+  assert.equal(harness.requests[0].path, "/me");
+  assert.equal(harness.state.cloud.authenticated, true);
+  assert.equal(harness.state.cloud.user.email, "owner@example.com");
+  assert.equal(harness.state.cloud.billing.plan, "pro");
+  assert.equal(harness.calls.some((item) => item[0] === "persist"), false);
+  assert.equal(harness.calls.some((item) => item[0] === "render"), false);
+  assert.equal(harness.toasts.at(-1).type, "warn");
+  assert.match(harness.toasts.at(-1).message, /2 个组织/);
+  assert.match(harness.toasts.at(-1).message, /所有者交接/);
 });
 
 test("admin and cloud hash routes route through the proper surfaces", () => {

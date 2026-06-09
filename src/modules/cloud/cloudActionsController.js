@@ -117,7 +117,15 @@ export function createCloudActionsController(deps = {}) {
   async function cloudDeleteAccount() {
     if (!windowRef?.confirm?.("确定删除云端账号吗？这会退出云端并停用当前账号。")) return false;
     return withLoading(els.cloudDeleteAccountBtn, "删除中", async () => {
-      await cloudRequest("/me", { method: "DELETE" });
+      try {
+        await cloudRequest("/me", { method: "DELETE" });
+      } catch (error) {
+        if (isOrganizationOwnerRequiredError(error)) {
+          toast(formatOrganizationOwnerRequiredMessage(error), "warn");
+          return false;
+        }
+        throw error;
+      }
       state.cloud = {
         ...(state.cloud || {}),
         authenticated: false,
@@ -135,6 +143,19 @@ export function createCloudActionsController(deps = {}) {
       toast("云端账号已删除，本地数据仍保留", "warn");
       return true;
     });
+  }
+
+  function isOrganizationOwnerRequiredError(error) {
+    return error?.code === "organization_owner_required" ||
+      error?.payload?.error?.code === "organization_owner_required";
+  }
+
+  function formatOrganizationOwnerRequiredMessage(error) {
+    const details = error?.details || error?.payload?.error?.details || {};
+    const count = Array.isArray(details.organization_ids) ? details.organization_ids.length : 0;
+    return count > 0
+      ? `账号仍是 ${count} 个组织的唯一所有者，请先把所有者交接给组织管理员，或先处理组织成员后再删除。`
+      : "账号仍是部分组织的唯一所有者，请先把所有者交接给组织管理员，或先处理组织成员后再删除。";
   }
 
   function openStandaloneAdminPage() {

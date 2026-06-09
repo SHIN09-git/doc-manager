@@ -73,6 +73,8 @@ export function createCloudApiClient(deps = {}) {
       const error = new Error(message);
       error.status = response.status;
       error.payload = data;
+      error.code = data?.error?.code || "";
+      error.details = data?.error?.details || null;
       throw error;
     }
     return data;
