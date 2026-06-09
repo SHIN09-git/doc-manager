@@ -1236,10 +1236,36 @@ test("data export, recent errors, readiness, and account deletion work", async (
   assert.equal(deletionRequest.status, 202);
   assert.equal(deletionRequest.json.request.status, "draft");
 
+  await server.store.write((data) => {
+    const now = new Date().toISOString();
+    data.organizations.push({
+      id: "org-delete-extra",
+      name: "额外组织",
+      slug: "delete-extra",
+      plan: "free",
+      created_by: owner.userId,
+      created_at: now,
+      updated_at: now,
+    });
+    data.memberships.push({
+      id: "mem-delete-extra",
+      organization_id: "org-delete-extra",
+      user_id: owner.userId,
+      role: "member",
+      created_at: now,
+    });
+  });
   const deleted = await api("/api/me", { method: "DELETE", cookie: owner.cookie });
   assert.equal(deleted.status, 204);
   const afterDelete = await api("/api/documents", { cookie: owner.cookie });
   assert.equal(afterDelete.status, 401);
+  const dataAfterDelete = await server.store.read();
+  const deletedUser = dataAfterDelete.users.find((item) => item.id === owner.userId);
+  assert.ok(deletedUser.disabled_at);
+  assert.equal(dataAfterDelete.memberships.some((item) => item.user_id === owner.userId), false);
+  const deleteAudit = dataAfterDelete.audit_logs.find((item) => item.action === "auth.account.delete" && item.user_id === owner.userId);
+  assert.equal(deleteAudit.metadata.removed_memberships, 2);
+  assert.deepEqual(new Set(deleteAudit.metadata.removed_organization_ids), new Set([owner.orgId, "org-delete-extra"]));
 });
 
 test("JSON store date filters include the full selected end date", async () => {

@@ -2112,11 +2112,16 @@ async function deleteOwnAccount(ctx) {
     const now = new Date().toISOString();
     const user = data.users.find((item) => item.id === ctx.auth.user.id);
     if (!user) throw new HttpError(404, "账号不存在", "not_found");
+    const removedMemberships = data.memberships.filter((item) => item.user_id === user.id);
     user.disabled_at = now;
     user.updated_at = now;
+    data.memberships = data.memberships.filter((item) => item.user_id !== user.id);
     data.sessions = data.sessions.filter((session) => session.user_id !== user.id);
     data.api_keys = data.api_keys.map((key) => key.user_id === user.id ? { ...key, disabled_at: key.disabled_at || now, updated_at: now } : key);
-    addAudit(data, null, user.id, "auth.account.delete", "user", user.id, {});
+    addAudit(data, null, user.id, "auth.account.delete", "user", user.id, {
+      removed_memberships: removedMemberships.length,
+      removed_organization_ids: removedMemberships.map((item) => item.organization_id).slice(0, 50),
+    });
   });
   ctx.response.setHeader("Set-Cookie", clearSessionCookie(SESSION_COOKIE, { secure: ctx.env.sessionSecure }));
   sendNoContent(ctx.response);
