@@ -957,6 +957,51 @@ test("organization invitations add members without exposing cross-org data", asy
   assert.equal(afterRemove.json.members.length, 1);
 });
 
+test("personal export includes organization documents and writers visible to the member", async () => {
+  const owner = await register("export-shared-owner@example.com");
+  const member = await register("export-shared-member@example.com");
+  const invitation = await api(`/api/orgs/${owner.orgId}/invitations`, {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { email: "export-shared-member@example.com", role: "member" },
+  });
+  assert.equal(invitation.status, 201);
+  const accepted = await api(`/api/orgs/${owner.orgId}/invitations/${invitation.json.invitation.id}/accept`, {
+    method: "POST",
+    cookie: member.cookie,
+    body: { token: invitation.json.invitation.token },
+  });
+  assert.equal(accepted.status, 200);
+
+  const document = await api("/api/documents", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { title: "共享导出文档", content: "成员可见正文" },
+  });
+  assert.equal(document.status, 201);
+  const writer = await api("/api/writers", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { name: "共享导出执笔人", handle: "shared_export_writer", summary_md: "成员可见说明" },
+  });
+  assert.equal(writer.status, 201);
+  await api("/api/api-keys", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { provider: "openai-compatible", api_key: "sk-shared-export-secret" },
+  });
+
+  const exported = await api("/api/me/export", { cookie: member.cookie });
+
+  assert.equal(exported.status, 200);
+  assert.ok(exported.json.organizations.some((item) => item.id === owner.orgId));
+  assert.ok(exported.json.documents.some((item) => item.id === document.json.document.id && item.content === "成员可见正文"));
+  assert.ok(exported.json.writer_profiles.some((item) => item.id === writer.json.writer.id && item.handle === "shared_export_writer"));
+  assert.ok(exported.json.writer_versions.some((item) => item.writer_profile_id === writer.json.writer.id));
+  assert.equal(exported.json.api_keys, undefined);
+  assert.equal(JSON.stringify(exported.json).includes("sk-shared-export-secret"), false);
+});
+
 test("account deletion preserves organization owner continuity", async () => {
   const owner = await register("delete-owner-continuity@example.com");
   const admin = await register("delete-owner-admin@example.com");

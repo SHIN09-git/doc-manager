@@ -2050,8 +2050,8 @@ async function exportOwnData(ctx) {
   const data = await ctx.store.read();
   const userId = ctx.auth.user.id;
   const organizationIds = new Set(data.memberships.filter((item) => item.user_id === userId).map((item) => item.organization_id));
-  const documentIds = new Set(data.documents.filter((item) => item.owner_id === userId).map((item) => item.id));
-  const writerIds = new Set(data.writer_profiles.filter((item) => item.owner_id === userId).map((item) => item.id));
+  const documentIds = new Set(data.documents.filter((item) => organizationIds.has(item.organization_id)).map((item) => item.id));
+  const writerIds = new Set(data.writer_profiles.filter((item) => organizationIds.has(item.organization_id)).map((item) => item.id));
   sendJson(ctx.response, 200, {
     exported_at: new Date().toISOString(),
     user: publicUser(ctx.auth.user),
