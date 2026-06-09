@@ -772,6 +772,60 @@ test("live AI proxy rejects requests without a concrete model", async () => {
   }
 });
 
+test("live AI proxy treats empty provider responses as failures", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-live-ai-empty-"));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url.startsWith("https://ai-provider.example/v1/chat/completions")) {
+      return new Response(JSON.stringify({ choices: [{ message: { content: "" } }], usage: { prompt_tokens: 8, completion_tokens: 0, total_tokens: 8 } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return originalFetch(input, init);
+  };
+  const liveServer = createApp({
+    env: {
+      DATA_DIR: temp,
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "live",
+      AI_BASE_URL: "https://ai-provider.example/v1",
+      AI_MODEL: "gpt-test",
+      PLATFORM_OPENAI_API_KEY: "sk-platform-test",
+    },
+  });
+  await new Promise((resolve) => liveServer.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${liveServer.address().port}`;
+  try {
+    const registered = await fetch(`${url}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "live-ai-empty@example.com", password: "password123", name: "Live AI Empty" }),
+    });
+    const cookie = registered.headers.get("set-cookie") || "";
+    const response = await fetch(`${url}/api/ai/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ task_type: "live_empty_response", messages: [{ role: "user", content: "hello" }] }),
+    });
+    const json = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(json.error.code, "provider_empty_response");
+    const data = await liveServer.store.read();
+    assert.equal(data.ai_usage.length, 1);
+    assert.equal(data.ai_usage[0].status, "failed");
+    assert.equal(data.ai_usage[0].model, "gpt-test");
+    assert.match(data.ai_usage[0].error, /未返回可用文本/);
+    assert.ok(data.system_events.some((item) => item.type === "ai.proxy.failed" && item.metadata?.usage_id === data.ai_usage[0].id));
+  } finally {
+    await new Promise((resolve) => liveServer.close(resolve));
+    globalThis.fetch = originalFetch;
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 test("manual recharge orders grant credits after admin approval", async () => {
   const owner = await register("manual-billing-owner@example.com");
   const summary = await api("/api/billing/summary", { cookie: owner.cookie });

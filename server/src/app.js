@@ -3190,8 +3190,19 @@ async function callAiProvider({ env, providerKey, body }) {
   if (!response.ok) {
     throw new HttpError(response.status, json.error?.message || "AI 服务返回错误", "provider_error");
   }
+  const reply = String(
+    json.choices?.[0]?.message?.content ||
+    json.choices?.[0]?.text ||
+    json.reply ||
+    json.output_text ||
+    json.content ||
+    "",
+  ).trim();
+  if (!reply) {
+    throw new HttpError(502, "AI 服务未返回可用文本", "provider_empty_response");
+  }
   return {
-    reply: json.choices?.[0]?.message?.content || "",
+    reply,
     mocked: false,
     usage: json.usage || null,
   };
