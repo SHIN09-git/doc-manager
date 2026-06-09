@@ -555,8 +555,27 @@ async function emailWebhook(ctx) {
       });
       return { matched: false, delivery: null };
     }
+    if (!shouldApplyEmailDeliveryCallbackStatus(delivery.status, status)) {
+      delivery.metadata = {
+        ...(delivery.metadata || {}),
+        ignored_callback_status: status,
+        ignored_callback_at: now,
+        ignored_provider_event_id: providerEventId,
+        ignored_current_status: delivery.status || "",
+        message_id: messageId || delivery.metadata?.message_id || "",
+      };
+      delivery.updated_at = now;
+      addSystemEvent(data, null, delivery.user_id || null, "info", "email.delivery.callback.ignored", "邮件投递回调未覆盖当前状态", {
+        delivery_id: delivery.id,
+        current_status: delivery.status,
+        ignored_status: status,
+        template: delivery.template,
+        email: delivery.email,
+      });
+      return { matched: true, delivery };
+    }
     delivery.status = status;
-    delivery.error = ["failed", "bounced"].includes(status) ? errorMessage || "邮件投递失败" : "";
+    delivery.error = isEmailDeliveryFailureStatus(status) ? errorMessage || "邮件投递失败" : "";
     delivery.metadata = {
       ...(delivery.metadata || {}),
       callback_status: status,
@@ -565,7 +584,7 @@ async function emailWebhook(ctx) {
       message_id: messageId || delivery.metadata?.message_id || "",
     };
     delivery.updated_at = now;
-    addSystemEvent(data, null, delivery.user_id || null, ["failed", "bounced"].includes(status) ? "warn" : "info", "email.delivery.callback", "邮件投递状态已更新", {
+    addSystemEvent(data, null, delivery.user_id || null, isEmailDeliveryFailureStatus(status) ? "warn" : "info", "email.delivery.callback", "邮件投递状态已更新", {
       delivery_id: delivery.id,
       status,
       template: delivery.template,
@@ -2420,6 +2439,10 @@ function publicEmailDeliveryMetadata(metadata = {}) {
     "callback_status",
     "callback_at",
     "provider_event_id",
+    "ignored_callback_status",
+    "ignored_callback_at",
+    "ignored_provider_event_id",
+    "ignored_current_status",
   ];
   return safeKeys.reduce((payload, key) => {
     if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
@@ -2460,6 +2483,25 @@ function normalizeEmailDeliveryStatus(status) {
   if (["failed", "failure", "delivery.failed", "email.failed", "email.delivery_delayed"].includes(value)) return "failed";
   if (["opened", "open", "clicked", "email.opened", "email.clicked"].includes(value)) return "opened";
   return "";
+}
+
+const EMAIL_DELIVERY_STATUS_RANK = Object.freeze({
+  pending: 0,
+  sent: 1,
+  delivered: 2,
+  opened: 3,
+  failed: 4,
+  bounced: 5,
+});
+
+function shouldApplyEmailDeliveryCallbackStatus(currentStatus, nextStatus) {
+  const currentRank = EMAIL_DELIVERY_STATUS_RANK[String(currentStatus || "").trim().toLowerCase()] ?? -1;
+  const nextRank = EMAIL_DELIVERY_STATUS_RANK[String(nextStatus || "").trim().toLowerCase()] ?? -1;
+  return nextRank >= currentRank;
+}
+
+function isEmailDeliveryFailureStatus(status) {
+  return ["failed", "bounced"].includes(status);
 }
 
 function assertEmailCallbackToken(ctx) {

@@ -326,6 +326,24 @@ test("email delivery callbacks require token and update delivery status", async 
     assert.equal(bouncedDelivery.error, "Mailbox unavailable");
     assert.equal(bouncedDelivery.metadata.message_id, "resend_email_456");
 
+    const lateOpened = await fetch(`${url}/api/webhooks/email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-email-callback-token": "callback-secret" },
+      body: JSON.stringify({ delivery_id: delivery.id, status: "opened", message_id: "resend_email_456", event_id: "late-opened" }),
+    });
+    const lateOpenedJson = await lateOpened.json();
+    assert.equal(lateOpened.status, 200);
+    assert.equal(lateOpenedJson.delivery.status, "bounced");
+    assert.equal(lateOpenedJson.delivery.metadata.callback_status, "bounced");
+    assert.equal(lateOpenedJson.delivery.metadata.ignored_callback_status, "opened");
+    const afterLate = await callbackServer.store.read();
+    const lateDelivery = afterLate.email_deliveries.find((item) => item.id === delivery.id);
+    assert.equal(lateDelivery.status, "bounced");
+    assert.equal(lateDelivery.error, "Mailbox unavailable");
+    assert.equal(lateDelivery.metadata.callback_status, "bounced");
+    assert.equal(lateDelivery.metadata.ignored_callback_status, "opened");
+    assert.ok(afterLate.system_events.some((item) => item.type === "email.delivery.callback.ignored"));
+
     const unmatched = await fetch(`${url}/api/webhooks/email`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer callback-secret" },

@@ -231,6 +231,8 @@ Resend 事件映射：
 3. 最后使用 `email + template` 匹配最近一条投递。
 4. 匹配失败时只写系统事件，不创建新的投递记录，避免污染运营数据。
 
+状态更新采用单向推进：`sent`、`delivered`、`opened` 可以依次推进，`failed` 和 `bounced` 会保留为更高优先级的失败态。邮件服务商如果乱序发送后续 `opened` 或 `delivered` 回调，系统会记录 `email.delivery.callback.ignored` 事件和 `ignored_callback_status`，但不会把已失败或已退信的投递改回成功态。
+
 管理员可以在管理后台“邮件投递”区域按邮箱、模板、状态筛选，并复制失败详情。
 
 运营处理建议：
