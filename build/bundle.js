@@ -24775,8 +24775,17 @@ ${formatListItems(items)}`;
         switchTab2("cloud");
         return false;
       }
-      if (windowRef?.location) windowRef.location.href = "./admin.html";
-      return true;
+      if (!windowRef?.location) {
+        toast2("\u5F53\u524D\u6D4F\u89C8\u5668\u73AF\u5883\u65E0\u6CD5\u6253\u5F00\u7BA1\u7406\u540E\u53F0\uFF0C\u8BF7\u76F4\u63A5\u8BBF\u95EE admin.html", "warn");
+        return false;
+      }
+      try {
+        windowRef.location.href = "./admin.html";
+        return true;
+      } catch {
+        toast2("\u7BA1\u7406\u540E\u53F0\u6253\u5F00\u5931\u8D25\uFF0C\u8BF7\u76F4\u63A5\u8BBF\u95EE admin.html", "warn");
+        return false;
+      }
     }
     function handleHashRoute() {
       if (windowRef?.location?.hash === "#admin") {

@@ -143,8 +143,17 @@ export function createCloudActionsController(deps = {}) {
       switchTab("cloud");
       return false;
     }
-    if (windowRef?.location) windowRef.location.href = "./admin.html";
-    return true;
+    if (!windowRef?.location) {
+      toast("当前浏览器环境无法打开管理后台，请直接访问 admin.html", "warn");
+      return false;
+    }
+    try {
+      windowRef.location.href = "./admin.html";
+      return true;
+    } catch {
+      toast("管理后台打开失败，请直接访问 admin.html", "warn");
+      return false;
+    }
   }
 
   function handleHashRoute() {

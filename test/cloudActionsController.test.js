@@ -246,6 +246,23 @@ test("admin and cloud hash routes route through the proper surfaces", () => {
   assert.ok(blocked.calls.some((item) => item[0] === "tab" && item[1] === "cloud"));
   assert.equal(blocked.toasts.at(-1).type, "warn");
 
+  const noLocation = createHarness({ windowRef: { location: null } });
+  assert.equal(noLocation.controller.openStandaloneAdminPage(), false);
+  assert.equal(noLocation.toasts.at(-1).type, "warn");
+
+  const lockedLocation = { hash: "#admin" };
+  Object.defineProperty(lockedLocation, "href", {
+    get() {
+      return "";
+    },
+    set() {
+      throw new Error("blocked");
+    },
+  });
+  const locked = createHarness({ windowRef: { location: lockedLocation } });
+  assert.equal(locked.controller.openStandaloneAdminPage(), false);
+  assert.equal(locked.toasts.at(-1).type, "warn");
+
   const cloud = createHarness({ windowRef: { location: { hash: "#cloud", href: "" } } });
   assert.equal(cloud.controller.handleHashRoute(), true);
   assert.ok(cloud.calls.some((item) => item[0] === "main-view" && item[1] === "cloud"));
