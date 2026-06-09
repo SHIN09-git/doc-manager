@@ -180,6 +180,9 @@ function validateEnv(env) {
     if (!env.platformOpenAiKey && !env.allowOrganizationAiKeys) {
       throw new Error("PLATFORM_OPENAI_API_KEY or ALLOW_ORGANIZATION_AI_KEYS=true is required when AI_PROXY_MODE=live in production");
     }
+    if (!env.aiModel) {
+      throw new Error("AI_MODEL is required when AI_PROXY_MODE=live in production");
+    }
   }
   if (env.paymentCheckoutMode === "webhook") {
     if (!env.paymentCheckoutUrl) {

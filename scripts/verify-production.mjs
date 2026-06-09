@@ -78,6 +78,12 @@ export function buildProductionChecks(source) {
     Boolean(envSource.PLATFORM_OPENAI_API_KEY || envSource.AI_PROXY_MODE !== "live" || envSource.ALLOW_ORGANIZATION_AI_KEYS === "true"),
     "set PLATFORM_OPENAI_API_KEY or ALLOW_ORGANIZATION_AI_KEYS=true when AI_PROXY_MODE=live",
   );
+  add(
+    "error",
+    "AI_MODEL",
+    Boolean(String(envSource.AI_MODEL || "").trim()) || envSource.AI_PROXY_MODE !== "live",
+    "set AI_MODEL to the default production model when AI_PROXY_MODE=live",
+  );
   if (envSource.PAYMENT_CHECKOUT_MODE === "webhook") {
     const priceMap = parseJsonObject(envSource.PAYMENT_PLAN_PRICE_MAP);
     add(

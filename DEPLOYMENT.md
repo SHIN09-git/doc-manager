@@ -91,7 +91,7 @@ EMAIL_MODE=log
 
 `AI_COST_RATES`、`PAYMENT_PLAN_PRICE_MAP` 和 `MANUAL_PAYMENT_PACKAGES` 是 JSON 环境变量。未配置时会使用默认空对象或空数组；一旦填写，启动时必须解析为正确的 JSON 对象或数组，否则服务会拒绝启动，避免支付价格映射、人工充值套餐或成本估算配置静默失效。
 
-`AI_PROXY_MODE=live` 时必须明确 AI Key 来源：如果使用平台统一 Key，填写 `PLATFORM_OPENAI_API_KEY`；如果由管理员在后台为组织保存 Key，则设置 `ALLOW_ORGANIZATION_AI_KEYS=true`。两者都没有时，生产环境和上线自检都会拒绝通过，避免真实用户调用 AI 时才发现缺少 Key。
+`AI_PROXY_MODE=live` 时必须明确 AI Key 来源并配置默认模型：如果使用平台统一 Key，填写 `PLATFORM_OPENAI_API_KEY`；如果由管理员在后台为组织保存 Key，则设置 `ALLOW_ORGANIZATION_AI_KEYS=true`；同时填写 `AI_MODEL` 作为云端代理默认模型。缺少 Key 来源或默认模型时，生产环境和上线自检都会拒绝通过，避免真实用户调用 AI 时才发现配置不完整。
 
 如果启用 `PAYMENT_CHECKOUT_MODE=webhook`，生产环境还必须同时配置：
 

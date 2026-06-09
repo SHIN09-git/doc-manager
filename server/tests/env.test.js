@@ -138,12 +138,14 @@ test("production live AI mode requires an explicit key source", () => {
     ...PRODUCTION_ENV,
     SESSION_SECURE: "true",
     AI_PROXY_MODE: "live",
+    AI_MODEL: "gpt-test",
   }), /PLATFORM_OPENAI_API_KEY or ALLOW_ORGANIZATION_AI_KEYS=true/);
 
   const platformKeyEnv = loadEnv({
     ...PRODUCTION_ENV,
     SESSION_SECURE: "true",
     AI_PROXY_MODE: "live",
+    AI_MODEL: "gpt-test",
     PLATFORM_OPENAI_API_KEY: "sk-production-key",
   });
   assert.equal(platformKeyEnv.platformOpenAiKey, "sk-production-key");
@@ -152,9 +154,19 @@ test("production live AI mode requires an explicit key source", () => {
     ...PRODUCTION_ENV,
     SESSION_SECURE: "true",
     AI_PROXY_MODE: "live",
+    AI_MODEL: "gpt-test",
     ALLOW_ORGANIZATION_AI_KEYS: "true",
   });
   assert.equal(organizationKeyEnv.allowOrganizationAiKeys, true);
+});
+
+test("production live AI mode requires a default model", () => {
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    SESSION_SECURE: "true",
+    AI_PROXY_MODE: "live",
+    PLATFORM_OPENAI_API_KEY: "sk-production-key",
+  }), /AI_MODEL is required/);
 });
 
 test("production payment webhook checkout requires a configured HTTPS url", () => {
