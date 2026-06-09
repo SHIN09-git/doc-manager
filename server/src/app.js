@@ -2125,6 +2125,7 @@ async function deleteOwnAccount(ctx) {
     const user = data.users.find((item) => item.id === ctx.auth.user.id);
     if (!user) throw new HttpError(404, "账号不存在", "not_found");
     const removedMemberships = data.memberships.filter((item) => item.user_id === user.id);
+    const ownerPromotions = preserveOrganizationOwnersOnAccountDelete(data, user.id);
     user.disabled_at = now;
     user.updated_at = now;
     data.memberships = data.memberships.filter((item) => item.user_id !== user.id);
@@ -2133,10 +2134,40 @@ async function deleteOwnAccount(ctx) {
     addAudit(data, null, user.id, "auth.account.delete", "user", user.id, {
       removed_memberships: removedMemberships.length,
       removed_organization_ids: removedMemberships.map((item) => item.organization_id).slice(0, 50),
+      promoted_owner_membership_ids: ownerPromotions.map((item) => item.id).slice(0, 50),
     });
   });
   ctx.response.setHeader("Set-Cookie", clearSessionCookie(SESSION_COOKIE, { secure: ctx.env.sessionSecure }));
   sendNoContent(ctx.response);
+}
+
+function preserveOrganizationOwnersOnAccountDelete(data, userId) {
+  const ownerMemberships = data.memberships.filter((item) => item.user_id === userId && item.role === "owner");
+  const promotions = [];
+  const blockedOrganizations = [];
+  ownerMemberships.forEach((ownerMembership) => {
+    const remainingMembers = data.memberships.filter((item) =>
+      item.organization_id === ownerMembership.organization_id &&
+      item.user_id !== userId);
+    if (!remainingMembers.length || remainingMembers.some((item) => item.role === "owner")) return;
+    const nextOwner = remainingMembers.find((item) => item.role === "admin");
+    if (!nextOwner) {
+      blockedOrganizations.push(ownerMembership.organization_id);
+      return;
+    }
+    nextOwner.role = "owner";
+    promotions.push(nextOwner);
+    addAudit(data, ownerMembership.organization_id, userId, "organization.owner.promote_on_account_delete", "membership", nextOwner.id, {
+      previous_owner_user_id: userId,
+      promoted_user_id: nextOwner.user_id,
+    });
+  });
+  if (blockedOrganizations.length) {
+    throw new HttpError(409, "账号仍是部分组织的唯一所有者，请先移除成员或联系管理员处理组织归属", "organization_owner_required", {
+      organization_ids: blockedOrganizations.slice(0, 50),
+    });
+  }
+  return promotions;
 }
 
 async function resolveAuth(request, store) {

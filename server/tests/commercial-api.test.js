@@ -957,6 +957,64 @@ test("organization invitations add members without exposing cross-org data", asy
   assert.equal(afterRemove.json.members.length, 1);
 });
 
+test("account deletion preserves organization owner continuity", async () => {
+  const owner = await register("delete-owner-continuity@example.com");
+  const admin = await register("delete-owner-admin@example.com");
+  const adminInvite = await api(`/api/orgs/${owner.orgId}/invitations`, {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { email: "delete-owner-admin@example.com", role: "admin" },
+  });
+  assert.equal(adminInvite.status, 201);
+  const adminAccepted = await api(`/api/orgs/${owner.orgId}/invitations/${adminInvite.json.invitation.id}/accept`, {
+    method: "POST",
+    cookie: admin.cookie,
+    body: { token: adminInvite.json.invitation.token },
+  });
+  assert.equal(adminAccepted.status, 200);
+  assert.equal(adminAccepted.json.membership.role, "admin");
+
+  const deletedWithAdmin = await api("/api/me", { method: "DELETE", cookie: owner.cookie });
+  assert.equal(deletedWithAdmin.status, 204);
+  const promotedMembers = await api(`/api/orgs/${owner.orgId}/members`, { cookie: admin.cookie });
+  assert.equal(promotedMembers.status, 200);
+  const promotedAdmin = promotedMembers.json.members.find((member) => member.user.email === "delete-owner-admin@example.com");
+  assert.equal(promotedAdmin.role, "owner");
+  const afterPromotionData = await server.store.read();
+  assert.ok(afterPromotionData.audit_logs.some((item) =>
+    item.action === "organization.owner.promote_on_account_delete" &&
+    item.organization_id === owner.orgId &&
+    item.metadata.promoted_user_id === admin.userId));
+
+  const ownerWithMember = await register("delete-owner-blocked@example.com");
+  const member = await register("delete-owner-member@example.com");
+  const memberInvite = await api(`/api/orgs/${ownerWithMember.orgId}/invitations`, {
+    method: "POST",
+    cookie: ownerWithMember.cookie,
+    body: { email: "delete-owner-member@example.com", role: "member" },
+  });
+  assert.equal(memberInvite.status, 201);
+  const memberAccepted = await api(`/api/orgs/${ownerWithMember.orgId}/invitations/${memberInvite.json.invitation.id}/accept`, {
+    method: "POST",
+    cookie: member.cookie,
+    body: { token: memberInvite.json.invitation.token },
+  });
+  assert.equal(memberAccepted.status, 200);
+  assert.equal(memberAccepted.json.membership.role, "member");
+
+  const blockedDelete = await api("/api/me", { method: "DELETE", cookie: ownerWithMember.cookie });
+  assert.equal(blockedDelete.status, 409);
+  assert.equal(blockedDelete.json.error.code, "organization_owner_required");
+  assert.deepEqual(blockedDelete.json.error.details.organization_ids, [ownerWithMember.orgId]);
+  const afterBlockedData = await server.store.read();
+  const blockedUser = afterBlockedData.users.find((item) => item.id === ownerWithMember.userId);
+  assert.equal(blockedUser.disabled_at, null);
+  assert.ok(afterBlockedData.memberships.some((item) =>
+    item.organization_id === ownerWithMember.orgId &&
+    item.user_id === ownerWithMember.userId &&
+    item.role === "owner"));
+});
+
 test("operator role can view operations data without mutating the organization", async () => {
   const owner = await register("operator-owner@example.com");
   const operator = await register("operator-viewer@example.com");
