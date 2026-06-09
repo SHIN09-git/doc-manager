@@ -2,7 +2,7 @@
 
 更新日期：2026-06-09
 
-本文件是项目当前待办索引。真实网站上线、商业化和你需要准备的资源，以 [WEBSITE_LAUNCH_TODO.md](WEBSITE_LAUNCH_TODO.md) 为准。
+本文是项目当前待办索引。真实网站上线、商业化和项目负责人需要准备的资源，以 [WEBSITE_LAUNCH_TODO.md](WEBSITE_LAUNCH_TODO.md) 为准。
 
 ## 当前状态
 
