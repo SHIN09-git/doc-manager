@@ -29,6 +29,7 @@
 - 管理后台用量和审计 CSV 导出新增公式注入防护，疑似公式的单元格会作为文本导出；发布清单同步包含新 CSV 模块，并补充独立单元测试。
 - 静态发布脚本会从后台入口递归收集相对 ESM 依赖，避免后台继续拆模块后部署目录缺少间接依赖。
 - 邮件投递回调状态更新改为单向推进，已失败或已退信的投递不会被后续乱序 `opened` / `delivered` 回调覆盖，忽略回调会写入系统事件。
+- AI 超额额度扣减失败现在会返回 `credit_spend_failed`，JSON Store 和 PostgreSQL Store 的扣减结果契约保持一致，避免余额并发变化时静默放行免费调用。
 - 新增 Store 事务回归测试，覆盖 JSON Store 和 PostgreSQL Store 在 mutator 抛错、rollback 和 commit 失败后的回滚语义。
 
 ### 文档

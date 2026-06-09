@@ -173,7 +173,7 @@ export class PostgresStore {
           metadata: { usage_id: options.usageId, amount: result.amount },
           created_at: now,
         });
-        return result.account;
+        return result;
       }
       await insertAuditLog(client, {
         id: createId("aud"),
@@ -185,7 +185,7 @@ export class PostgresStore {
         metadata: { amount: result.amount, balance_after: result.account.balance },
         created_at: now,
       });
-      return result.account;
+      return result;
     });
   }
 

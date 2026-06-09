@@ -395,6 +395,7 @@ POST /api/billing/manual-orders/:id/review
 - owner/admin 在 `admin.html` 的“账单”栏目确认或拒绝订单。
 - 确认后，系统会按套餐写入 `credit_accounts` / `credit_ledger`，或更新组织 `plan` 与 `plan_expires_at`。
 - AI 日限用完后，如果用户还有已购买额度，成功调用会扣减 1 点额度。
+- 如果额度扣减阶段发现余额已不足，接口会返回 `credit_spend_failed`，不会把本次响应静默当作免费调用；系统会保留 `billing.credit.spend_skipped` 事件用于后台排查。
 
 可选环境变量：
 

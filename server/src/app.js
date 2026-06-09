@@ -1221,6 +1221,9 @@ async function chatProxy(ctx) {
     }
     sendJson(ctx.response, 200, { reply: result.reply, mocked: result.mocked, usage: publicUsage(usageRecord) });
   } catch (error) {
+    if (isCreditSpendFailedError(error) && usageRecord?.status === "success") {
+      throw error;
+    }
     usageRecord = await recordUsage(ctx, {
       organization_id: organization.id,
       user_id: ctx.auth.user.id,
@@ -2773,19 +2776,22 @@ function grantCredits(data, { organizationId, userId, orderId = null, amount, re
 }
 
 async function spendCreditsForUsage(ctx, organizationId, userId, usageId, amount) {
+  let result;
   if (typeof ctx.store.spendCreditsForUsage === "function") {
-    return ctx.store.spendCreditsForUsage({ organizationId, userId, usageId, amount });
+    result = await ctx.store.spendCreditsForUsage({ organizationId, userId, usageId, amount });
+    if (result?.skipped) throw new HttpError(402, "可用 AI 额度不足，请刷新后重试", "credit_spend_failed", { usage_id: usageId, amount: result.amount });
+    return result;
   }
-  await ctx.store.write((data) => {
+  result = await ctx.store.write((data) => {
     const creditAmount = Math.max(1, Math.floor(Number(amount || 1)));
     const account = ensureCreditAccount(data, organizationId, userId);
     if (account.balance < creditAmount) {
       addSystemEvent(data, organizationId, userId, "warn", "billing.credit.spend_skipped", "额度扣减失败，余额不足", { usage_id: usageId, amount: creditAmount });
-      return null;
+      return { account, ledger: null, skipped: true, amount: creditAmount };
     }
     account.balance -= creditAmount;
     account.updated_at = new Date().toISOString();
-    data.credit_ledger.push({
+    const ledger = {
       id: createId("led"),
       organization_id: organizationId,
       user_id: userId,
@@ -2796,10 +2802,17 @@ async function spendCreditsForUsage(ctx, organizationId, userId, usageId, amount
       balance_after: account.balance,
       reason: "ai_quota_overage",
       created_at: account.updated_at,
-    });
+    };
+    data.credit_ledger.push(ledger);
     addAudit(data, organizationId, userId, "billing.credit.spend", "ai_usage", usageId, { amount: creditAmount, balance_after: account.balance });
-    return account;
+    return { account, ledger, skipped: false, amount: creditAmount };
   });
+  if (result?.skipped) throw new HttpError(402, "可用 AI 额度不足，请刷新后重试", "credit_spend_failed", { usage_id: usageId, amount: result.amount });
+  return result;
+}
+
+function isCreditSpendFailedError(error) {
+  return error instanceof HttpError && error.code === "credit_spend_failed";
 }
 
 function getOrganizationCreditSummary(data, organizationId) {

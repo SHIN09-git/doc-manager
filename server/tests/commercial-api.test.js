@@ -2707,6 +2707,142 @@ test("AI overage credit spend uses repository hook when available", async () => 
   }
 });
 
+test("AI overage credit spend failure rejects the response without recording a fake AI failure", async () => {
+  const now = new Date().toISOString();
+  const token = `credit-spend-skip-${crypto.randomUUID()}`;
+  const data = normalizeData({
+    users: [{
+      id: "usr_credit_skip",
+      email: "credit-skip@example.com",
+      name: "Credit Skip",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_credit_skip",
+      name: "Credit Skip Org",
+      slug: "credit-skip-org",
+      plan: "free",
+      created_by: "usr_credit_skip",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_credit_skip",
+      organization_id: "org_credit_skip",
+      user_id: "usr_credit_skip",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_credit_skip",
+      user_id: "usr_credit_skip",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+    ai_usage: [{
+      id: "use_existing_skip_limit",
+      organization_id: "org_credit_skip",
+      user_id: "usr_credit_skip",
+      provider: "mock",
+      model: "mock",
+      task_type: "draft",
+      prompt_tokens: 1,
+      completion_tokens: 0,
+      total_tokens: 1,
+      estimated_cost: 0,
+      status: "success",
+      error: "",
+      created_at: now,
+    }],
+    credit_accounts: [{
+      id: "crd_credit_skip",
+      organization_id: "org_credit_skip",
+      user_id: "usr_credit_skip",
+      balance: 1,
+      updated_at: now,
+    }],
+  });
+  let recordedUsageOptions = null;
+  let spendOptions = null;
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      return mutator(data);
+    },
+    async recordAiUsage(options) {
+      recordedUsageOptions = options;
+      data.ai_usage.push(options.usage);
+      return options.usage;
+    },
+    async spendCreditsForUsage(options) {
+      spendOptions = options;
+      data.system_events.push({
+        id: "evt_credit_spend_skipped",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        level: "warn",
+        type: "billing.credit.spend_skipped",
+        message: "额度扣减失败，余额不足",
+        metadata: { usage_id: options.usageId, amount: Number(options.amount || 1) },
+        created_at: now,
+      });
+      return {
+        account: data.credit_accounts[0],
+        ledger: null,
+        skipped: true,
+        amount: Number(options.amount || 1),
+      };
+    },
+  };
+  const creditServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "mock",
+      DAILY_USER_REQUEST_LIMIT: "1",
+      DAILY_ORG_REQUEST_LIMIT: "10",
+    },
+    store,
+  });
+  await new Promise((resolve) => creditServer.listen(0, "127.0.0.1", resolve));
+  const address = creditServer.address();
+  const creditBaseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const response = await fetch(`${creditBaseUrl}/api/ai/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `mowen_session=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({
+        task_type: "draft",
+        messages: [{ role: "user", content: "hello skipped credit spend" }],
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 402, JSON.stringify(body));
+    assert.equal(body.error.code, "credit_spend_failed");
+    assert.equal(data.rate_limits.length, 1);
+    assert.equal(data.credit_accounts[0].balance, 1);
+    assert.equal(data.credit_ledger.length, 0);
+    assert.equal(recordedUsageOptions.usage.status, "success");
+    assert.equal(spendOptions.usageId, recordedUsageOptions.usage.id);
+    assert.equal(data.ai_usage.filter((item) => item.status === "failed").length, 0);
+    assert.ok(data.system_events.some((item) => item.type === "billing.credit.spend_skipped"));
+    assert.equal(data.system_events.some((item) => item.type === "ai.proxy.failed"), false);
+  } finally {
+    await new Promise((resolve) => creditServer.close(resolve));
+  }
+});
+
 test("manual payment APIs use repository hooks when available", async () => {
   const now = new Date().toISOString();
   const token = `manual-payment-repo-${crypto.randomUUID()}`;
