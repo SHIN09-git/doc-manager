@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sanitizeCssColor, sanitizeFileName, sanitizeUrl } from "../src/utils/helpers.js";
+import { createId, sanitizeCssColor, sanitizeFileName, sanitizeUrl } from "../src/utils/helpers.js";
+
+test("createId falls back when Web Crypto is unavailable", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", {
+    value: undefined,
+    configurable: true,
+  });
+  try {
+    assert.match(createId(), /^[a-z0-9]+-[a-z0-9]+$/);
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(globalThis, "crypto", descriptor);
+    } else {
+      delete globalThis.crypto;
+    }
+  }
+});
 
 test("sanitizeFileName keeps export names stable and filesystem-safe", () => {
   assert.equal(sanitizeFileName("工作总结"), "工作总结");
