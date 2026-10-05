@@ -23,13 +23,13 @@
     "test:e2e": "npm run build && node e2e/run-e2e.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
-    "esbuild": "^0.25.12"
+    "@playwright/test": "^1.63.0",
+    "esbuild": "^0.28.2"
   },
   "dependencies": {
-    "jszip": "^3.10.1",
-    "mammoth": "^1.12.0",
-    "pg": "^8.13.1",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.13.0",
+    "pg": "^8.23.1",
     "pptxgenjs": "^4.0.1"
   },
   "overrides": {
