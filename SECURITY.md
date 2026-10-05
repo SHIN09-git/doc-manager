@@ -1,5 +1,9 @@
 # 安全与隐私
 
+## 依赖维护
+
+使用 `npm ci` 安装锁定依赖，使用 `npm audit` 复查已知告警。`pptxgenjs` 的间接依赖 `image-size` 暂时覆盖为 `2.0.4`，以修复旧解析器处理部分图片格式时的无限循环问题。升级 `pptxgenjs` 后应复核是否仍需该覆盖；当前原生 PPTX 导出由 `test/pptxBuilder.test.js` 验证。
+
 ## 后台运营权限边界
 
 - 组织后台的 `/api/ops/recent-errors` 只返回当前组织归属的系统事件和 AI 失败记录，不返回 `organization_id === null` 的平台级全局事件。

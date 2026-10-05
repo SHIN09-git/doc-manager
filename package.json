@@ -31,5 +31,10 @@
     "mammoth": "^1.12.0",
     "pg": "^8.13.1",
     "pptxgenjs": "^4.0.1"
+  },
+  "overrides": {
+    "pptxgenjs": {
+      "image-size": "2.0.4"
+    }
   }
 }
