@@ -76,6 +76,8 @@ PUBLIC_API_BASE_URL=https://api.example.com/api npm run build:static
 
 ### Windows 安装包
 
+普通用户可在 [2026-10-15 发布页](https://github.com/SHIN09-git/doc-manager/releases/tag/v0.1.0-20261015) 下载 `Mowen-Nibi-Workbench-0.1.0-20261015-windows-x64-Setup.exe`。只需这个安装程序，无需另装 Node.js；AI 功能仍需配置可用接口。安装程序尚未代码签名，Windows 可能提示未知发布者，请核对下载来源和同页 SHA-256 校验文件。
+
 生成包含 Node.js、本地 API、桌面快捷方式安装脚本的 Windows 自包含安装包：
 
 ```bash
