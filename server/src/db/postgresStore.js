@@ -3,9 +3,15 @@ import { fileURLToPath } from "node:url";
 import { createId } from "../utils/crypto.js";
 import { normalizeData } from "./jsonStore.js";
 import { runMigrations } from "./migrations/migrationRunner.js";
+import { prunePostgresOperationalData } from "./operationalDataRetention.js";
 import { getAdminPreferences, upsertAdminPreferences, deleteAdminPreferences } from "./repositories/adminPreferenceRepository.js";
 import { insertAuditLog, listAuditByOrganization } from "./repositories/auditRepository.js";
-import { grantCreditsForOrder, spendCreditsForUsage as spendCreditsForUsageRecord } from "./repositories/creditRepository.js";
+import {
+  grantCreditsForOrder,
+  refundAiCreditReservation as refundAiCreditReservationRecord,
+  settleAiCreditReservation as settleAiCreditReservationRecord,
+  spendCreditsForUsage as spendCreditsForUsageRecord,
+} from "./repositories/creditRepository.js";
 import { listDocumentsByOrganization } from "./repositories/documentRepository.js";
 import {
   createFeedbackEvent,
@@ -18,6 +24,7 @@ import {
   reviewManualPaymentOrder as reviewManualPaymentOrderRecord,
 } from "./repositories/manualPaymentRepository.js";
 import { getOpsTriage, upsertOpsTriage } from "./repositories/opsTriageRepository.js";
+import { reserveAiQuota as reserveAiQuotaRecord } from "./repositories/rateLimitRepository.js";
 import { createSystemEvent as createSystemEventRecord, updateSystemEventMetadata } from "./repositories/systemEventRepository.js";
 import { insertUsageRecord, listUsageByOrganization } from "./repositories/usageRepository.js";
 import {
@@ -46,6 +53,7 @@ const TABLES = {
   ai_usage: ["id", "organization_id", "user_id", "provider", "model", "task_type", "prompt_tokens", "completion_tokens", "total_tokens", "estimated_cost", "status", "error", "created_at"],
   manual_payment_orders: ["id", "organization_id", "user_id", "package_id", "package_type", "title", "amount_cny", "credits", "plan", "duration_days", "payment_channel", "payer_note", "proof_text", "status", "reviewed_by", "reviewed_at", "review_note", "created_at", "updated_at"],
   credit_accounts: ["id", "organization_id", "user_id", "balance", "updated_at"],
+  ai_credit_reservations: ["id", "organization_id", "user_id", "usage_id", "amount", "balance_after", "status", "created_at", "updated_at"],
   credit_ledger: ["id", "organization_id", "user_id", "order_id", "usage_id", "direction", "amount", "balance_after", "reason", "created_at"],
   ops_triage: ["id", "organization_id", "source_type", "source_id", "metadata", "updated_by", "created_at", "updated_at"],
   audit_logs: ["id", "organization_id", "user_id", "action", "target_type", "target_id", "metadata", "created_at"],
@@ -65,22 +73,51 @@ export class PostgresStore {
     this.pool = null;
     this.data = null;
     this.ready = false;
+    this.initPromise = null;
     this.writeQueue = Promise.resolve();
     this.migrationResult = null;
+    this.lastOperationalPruneAt = 0;
+    this.operationalPrunePromise = null;
   }
 
   async init() {
     if (this.ready) return;
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = this.initialize();
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+    }
+  }
+
+  async initialize() {
     const { Pool } = await import("pg");
     this.pool = new Pool({ connectionString: this.databaseUrl });
-    await this.applyMigrations();
-    this.data = await this.loadAll();
-    this.ready = true;
+    try {
+      await this.applyMigrations();
+      await this.pruneOperationalData({ force: true });
+      this.data = await this.loadAll();
+      this.ready = true;
+    } catch (error) {
+      await this.pool.end().catch(() => null);
+      this.pool = null;
+      throw error;
+    }
   }
 
   async read() {
     await this.init();
     return this.data;
+  }
+
+  async refresh() {
+    await this.init();
+    await this.writeQueue.catch(() => null);
+    await this.pruneOperationalData();
+    const snapshot = await this.loadAll();
+    this.data = snapshot;
+    return snapshot;
   }
 
   async write(mutator) {
@@ -125,6 +162,21 @@ export class PostgresStore {
     await this.pool?.end();
   }
 
+  async pruneOperationalData({ force = false } = {}) {
+    const now = Date.now();
+    if (!force && now - this.lastOperationalPruneAt < 24 * 60 * 60 * 1000) return null;
+    if (this.operationalPrunePromise) return this.operationalPrunePromise;
+    this.operationalPrunePromise = prunePostgresOperationalData(this.pool, { now: new Date(now) })
+      .then((result) => {
+        this.lastOperationalPruneAt = now;
+        return result;
+      })
+      .finally(() => {
+        this.operationalPrunePromise = null;
+      });
+    return this.operationalPrunePromise;
+  }
+
   async applyMigrations() {
     const currentFile = fileURLToPath(import.meta.url);
     const migrationsDir = path.resolve(path.dirname(currentFile), "../../migrations");
@@ -134,6 +186,10 @@ export class PostgresStore {
   async listUsageByOrganization(options) {
     await this.init();
     return listUsageByOrganization(this.pool, options);
+  }
+
+  async reserveAiQuota(options = {}) {
+    return this.repositoryWrite((client) => reserveAiQuotaRecord(client, options));
   }
 
   async recordAiUsage(options = {}) {
@@ -185,6 +241,68 @@ export class PostgresStore {
         metadata: { amount: result.amount, balance_after: result.account.balance },
         created_at: now,
       });
+      return result;
+    });
+  }
+
+  async settleAiCreditReservation(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const result = await settleAiCreditReservationRecord(client, { ...options, now });
+      if (!result.alreadySettled) {
+        await insertAuditLog(client, {
+          id: createId("aud"),
+          organization_id: options.organizationId,
+          user_id: options.userId,
+          action: "billing.credit.settle",
+          target_type: "ai_usage",
+          target_id: options.usageId,
+          metadata: {
+            reservation_id: options.reservationId,
+            amount: result.reservation.amount,
+            balance_after: result.reservation.balance_after,
+          },
+          created_at: now,
+        });
+      }
+      return result;
+    });
+  }
+
+  async refundAiCreditReservation(options = {}) {
+    return this.repositoryWrite(async (client) => {
+      const now = new Date().toISOString();
+      const result = await refundAiCreditReservationRecord(client, { ...options, now });
+      if (!result.alreadyRefunded && !result.skipped) {
+        await insertAuditLog(client, {
+          id: createId("aud"),
+          organization_id: options.organizationId,
+          user_id: options.userId,
+          action: "billing.credit.refund",
+          target_type: "ai_credit_reservation",
+          target_id: options.reservationId,
+          metadata: {
+            amount: result.reservation.amount,
+            balance_after: result.account.balance,
+            reason: options.reason || "ai_request_failed",
+          },
+          created_at: now,
+        });
+        await insertSystemEvent(client, {
+          id: createId("evt"),
+          organization_id: options.organizationId,
+          user_id: options.userId,
+          level: "info",
+          type: "billing.credit.refunded",
+          message: "AI 调用未完成，预留额度已退回",
+          metadata: {
+            reservation_id: options.reservationId,
+            amount: result.reservation.amount,
+            reason: options.reason || "ai_request_failed",
+          },
+          created_at: now,
+        });
+      }
       return result;
     });
   }

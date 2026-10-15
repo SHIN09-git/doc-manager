@@ -1,4 +1,5 @@
 import { DEFAULT_STYLE_SKILL, DEFAULT_SYSTEM_PROMPT, folderColors } from "../config/constants.js";
+import { ensureGongwenWriter } from "../modules/skills/gongwenWriter.js";
 
 export function initializeWorkspaceState(options = {}) {
   const {
@@ -27,6 +28,7 @@ export function initializeWorkspaceState(options = {}) {
   if (!Array.isArray(state.styles) || state.styles.length === 0) {
     state.styles = [createDefaultNoticeWriter({ createId, now })];
   }
+  ensureGongwenWriter(state, now());
   state.styles = state.styles.map((style) => normalizeSkill(style));
   migrateLegacyBranding(state, { now });
 

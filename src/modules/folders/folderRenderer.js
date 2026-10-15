@@ -15,23 +15,22 @@ export function createFolderRenderer(deps) {
     const allActive = ui.selectedFolderId === "all";
     const folderRows = [
       `<button class="folder-item ${allActive ? "active" : ""}" type="button" data-folder-id="all">
-        <span class="folder-main"><span class="folder-color" style="background:#2d3234"></span><span>全部文档</span></span>
-        <span>${state.docs.length}</span>
+        <span class="folder-main"><span class="folder-color folder-color-all"></span><span class="folder-name">全部文档</span></span>
+        <span class="folder-count">${state.docs.length}</span>
       </button>`,
       ...state.folders.map((folder) => {
         const count = state.docs.filter((doc) => doc.folderId === folder.id).length;
         const isReal = folder.kind === "real";
-        const badge = isReal ? "真实" : "标签";
         const folderId = escapeHtml(folder.id);
         const color = sanitizeCssColor(folder.color);
         return `<div class="folder-item ${ui.selectedFolderId === folder.id ? "active" : ""}">
           <button class="folder-main tiny-reset" type="button" data-folder-id="${folderId}">
             <span class="folder-color" style="background:${color}"></span>
-            <span>${escapeHtml(folder.name)}</span>
-            <small class="folder-kind">${badge}</small>
+            <span class="folder-name">${escapeHtml(folder.name)}</span>
+            ${isReal ? '<small class="folder-kind">真实文件夹</small>' : ""}
           </button>
+          <span class="folder-count">${count}</span>
           <span class="folder-actions">
-            <span>${count}</span>
             ${isReal ? `<button class="tiny-button" type="button" title="从真实文件夹重新导入" data-sync-folder="${folderId}"><i data-lucide="refresh-cw"></i></button>` : ""}
             <button class="tiny-button" type="button" title="重命名显示名称" data-rename-folder="${folderId}"><i data-lucide="pencil"></i></button>
             <button class="tiny-button danger-text" type="button" title="${isReal ? "取消关联" : "删除标签"}" data-delete-folder="${folderId}"><i data-lucide="x"></i></button>

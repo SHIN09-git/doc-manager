@@ -32,6 +32,16 @@ npm run server:dev
 http://127.0.0.1:8787/api
 ```
 
+### 静态站连接云端 API
+
+前端与 API 分开部署时，在构建静态目录前设置公开 API 地址：
+
+```bash
+PUBLIC_API_BASE_URL=https://api.example.com/api npm run build:static
+```
+
+该值会写入 `dist/runtime-config.js`，只允许 HTTPS 公网地址或本地开发地址。不要把服务端 `API_BASE_URL` 当成公开构建变量，以免误把内部地址或密钥相关配置暴露到前端。
+
 ## 必要环境变量
 
 生产或灰度环境至少配置：
@@ -44,8 +54,10 @@ APP_ENCRYPTION_SECRET=replace-with-a-long-random-secret-at-least-32-chars
 SESSION_SECRET=replace-with-another-long-random-secret-at-least-32-chars
 CORS_ORIGIN=https://your-frontend-domain.example
 SESSION_SECURE=true
+SESSION_SAME_SITE=Lax
 AI_PROXY_MODE=live
 AI_BASE_URL=https://api.openai.com/v1
+AI_MODEL=gpt-4.1-mini
 PLATFORM_OPENAI_API_KEY=
 ALLOW_ORGANIZATION_AI_KEYS=true
 REQUEST_LOGGING=true
@@ -86,6 +98,10 @@ STORE_DRIVER=json
 AI_PROXY_MODE=mock
 EMAIL_MODE=log
 ```
+
+生产环境默认拒绝 JSON Store。只有明确理解单机文件存储风险时，才可临时设置 `ALLOW_PRODUCTION_JSON_STORE=true`；正式灰度仍应使用 PostgreSQL。
+
+前端与 API 最好部署在同一站点的子域，例如 `app.example.com` 与 `api.example.com`，此时保持 `SESSION_SAME_SITE=Lax`。只有真正跨站部署时才使用 `SESSION_SAME_SITE=None`，并同时保持 `SESSION_SECURE=true`；部分浏览器仍可能拦截第三方 Cookie，因此跨站方案必须做真实浏览器验收。
 
 生产环境必须使用 `EMAIL_MODE=webhook`。开发模式的 `EMAIL_MODE=log` 只会记录邮件投递摘要，不会输出验证码或重置码。
 
@@ -265,7 +281,7 @@ Resend 事件映射：
 - 额度扣减：`credit_accounts` / `credit_ledger`
 - 人工确认充值：`manual_payment_orders` / `credit_accounts` / `credit_ledger` / `organizations`
 
-JSON Store 行为保持不变。正式高并发部署前仍建议补充真实 PostgreSQL 集成测试，并继续评估邮件/支付回调事件等需要和业务状态保持同事务的 `system_events` 写入是否需要进一步拆分。
+JSON Store 行为保持不变。服务会自动清理过期会话、过期一段时间的一次性验证码、30 天前登录尝试和 35 天前限流记录；审计、用量、支付和账单记录不会被这项清理删除。当前兼容写路径仍可能全量读取和重写数据库，正式高并发部署前必须补充真实 PostgreSQL 集成测试并继续迁移剩余表级写路径。
 
 如需把本地 JSON 数据导入 PostgreSQL：
 
@@ -353,7 +369,7 @@ x-webhook-timestamp: Unix 秒级时间戳
 x-webhook-signature: HMAC-SHA256(PAYMENT_WEBHOOK_SECRET, timestamp + "." + rawBody)
 ```
 
-当前支持通用事件映射：`checkout.completed`、`subscription.created`、`subscription.updated` 会更新组织套餐，`subscription.deleted` 和 `subscription.cancelled` 会降级为 `free`。`invoice.payment_failed` 和 `refund.created` 只记录运营事件，不会自动降级。
+当前支持通用事件映射：`checkout.completed`、`subscription.created`、`subscription.updated` 会更新组织套餐；`subscription.deleted` 和 `subscription.cancelled` 只有在命中价格 ID 映射时才会降级为 `free`，未命中映射时只记录运营事件。`invoice.payment_failed` 和 `refund.created` 只记录运营事件，不会自动降级。
 
 正式接入支付渠道时，不要直接信任 webhook 里的 `plan` 字段。请使用 `PAYMENT_PLAN_PRICE_MAP` 绑定渠道价格 ID 与内部套餐：
 
@@ -362,6 +378,8 @@ PAYMENT_PLAN_PRICE_MAP='{"price_123_pro":"pro","price_456_team":"team"}'
 ```
 
 当映射存在时，只有命中价格 ID 的事件才会升级套餐；未命中映射的事件只记录为账单事件，避免被伪造字段误改套餐。
+
+组织 ID 可以放在顶层 `organization_id`、`payload.organization_id`、`data.organization_id`，也可以放在支付渠道常见的 `data.object.metadata.organization_id` 或 `client_reference_id`。价格 ID 可以放在顶层 `price_id`、`payload.price_id`、`data.object.price.id`、`data.object.plan.id` 或 `data.object.items.data[0].price.id`。
 
 ## 支付 checkout
 
@@ -398,8 +416,8 @@ POST /api/billing/manual-orders/:id/review
 - 订单进入 `pending` 状态，写入 `manual_payment_orders`。
 - owner/admin 在 `admin.html` 的“账单”栏目确认或拒绝订单。
 - 确认后，系统会按套餐写入 `credit_accounts` / `credit_ledger`，或更新组织 `plan` 与 `plan_expires_at`。
-- AI 日限用完后，如果用户还有已购买额度，成功调用会扣减 1 点额度。
-- 如果额度扣减阶段发现余额已不足，接口会返回 `credit_spend_failed`，不会把本次响应静默当作免费调用；系统会保留 `billing.credit.spend_skipped` 事件用于后台排查。
+- AI 日限用完后，系统会在调用模型前原子预留 1 点已购买额度；调用成功后绑定用量并形成消费流水，调用失败则自动退回。
+- 预留时余额不足会在模型调用前拒绝请求；退款遇到瞬时存储错误会重试一次，超过 1 小时仍未结算的悬空预留会由运维清理任务恢复。
 
 可选环境变量：
 

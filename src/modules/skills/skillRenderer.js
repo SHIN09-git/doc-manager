@@ -9,6 +9,7 @@ import {
   now,
 } from "../../utils/helpers.js";
 import { buildSkillVersionDiff } from "./skillVersionDiff.js";
+import { isGongwenWriter } from "./gongwenWriter.js";
 
 export function createSkillRenderer(deps) {
   const {
@@ -324,14 +325,18 @@ export function createSkillRenderer(deps) {
     const isSelected = ui.selectedSkillCardId === style.id;
     const isExpanded = isSelected || status.key === "building" || status.key === "failed";
     const skillId = escapeHtml(style.id);
+    const invokeDisabled = style.enabled === false ? ' disabled title="请先启用执笔人"' : "";
     if (!isExpanded) {
       return `<article class="skill-card is-collapsed is-${status.key}" data-skill-card="${skillId}" tabindex="0" aria-expanded="false">
         <div class="skill-card-compact">
           <div class="skill-card-title">
             <span class="skill-avatar"><i data-lucide="book-open-text"></i></span>
-            <h3>${escapeHtml(style.name || "未命名执笔人")}</h3>
+            <div>
+              <h3>${escapeHtml(style.name || "未命名执笔人")}</h3>
+              <span class="skill-card-sub">@${escapeHtml(style.handle || normalizeHandle(style.name))} · ${escapeHtml(style.category || "自定义")}${status.key === "ready" ? "" : ` · ${status.label}`}</span>
+            </div>
           </div>
-          <button class="primary-action" type="button" data-invoke-skill="${skillId}">
+          <button class="primary-action" type="button" data-invoke-skill="${skillId}"${invokeDisabled}>
             <i data-lucide="at-sign"></i>
             调用
           </button>
@@ -354,14 +359,15 @@ export function createSkillRenderer(deps) {
       </div>
       <p class="skill-card-desc">${escapeHtml(getSkillDescription(style))}</p>
       <div class="skill-card-meta">
-        <span>${(style.examples || []).length} 份样本</span>
-        <span>${(style.versions || []).length} 个版本</span>
+        ${isGongwenWriter(style)
+          ? "<span>内置参考</span><span>7 类文体</span><span>非商业使用</span>"
+          : `<span>${(style.examples || []).length} 份样本</span><span>${(style.versions || []).length} 个版本</span>`}
         <span>${escapeHtml(formatSkillDate(style.lastBuildAt || style.updatedAt || style.createdAt))}</span>
       </div>
       ${status.key === "building" ? renderBuildProgress(style, buildProgress) : ""}
       ${status.key === "failed" ? renderBuildFailure(style) : renderBuildResult(style, result)}
       <div class="skill-card-actions">
-        <button class="primary-action" type="button" data-invoke-skill="${skillId}">
+        <button class="primary-action" type="button" data-invoke-skill="${skillId}"${invokeDisabled}>
           <i data-lucide="at-sign"></i>
           调用
         </button>
@@ -407,10 +413,10 @@ export function createSkillRenderer(deps) {
 
   function renderBuildResult(style, result) {
     if (!result.version && !style.lastBuildAt) return "";
-    return `<div class="skill-build-result">
+    return `<div class="skill-build-result${style.status === "draft" ? " is-draft" : ""}">
       已生成${result.version ? ` v${escapeHtml(String(result.version))}` : ""}，
       强规则 ${Number(result.strongRuleCount || countStrongRules(style))} 条 ·
-      候选 ${Number(result.candidateRuleCount || countCandidateRules(style))} 条
+      候选 ${Number(result.candidateRuleCount || countCandidateRules(style))} 条${style.status === "draft" ? " · 尚未测试" : ""}
     </div>`;
   }
 
@@ -469,6 +475,7 @@ export function createSkillRenderer(deps) {
   function getSkillStatus(style) {
     if (style.status === "building") return { key: "building", label: "生成中", className: "is-building" };
     if (style.status === "failed") return { key: "failed", label: "生成失败", className: "is-failed" };
+    if (style.status === "draft") return { key: "draft", label: "待测试", className: "is-pending" };
     const hasTraining = (style.examples || []).length > 0 || (style.versions || []).length > 0 || style.summary;
     if (!hasTraining) return { key: "pending", label: "待训练", className: "is-pending" };
     return style.enabled === false

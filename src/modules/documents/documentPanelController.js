@@ -19,11 +19,20 @@ export function createDocumentPanelController(deps = {}) {
   function bindEvents() {
     els.newDocBtn?.addEventListener("click", createDocument);
     els.importInput?.addEventListener("change", importDocuments);
+    els.docDropZone?.addEventListener("keydown", openDocumentPickerFromKeyboard);
     setupFileDrop(els.docDropZone, importDocumentFiles);
     setupFileDrop(els.docList, importDocumentFiles);
     els.exportDocBtn?.addEventListener("click", exportCurrentDocument);
     els.backupBtn?.addEventListener("click", exportWorkspaceBackup);
+    els.restoreBackupBtn?.addEventListener("click", () => els.restoreBackupInput?.click?.());
+    els.restoreBackupInput?.addEventListener("change", restoreWorkspaceBackup);
     trashController.bindEvents();
+  }
+
+  function openDocumentPickerFromKeyboard(event) {
+    if (!event || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault?.();
+    els.importInput?.click?.();
   }
 
   function selectDocument(docId) {
@@ -97,9 +106,11 @@ export function createDocumentPanelController(deps = {}) {
     return documentManager.importDocumentFiles(files);
   }
 
-  async function exportCurrentDocument() {
+  async function exportCurrentDocument(options = {}) {
+    // 点击事件直接绑定到这里时，第一个参数是 Event，不能当作导出选项
+    const exportOptions = options && typeof options === "object" && "layout" in options ? { layout: options.layout } : {};
     try {
-      return await documentManager.exportCurrentDocument();
+      return await documentManager.exportCurrentDocument(exportOptions);
     } catch (error) {
       toast(`导出 Word 文档失败：${error.message || "请稍后重试"}`, "error");
       return null;
@@ -108,6 +119,18 @@ export function createDocumentPanelController(deps = {}) {
 
   function exportWorkspaceBackup() {
     return documentManager.exportWorkspaceBackup();
+  }
+
+  async function restoreWorkspaceBackup(event) {
+    const file = event?.target?.files?.[0] || null;
+    try {
+      return await documentManager.restoreWorkspaceBackupFile(file);
+    } catch (error) {
+      toast(`恢复备份失败：${error.message || "备份文件不可用"}`, "error");
+      return null;
+    } finally {
+      if (event?.target) event.target.value = "";
+    }
   }
 
   return {
@@ -129,5 +152,6 @@ export function createDocumentPanelController(deps = {}) {
     importDocumentFiles,
     exportCurrentDocument,
     exportWorkspaceBackup,
+    restoreWorkspaceBackup,
   };
 }

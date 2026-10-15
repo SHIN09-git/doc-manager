@@ -1,32 +1,45 @@
 @echo off
+chcp 65001 >nul
+setlocal
+cd /d "%~dp0"
+
 echo ========================================
-echo   摹文拟笔工作台 - 启动服务器
+echo   摹文拟笔工作台 - 一键启动
 echo ========================================
 echo.
 
-REM 检查 Python 是否安装
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [错误] 未检测到 Python
-    echo.
-    echo 请先安装 Python 3.x: https://www.python.org/downloads/
-    echo.
+where node >nul 2>&1
+if errorlevel 1 (
+    echo [错误] 未检测到 Node.js 20 或更高版本。
+    echo 请先安装：https://nodejs.org/
     pause
     exit /b 1
 )
 
-echo [信息] 正在启动 HTTP 服务器...
-echo [信息] 端口: 8000
-echo.
-echo ========================================
-echo   请在浏览器中访问:
-echo   http://localhost:8000
-echo ========================================
-echo.
-echo 按 Ctrl+C 停止服务器
-echo.
+where npm.cmd >nul 2>&1
+if errorlevel 1 (
+    echo [错误] 未检测到 npm，请重新安装 Node.js。
+    pause
+    exit /b 1
+)
 
-REM 启动 Python HTTP 服务器
-python -m http.server 8000
+if not exist "node_modules" (
+    echo [信息] 首次运行，正在安装依赖...
+    call npm.cmd install
+    if errorlevel 1 (
+        echo [错误] 依赖安装失败，请检查网络后重试。
+        pause
+        exit /b 1
+    )
+)
 
-pause
+echo [信息] 正在构建并启动工作台与本地 API...
+echo [信息] 启动后将自动打开 http://127.0.0.1:4173/index.html
+echo [信息] 按 Ctrl+C 可停止本次启动的服务。
+echo.
+call npm.cmd start
+if errorlevel 1 (
+    echo.
+    echo [错误] 启动失败，请保留本窗口中的错误信息。
+    pause
+)

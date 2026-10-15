@@ -59,6 +59,11 @@ export function createEditorContextMenuController(deps = {}) {
     const button = event.target.closest("button[data-editor-action]");
     if (!button) return;
     const action = button.dataset.editorAction;
+    if (action === "revise-custom") {
+      hide({ restoreFocus: false });
+      generationController.focusRevisionInput();
+      return;
+    }
     if (action === "copy") {
       await copyText();
     }

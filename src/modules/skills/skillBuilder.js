@@ -24,7 +24,8 @@ export function createSkillBuilder(deps) {
     const examples = (style.examples || []).slice(0, 8);
     const analyses = [];
     const hasFeedback = (style.feedbacks || []).length > 0;
-    const totalStages = hasFeedback ? 5 : 4;
+    const runTest = options.runTest !== false;
+    const totalStages = (hasFeedback ? 4 : 3) + (runTest ? 1 : 0);
     for (const [index, example] of examples.entries()) {
       throwIfAborted(options.signal);
       const baseProgress = 8 + Math.round((index / Math.max(examples.length, 1)) * 36);
@@ -46,11 +47,35 @@ export function createSkillBuilder(deps) {
       progress?.update(`步骤 4/${totalStages}：正在吸收用户反馈优化执笔人`, 74);
       draft = await optimizeSkillWithFeedback(style, draft, aggregationData, options);
     }
-    throwIfAborted(options.signal);
-    progress?.update(`步骤 ${totalStages}/${totalStages}：正在生成测试文档并自检`, 82);
-    const test = await testSkillOnGeneration(style, draft.skillJson, draft.exampleInput, options);
+    let test;
+    if (runTest) {
+      throwIfAborted(options.signal);
+      progress?.update(`步骤 ${totalStages}/${totalStages}：正在生成测试文档并自检`, 82);
+      const testInput = String(options.testInput || "").trim()
+        ? { 用户测试任务: String(options.testInput).trim() }
+        : draft.exampleInput;
+      test = await testSkillOnGeneration(style, draft.skillJson, testInput, options);
+    } else {
+      progress?.update("正在整理待测试草案", 82);
+      test = {
+        document: "",
+        report: {
+          skipped: true,
+          test_cases: [],
+          overall_result: {
+            passed: false,
+            score: 0,
+            must_rule_miss_count: 0,
+            privacy_leak_count: 0,
+            case_specific_leak_count: 0,
+            fabrication_risk_count: 0,
+            save_allowed: false,
+          },
+        },
+      };
+    }
     const qualityReport = normalizeSkillQualityReport(style, aggregationData, draft.qualityReport, test.report);
-    if (test.report?.overall_result?.save_allowed === false) {
+    if (runTest && test.report?.overall_result?.save_allowed === false) {
       const result = test.report.overall_result;
       throw new Error(
         `执笔人测试未通过，已阻止保存为正式执笔人：隐私泄漏 ${result.privacy_leak_count || 0}，个案复用 ${result.case_specific_leak_count || 0}，事实编造 ${result.fabrication_risk_count || 0}，硬规则漏命中 ${result.must_rule_miss_count || 0}`,
@@ -110,7 +135,7 @@ export function createSkillBuilder(deps) {
       "请采用类似 Codex Skill 的设计原则：触发条件要清楚，正文规则要精简，只写模型无法稳定自行推断的关键程序知识；可变内容放入输入字段和变量槽位；可验证流程写成步骤和自检清单。",
       "生成 skill_json 字段时，strong_rules 必须来自聚合结果 strong_rules；candidate_rules 只能放入 recommended 或 optional，不得伪装成必须规则；strong_rules 只有 support_count >= 2 且 confidence 不为 low 时，才允许进入 style_rules.must。",
       "skill_json 是程序调用的执笔人执行卡 JSON，要能被后续文档生成模块调用，用来控制文种结构、行文风格、格式规范、常用表达和审稿标准；不要把样本文档原文、隐私信息或个案事实写入 JSON。",
-      "markdown 是给文员看的简短说明，控制在 1200 字以内，重点写适用范围、输入字段、必守规则、禁忌和自检，不要显化完整提示词。常用表达库必须去实体化，不得直接保存样本文档中的具体事实句。缺少事实时必须使用【可替换占位符】，不能编造。",
+      "markdown 是给使用者看的简短说明，控制在 1200 字以内，重点写适用范围、输入字段、必守规则、禁忌和自检，不要显化完整提示词。常用表达库必须去实体化，不得直接保存样本文档中的具体事实句。缺少事实时必须使用【可替换占位符】，不能编造。",
       "只输出 JSON，不要 Markdown。",
       "JSON 结构：{\n  \"markdown\":\"# 执笔人名称\\n...\",\n  \"skill_json\": {\n    \"name\":\"...\",\n    \"handle\":\"...\",\n    \"version\":\"...\",\n    \"enabled\": true,\n    \"category\":\"...\",\n    \"description\":\"...\",\n    \"trigger_description\":\"何时应该调用这个执笔人\",\n    \"default_prompt\":\"@handle 起草...\",\n    \"concise_instruction\":\"一句话概括执行方式\",\n    \"applicable_scope\":\"...\",\n    \"confidence\":\"low|medium|high\",\n    \"mixed_sample_warning\": false,\n    \"detected_document_types\": [],\n    \"aggregation_policy\":\"...\",\n    \"source_documents\": [],\n    \"input_contract\": {\"required_fields\": [], \"optional_fields\": [], \"missing_fact_policy\":\"事实缺失时使用【可替换占位符】\"},\n    \"user_input_fields\": [],\n    \"document_structure_template\": [],\n    \"style_rules\": {\"must\": [], \"recommended\": [], \"optional\": []},\n    \"rule_evidence\": {\"规则文本\":{\"support_count\":2,\"support_doc_ids\":[],\"scope\":\"document_type\",\"confidence\":\"medium|high\"}},\n    \"format_rules\": [],\n    \"common_expression_library\": [],\n    \"scene_variations\": [],\n    \"variable_slots\": [],\n    \"forbidden\": [],\n    \"privacy_filters\": [],\n    \"case_specific_exclusions\": [],\n    \"execution_workflow\": [],\n    \"generation_steps\": [],\n    \"validation_checklist\": [],\n    \"self_checklist\": [],\n    \"review_standards\": [],\n    \"activation_examples\": [],\n    \"quality_controls\": {\"rule_confidence\":\"...\", \"conflict_resolution\": [], \"single_document_rule_policy\":\"...\", \"candidate_rule_policy\":\"...\", \"privacy_filter\": true},\n    \"example_input\": {},\n    \"example_output\": \"...\"\n  },\n  \"quality_report\": {\"confidence\":\"...\", \"strong_rule_count\":0, \"candidate_rule_count\":0, \"conflicts\":[], \"excluded_case_specific_items\":[], \"privacy_filter_notes\":[]},\n  \"example_input\": {}\n}",
       `执笔人基本信息：${JSON.stringify(pickSkillMetadata(style), null, 2)}`,

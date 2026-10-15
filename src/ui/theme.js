@@ -1,13 +1,26 @@
 const THEME_STORAGE_KEY = "school-doc-manager:theme";
 
-export function initThemeToggle(button, root = document.documentElement) {
-  const mediaQuery = window.matchMedia?.("(prefers-color-scheme: dark)");
+export function initThemeToggle(button, root = document.documentElement, env = {}) {
+  const windowRef = env.window || globalThis.window;
+  const storage = env.storage || globalThis.localStorage;
+  const mediaQuery = windowRef?.matchMedia?.("(prefers-color-scheme: dark)");
+  const readSavedTheme = () => {
+    try {
+      return storage?.getItem?.(THEME_STORAGE_KEY) || "";
+    } catch {
+      return "";
+    }
+  };
   const getSystemTheme = () => (mediaQuery?.matches ? "dark" : "light");
   const setTheme = (theme, persist = false) => {
     root.dataset.theme = theme;
     root.style.colorScheme = theme;
     if (persist) {
-      localStorage.setItem(THEME_STORAGE_KEY, theme);
+      try {
+        storage?.setItem?.(THEME_STORAGE_KEY, theme);
+      } catch {
+        // Theme persistence is optional in restricted browser contexts.
+      }
     }
     if (button) {
       button.setAttribute("aria-label", theme === "dark" ? "切换到浅色模式" : "切换到深色模式");
@@ -15,18 +28,18 @@ export function initThemeToggle(button, root = document.documentElement) {
     }
   };
 
-  const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+  const savedTheme = readSavedTheme();
   setTheme(savedTheme || root.dataset.theme || getSystemTheme());
 
   button?.addEventListener("click", () => {
     const nextTheme = root.dataset.theme === "dark" ? "light" : "dark";
     root.classList.add("theme-transitioning");
     setTheme(nextTheme, true);
-    window.setTimeout(() => root.classList.remove("theme-transitioning"), 300);
+    windowRef?.setTimeout?.(() => root.classList.remove("theme-transitioning"), 300);
   });
 
   mediaQuery?.addEventListener("change", (event) => {
-    if (!localStorage.getItem(THEME_STORAGE_KEY)) {
+    if (!readSavedTheme()) {
       setTheme(event.matches ? "dark" : "light");
     }
   });

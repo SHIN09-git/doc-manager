@@ -20,21 +20,28 @@ export function hmacSha256(secret, value) {
   return crypto.createHmac("sha256", String(secret)).update(String(value)).digest("hex");
 }
 
-export function hashPassword(password) {
+export async function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("base64url");
-  const hash = crypto
-    .pbkdf2Sync(String(password), salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST)
-    .toString("base64url");
+  const hash = (await pbkdf2(String(password), salt, PASSWORD_ITERATIONS)).toString("base64url");
   return `pbkdf2$${PASSWORD_ITERATIONS}$${salt}$${hash}`;
 }
 
-export function verifyPassword(password, encoded) {
+export async function verifyPassword(password, encoded) {
   const [scheme, iterations, salt, expected] = String(encoded || "").split("$");
   if (scheme !== "pbkdf2" || !iterations || !salt || !expected) return false;
-  const actual = crypto
-    .pbkdf2Sync(String(password), salt, Number(iterations), PASSWORD_KEY_LENGTH, PASSWORD_DIGEST)
-    .toString("base64url");
+  const iterationCount = Number(iterations);
+  if (!Number.isInteger(iterationCount) || iterationCount < 10_000 || iterationCount > 1_000_000) return false;
+  const actual = (await pbkdf2(String(password), salt, iterationCount)).toString("base64url");
   return timingSafeEqual(actual, expected);
+}
+
+function pbkdf2(password, salt, iterations) {
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, iterations, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST, (error, key) => {
+      if (error) reject(error);
+      else resolve(key);
+    });
+  });
 }
 
 export function encryptSecret(value, secret) {

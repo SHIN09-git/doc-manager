@@ -151,14 +151,18 @@ test("cloudLogin and cloudRegister submit credentials and refresh cloud summarie
   const harness = createHarness({
     responses: {
       "/auth/login": { user: { email: "owner@example.com" }, email_verification_token: "verify-token" },
-      "/auth/register": { user: { email: "owner@example.com" }, organization: { id: "org-1" } },
+      "/auth/register": {
+        user: { email: "owner@example.com" },
+        organization: { id: "org-1" },
+        email_verification_token: "register-verify-token",
+      },
     },
   });
 
   await harness.controller.cloudLogin();
   await harness.controller.cloudRegister();
 
-  assert.equal(harness.els.cloudEmailTokenInput.value, "verify-token");
+  assert.equal(harness.els.cloudEmailTokenInput.value, "register-verify-token");
   assert.deepEqual(harness.requests.map((item) => item.path), ["/auth/login", "/auth/register"]);
   assert.equal(JSON.parse(harness.requests[0].options.body).password, "secret");
   assert.equal(JSON.parse(harness.requests[1].options.body).organizationName, "王老师工作区");

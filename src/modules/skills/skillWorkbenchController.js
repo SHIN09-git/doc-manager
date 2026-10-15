@@ -77,6 +77,10 @@ export function createSkillWorkbenchController(deps = {}) {
   function invokeFromCard(skillId) {
     const skill = state.styles.find((item) => item.id === skillId);
     if (!skill) return "";
+    if (skill.enabled === false) {
+      toast(skill.status === "draft" ? "请先测试并启用该执笔人" : "请先启用该执笔人", "warn");
+      return "";
+    }
     const mention = `@${skill.handle || normalizeHandle(skill.name)}`;
     const prompt = els.generatePrompt;
     const current = prompt.value.trimEnd();
@@ -102,6 +106,11 @@ export function createSkillWorkbenchController(deps = {}) {
   }
 
   function toggleEnabledFromCard(skillId, enabled) {
+    const current = state.styles.find((item) => item.id === skillId);
+    if (enabled && current?.status === "draft") {
+      toast("待测试草案不能启用，请先运行生成测试", "warn");
+      return null;
+    }
     const skill = updateBuildState(skillId, { enabled });
     if (!skill) return null;
     toast(`${enabled ? "已启用" : "已停用"} @${skill.handle}`);

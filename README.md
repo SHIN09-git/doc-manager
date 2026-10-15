@@ -6,11 +6,14 @@
 
 ## 核心能力
 
+新增内置“公文写作”执笔人：点击调用后选择文种、补充事项，即可使用公文写作 DNA 的结构与表达参考；生成后可查看“行文自检”。它仅限非商业使用，具体范围和许可见 [接入说明](assets/third-party/lieflat-gongwen/INTEGRATION.md) 与 [第三方许可](THIRD_PARTY_NOTICES.md)。原有自有代码的 MIT 许可不变，但不覆盖该第三方组件。
+
 | 模块 | 能做什么 |
 | --- | --- |
 | 文档管理 | 导入、拖拽、阅读、归类、标签、排序、垃圾箱恢复、真实文件夹关联 |
-| 文本编辑 | 手工编辑、查找替换与匹配数量提示、撤销、右键整理格式、段落 AI 改写、默认导出 Word |
-| AI 起草 | 用提示词生成新文档、插入到当前文档、覆盖当前文档，并支持 `@调用名` 调用执笔人 |
+| 文本编辑 | 手工编辑、查找替换与匹配数量提示、撤销、右键整理格式、段落 AI 改写、待填占位符清单（定位、批量填入） |
+| 导出 | 默认导出 Word；可切换为公文版式（GB/T 9704：小标宋标题、仿宋三号正文、每页 22 行 × 28 字、奇偶页码），导出前提醒未补全的占位符 |
+| AI 起草 | 用提示词生成新文档、插入到当前文档、覆盖当前文档，支持 `@调用名` 调用执笔人；可勾选文档库资料作为事实依据，并按执笔人的输入字段填写结构化信息 |
 | 执笔人工作台 | 以卡片方式展示可用执笔人，支持调用、启用、详情、测试、导入导出与重训 |
 | 执笔人生成 | 从多篇同类样本中提取结构、文风、句式、禁忌和审稿标准，生成可编辑、可测试、可迭代的写作能力 |
 | PPT 生成 | 从文本和资料生成原生 `.pptx`，支持公文汇报、校园培训、瑞士风、归藏风格和自定义风格 |
@@ -48,11 +51,10 @@ index.html
 
 ```bash
 npm install
-npm run build
-node e2e/serve-static.mjs
+npm start
 ```
 
-然后访问：
+该命令会构建前端、启动本地 API 与静态服务，并自动打开浏览器。手动访问地址：
 
 ```text
 http://127.0.0.1:4173/index.html
@@ -65,6 +67,22 @@ npm run build:static
 ```
 
 发布目录是 `dist/`。完整上线准备见 [WEBSITE_DEPLOYMENT.md](WEBSITE_DEPLOYMENT.md)。
+
+前后端分域部署时，构建静态站前必须设置公开 API 地址，例如：
+
+```bash
+PUBLIC_API_BASE_URL=https://api.example.com/api npm run build:static
+```
+
+### Windows 安装包
+
+生成包含 Node.js、本地 API、桌面快捷方式安装脚本的 Windows 自包含安装包：
+
+```bash
+npm run package:windows
+```
+
+产物位于 `release/`，包括单文件 `Setup.exe`、ZIP 安装包及各自的 SHA-256 校验文件。普通用户直接运行 `Setup.exe` 即可；ZIP 版本必须完整解压后再双击“安装摹文拟笔工作台.cmd”。安装失败会保留日志，升级和卸载默认保留用户数据目录。
 
 ### 可选云端后端
 
@@ -84,7 +102,7 @@ http://127.0.0.1:8787/api
 
 最新后台能力还包括：AI 失败记录可与系统错误使用同一跟进入口保存负责人、备注、优先级和 SLA；审计筛选与后台筛选偏好会按组织和用户保存到云端，并保留本地兜底；成本估算可由后端 `AI_COST_RATES` 统一计算，并在后台展示今日/本月预算摘要；人工确认版充值支持微信/支付宝收款码、用户提交付款备注/凭证、管理员确认后开通会员或发放 AI 额度。
 
-云端开发模式默认使用 `server/.data/db.json`。设置 `STORE_DRIVER=postgres` 和 `DATABASE_URL` 后，后端会使用 PostgreSQL，按 `server/migrations/*.sql` 执行迁移并记录 `migration_versions`。当前已把 `ai_usage` 历史查询、`audit_logs` 审计查询、`documents` 文档列表拆为表级只读 repository，并把后台偏好、AI 失败跟进、反馈处理、系统错误事件跟进、执笔人云端写入、AI 用量写入、额度扣减和人工确认充值等高价值路径推进到表级读写 repository；JSON Store 路径保持不变。生产模式会校验强密钥、`CORS_ORIGIN` 和邮件投递模式，避免默认配置直接上线。邮件发送可选择通用 HTTP webhook 或 Resend 适配，邮件服务商状态可通过 `POST /api/webhooks/email` 回调更新；支付渠道价格 ID 可通过 `PAYMENT_PLAN_PRICE_MAP` 映射到内部套餐；人工确认充值可配置 `MANUAL_PAYMENT_WECHAT_QR_URL`、`MANUAL_PAYMENT_ALIPAY_QR_URL`、`MANUAL_PAYMENT_PACKAGES`；备份可运行 `npm run server:backup`，配置 `BACKUP_ENCRYPTION_KEY` 后会输出 `.json.gcm` 加密备份，也可以配置 S3-compatible 对象存储上传副本。`npm run server:backup:verify -- <backup-file>` 可校验明文或加密备份结构，失败告警可接 `BACKUP_FAILURE_WEBHOOK_URL`。
+云端开发模式默认使用 `server/.data/db.json`。生产模式默认强制 PostgreSQL；只有显式确认 `ALLOW_PRODUCTION_JSON_STORE=true` 才允许临时例外。设置 `STORE_DRIVER=postgres` 和 `DATABASE_URL` 后，后端会按 `server/migrations/*.sql` 执行迁移并记录 `migration_versions`。当前已把 `ai_usage` 历史查询、`audit_logs` 审计查询、`documents` 文档列表拆为表级只读 repository，并把后台偏好、AI 失败跟进、反馈处理、系统错误事件跟进、执笔人云端写入、AI 用量写入、额度预留/结算/退款和人工确认充值等高价值路径推进到表级读写 repository；剩余通用写路径仍采用兼容快照机制，不建议直接承载高并发。生产模式还会校验强密钥、`CORS_ORIGIN`、HTTPS、AI Key 来源和邮件投递模式。邮件发送可选择通用 HTTP webhook 或 Resend 适配；人工确认充值可配置微信/支付宝收款码和套餐；备份可运行 `npm run server:backup`，并支持 AES-256-GCM 加密、S3-compatible 副本、结构校验和失败告警。
 
 ## 基本流程
 
@@ -123,6 +141,7 @@ http://127.0.0.1:8787/api
 
 - `Ctrl/Cmd+S`：在文档标题、正文、类型、文件夹或默认执笔人控件中保存当前文档。
 - `Ctrl/Cmd+Z`：在正文编辑框中调用工作台撤销。
+- `F8` / `Shift+F8`：在正文中跳到下一处 / 上一处待填占位符。
 - `Esc`：关闭右键菜单、`@执笔人` 提及面板、执笔人生成弹窗或响应式工具抽屉。
 
 ## 开发命令
@@ -137,9 +156,9 @@ npm run test:e2e
 
 当前测试覆盖：
 
-- 前端与核心单元测试：238 项
-- 后端服务与 repository 测试：103 项
-- 端到端测试：30 项
+- 前端与核心单元测试：315 项
+- 后端服务与 repository 测试：139 项
+- 端到端测试：32 项
 - GitHub Actions：自动运行 `npm run check` 和 `npm test`
 
 ## 项目结构
@@ -148,7 +167,8 @@ npm run test:e2e
 school-doc-manager/
 ├─ index.html              # 页面结构
 ├─ admin.html              # 独立管理后台页面
-├─ styles.css              # 设计 token 与界面样式
+├─ workbench.css           # 工作台唯一样式来源：设计 token、组件与响应式
+├─ styles.css              # 独立后台 admin.html 的历史样式（含 ui-refresh.css）
 ├─ app.js                  # 兼容层与页面装配
 ├─ src/
 │  ├─ main.js              # 打包入口
@@ -170,6 +190,7 @@ school-doc-manager/
 
 - 文档内容、执笔人、版本和配置主要存放在浏览器 IndexedDB。
 - localStorage 只作为轻量启动与兼容兜底。
+- 顶栏“备份”导出的本机工作区文件不包含本机 API Key 和云端登录态；“恢复”会替换本机文档、标签和执笔人，不覆盖云端数据。
 - 只有你主动调用 AI 时，相关提示词、样本摘要或生成内容才会发送到你配置的 AI 服务。
 - 本机直连模式下，API Key 保存在本机浏览器，不会提交到仓库。
 - 云端模式下，API Key 只在后端加密存储，前端和 API 响应只显示 `key_hint`。
@@ -183,6 +204,7 @@ school-doc-manager/
 - [CONTRIBUTING.md](CONTRIBUTING.md)：贡献指南
 - [TODO.md](TODO.md)：后续路线图
 - [REVIEW.md](REVIEW.md)：当前代码评审记录
+- [FUNCTIONAL_QA_REPORT.md](FUNCTIONAL_QA_REPORT.md)：全功能实测评分、修复清单与验证证据
 - [SECURITY.md](SECURITY.md)：安全与隐私说明
 - [CHANGELOG.md](CHANGELOG.md)：更新记录
 - [COMMERCIALIZATION_PLAN.md](COMMERCIALIZATION_PLAN.md)：商业化总体规划

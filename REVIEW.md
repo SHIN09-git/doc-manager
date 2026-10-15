@@ -1,5 +1,39 @@
 # 代码评审记录
 
+## 2026-07-17 全量代码、架构与功能 Review
+
+范围：主工作台、独立后台、文档与 Office 导入、执笔人、PPT、云端 API、认证、PostgreSQL/JSON Store、计费、部署脚本、静态站、Windows 安装包、单元测试与 Playwright。
+
+结论：没有发现阻断本地工作台发布的回归。已修复生产角色迁移缺失、跨实例快照陈旧、生产误用 JSON Store、静态路径穿越、Office 压缩包资源耗尽、备份无法恢复且携带本机密钥、保存成功提示失真、运行时 API 地址缺失、请求 URL 泄露敏感查询参数、同步密码哈希阻塞事件循环、Cookie 跨域策略不明确、启动与安装健康检查不兼容、下载结果误报成功、localStorage 被浏览器禁用时页面崩溃、执笔人高级测试选项未生效、云端信息层级不清，以及 AI 额度在模型返回后才扣减的并发窗口等问题。功能评分与操作证据见 `FUNCTIONAL_QA_REPORT.md`。
+
+本轮新增保护：
+
+- 本机工作区备份升级为 v2，排除 API Key 与云端会话，并提供有确认门禁的恢复入口；兼容 v1 备份。
+- `.docx` / `.pptx` 解压前检查条目数、总声明体积和 XML 单项体积，阻断异常压缩包。
+- 生产默认强制 PostgreSQL；PostgreSQL 请求读取刷新最新快照，并对临时运营数据执行有 advisory lock 的保留期清理。
+- 静态部署通过 `PUBLIC_API_BASE_URL` 生成 `runtime-config.js`；API 请求日志会隐藏 token、email 等敏感查询参数。
+- PBKDF2 改为异步线程池调用，并为未知账号执行固定 dummy hash，降低事件循环阻塞和时序枚举。
+- AI 购买额度改为调用前原子预留、成功结算、失败退款；退款失败会重试，1 小时以上悬空预留会自动恢复。
+- 执笔人关闭自动测试时只保存禁用草案，不能被调用或误启用；自定义测试输入会进入真实测试链路。
+- 云端主视图优先展示账号、同步、用量和账单，次要功能导航默认收起；文档类型控件恢复明确的无障碍名称。
+- 页面 DOM ID 唯一性、脚本绑定完整性、恢复备份、运行时配置、启动器、下载、主题、Office 安全和数据保留均有自动测试。
+
+验证结果：
+
+- `npm run check`：通过。
+- `npm test`：321 项前端/核心测试与 146 项后端测试通过。
+- `npm run test:e2e`：40 项浏览器回归通过，runner 正常退出。
+- `npm run build:static`：通过，发布目录为 `dist/`。
+- `npm audit`：77 个依赖，0 个已知漏洞。
+- `npm run package:windows`：通过，生成单文件 Setup、ZIP 与 SHA-256 校验文件。
+- 1440 / 900 / 390 像素视觉检查：无横向溢出、无页面脚本错误，状态提示固定可见。
+
+仍需阻断多人高并发正式上线的风险：
+
+- PostgreSQL 兼容通用写路径仍会全库读取、删除和重写；当前锁与刷新解决正确性，不解决吞吐和长事务问题。
+- 真实 PostgreSQL、多实例、邮件、正式模型、跨域 Cookie 和备份恢复仍需要预发布环境联调。
+- 前端 bundle 约 1.9 MB，且 `server/src/app.js`、`src/admin/adminPage.js`、`styles.css` 仍偏大，应渐进拆分而非一次性重写。
+
 ## 2026-06-09 人工充值付费套餐权益 Review
 
 范围：`server/src/billing/manualPaymentService.js`、`server/tests/manual-payment-service.test.js`、`test/deployScripts.test.js`。

@@ -1,5 +1,6 @@
 import mammoth from "mammoth";
 import JSZip from "jszip";
+import { assertOfficeArchiveSafe } from "./officeArchiveGuard.js";
 import { readTextFile } from "./textEncoding.js";
 import {
   isLegacyPresentationFile,
@@ -46,6 +47,7 @@ export function buildUnsupportedFileMessage(name = "") {
 
 async function readDocxFile(file) {
   const arrayBuffer = await file.arrayBuffer();
+  assertOfficeArchiveSafe(arrayBuffer, file.name);
   const options = createMammothOptions(arrayBuffer);
   const htmlResult = await mammoth.convertToHtml(options);
   const text = htmlToTextPreservingTables(htmlResult.value || "");
@@ -145,7 +147,9 @@ function normalizeDocxText(text) {
 }
 
 async function readPptxFile(file) {
-  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const arrayBuffer = await file.arrayBuffer();
+  assertOfficeArchiveSafe(arrayBuffer, file.name);
+  const zip = await JSZip.loadAsync(arrayBuffer);
   const slideFiles = Object.keys(zip.files)
     .filter((name) => /^ppt\/slides\/slide\d+\.xml$/i.test(name))
     .sort(compareNumberedPath);

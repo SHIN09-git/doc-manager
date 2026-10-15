@@ -4,6 +4,9 @@ services:
     runtime: static
     buildCommand: npm ci && npm run build:static
     staticPublishPath: ./dist
+    envVars:
+      - key: PUBLIC_API_BASE_URL
+        sync: false
 
   - type: web
     name: mowen-api
@@ -29,6 +32,8 @@ services:
         sync: false
       - key: SESSION_SECURE
         value: "true"
+      - key: SESSION_SAME_SITE
+        value: Lax
       - key: SESSION_SECRET
         generateValue: true
       - key: APP_ENCRYPTION_SECRET
@@ -37,6 +42,10 @@ services:
         value: live
       - key: AI_BASE_URL
         value: https://api.openai.com/v1
+      - key: AI_MODEL
+        sync: false
+      - key: ALLOW_ORGANIZATION_AI_KEYS
+        value: "true"
       - key: EMAIL_MODE
         value: webhook
       - key: EMAIL_PROVIDER

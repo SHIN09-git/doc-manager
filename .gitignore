@@ -20,5 +20,9 @@ coverage/
 playwright-report/
 test-results/
 dist/
+release/
+output/
+.workbuddy/
+.openai/hosting.json
 
 *.log

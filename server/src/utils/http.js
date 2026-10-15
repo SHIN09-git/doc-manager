@@ -61,15 +61,23 @@ function safeDecodeCookieValue(value) {
 }
 
 export function createSessionCookie(name, value, options = {}) {
+  const sameSite = normalizeCookieSameSite(options.sameSite);
   const parts = [
     `${name}=${encodeURIComponent(value)}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
+    `SameSite=${sameSite}`,
     `Max-Age=${Math.floor(options.maxAgeSeconds || 60 * 60 * 24 * 14)}`,
   ];
   if (options.secure) parts.push("Secure");
   return parts.join("; ");
+}
+
+function normalizeCookieSameSite(value) {
+  const normalized = String(value || "Lax").trim().toLowerCase();
+  if (normalized === "strict") return "Strict";
+  if (normalized === "none") return "None";
+  return "Lax";
 }
 
 export function clearSessionCookie(name, options = {}) {
@@ -77,6 +85,7 @@ export function clearSessionCookie(name, options = {}) {
 }
 
 export function setSecurityHeaders(response, env, request = null) {
+  response.setHeader("Cache-Control", "no-store");
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("Referrer-Policy", "no-referrer");
   response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
