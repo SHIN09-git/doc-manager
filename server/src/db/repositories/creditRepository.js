@@ -21,6 +21,153 @@ const CREDIT_LEDGER_COLUMNS = [
   "created_at",
 ];
 
+const AI_CREDIT_RESERVATION_COLUMNS = [
+  "id",
+  "organization_id",
+  "user_id",
+  "usage_id",
+  "amount",
+  "balance_after",
+  "status",
+  "created_at",
+  "updated_at",
+];
+
+export async function reserveCreditsForAi(pool, {
+  organizationId,
+  userId,
+  amount = 1,
+  now = new Date().toISOString(),
+} = {}) {
+  if (!organizationId) throw new Error("organizationId is required");
+  if (!userId) throw new Error("userId is required");
+  const creditAmount = Math.max(1, Math.floor(Number(amount || 1)));
+  const existing = await ensureCreditAccount(pool, { organizationId, userId, now });
+  const updated = await pool.query(
+    `
+      update credit_accounts
+      set balance = balance - $3,
+          updated_at = $4
+      where organization_id = $1 and user_id = $2 and balance >= $3
+      returning ${CREDIT_ACCOUNT_COLUMNS.join(", ")}
+    `,
+    [organizationId, userId, creditAmount, now],
+  );
+  const account = updated.rows[0] ? normalizeCreditAccountRow(updated.rows[0]) : existing;
+  if (!updated.rows[0]) {
+    return { account, reservation: null, skipped: true, amount: creditAmount };
+  }
+  const result = await pool.query(
+    `
+      insert into ai_credit_reservations (${AI_CREDIT_RESERVATION_COLUMNS.join(", ")})
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      returning ${AI_CREDIT_RESERVATION_COLUMNS.join(", ")}
+    `,
+    [
+      createId("acr"),
+      organizationId,
+      userId,
+      null,
+      creditAmount,
+      account.balance,
+      "reserved",
+      now,
+      now,
+    ],
+  );
+  return {
+    account,
+    reservation: normalizeCreditReservationRow(result.rows[0]),
+    skipped: false,
+    amount: creditAmount,
+  };
+}
+
+export async function settleAiCreditReservation(pool, {
+  organizationId,
+  userId,
+  reservationId,
+  usageId,
+  now = new Date().toISOString(),
+} = {}) {
+  if (!usageId) throw new Error("usageId is required");
+  const reservation = await lockCreditReservation(pool, { organizationId, userId, reservationId });
+  if (reservation.status === "settled") {
+    return { reservation, ledger: null, alreadySettled: true };
+  }
+  if (reservation.status !== "reserved") {
+    throw new Error(`AI credit reservation ${reservationId} cannot be settled from ${reservation.status}`);
+  }
+  const updated = await pool.query(
+    `
+      update ai_credit_reservations
+      set usage_id = $4,
+          status = 'settled',
+          updated_at = $5
+      where id = $1 and organization_id = $2 and user_id = $3 and status = 'reserved'
+      returning ${AI_CREDIT_RESERVATION_COLUMNS.join(", ")}
+    `,
+    [reservationId, organizationId, userId, usageId, now],
+  );
+  if (!updated.rows[0]) throw new Error(`AI credit reservation ${reservationId} was not settled`);
+  const settled = normalizeCreditReservationRow(updated.rows[0]);
+  const ledger = await insertCreditLedger(pool, {
+    organizationId,
+    userId,
+    orderId: null,
+    usageId,
+    direction: "out",
+    amount: settled.amount,
+    balanceAfter: settled.balance_after,
+    reason: "ai_quota_overage",
+    now,
+  });
+  return { reservation: settled, ledger, alreadySettled: false };
+}
+
+export async function refundAiCreditReservation(pool, {
+  organizationId,
+  userId,
+  reservationId,
+  now = new Date().toISOString(),
+} = {}) {
+  const reservation = await lockCreditReservation(pool, { organizationId, userId, reservationId });
+  if (reservation.status === "refunded") {
+    return { reservation, account: null, alreadyRefunded: true, skipped: false };
+  }
+  if (reservation.status !== "reserved") {
+    return { reservation, account: null, alreadyRefunded: false, skipped: true };
+  }
+  const accountResult = await pool.query(
+    `
+      update credit_accounts
+      set balance = balance + $3,
+          updated_at = $4
+      where organization_id = $1 and user_id = $2
+      returning ${CREDIT_ACCOUNT_COLUMNS.join(", ")}
+    `,
+    [organizationId, userId, reservation.amount, now],
+  );
+  if (!accountResult.rows[0]) throw new Error(`Credit account missing for reservation ${reservationId}`);
+  const updated = await pool.query(
+    `
+      update ai_credit_reservations
+      set status = 'refunded',
+          updated_at = $4
+      where id = $1 and organization_id = $2 and user_id = $3 and status = 'reserved'
+      returning ${AI_CREDIT_RESERVATION_COLUMNS.join(", ")}
+    `,
+    [reservationId, organizationId, userId, now],
+  );
+  if (!updated.rows[0]) throw new Error(`AI credit reservation ${reservationId} was not refunded`);
+  return {
+    reservation: normalizeCreditReservationRow(updated.rows[0]),
+    account: normalizeCreditAccountRow(accountResult.rows[0]),
+    alreadyRefunded: false,
+    skipped: false,
+  };
+}
+
 export async function spendCreditsForUsage(pool, {
   organizationId,
   userId,
@@ -162,6 +309,23 @@ async function insertCreditLedger(pool, {
   return normalizeCreditLedgerRow(result.rows[0]);
 }
 
+async function lockCreditReservation(pool, { organizationId, userId, reservationId }) {
+  if (!organizationId) throw new Error("organizationId is required");
+  if (!userId) throw new Error("userId is required");
+  if (!reservationId) throw new Error("reservationId is required");
+  const result = await pool.query(
+    `
+      select ${AI_CREDIT_RESERVATION_COLUMNS.join(", ")}
+      from ai_credit_reservations
+      where id = $1 and organization_id = $2 and user_id = $3
+      for update
+    `,
+    [reservationId, organizationId, userId],
+  );
+  if (!result.rows[0]) throw new Error(`AI credit reservation ${reservationId} not found`);
+  return normalizeCreditReservationRow(result.rows[0]);
+}
+
 function normalizeCreditAccountRow(row) {
   return {
     ...row,
@@ -178,6 +342,18 @@ function normalizeCreditLedgerRow(row) {
     amount: Number(row.amount || 0),
     balance_after: Number(row.balance_after || 0),
     created_at: normalizeDateValue(row.created_at),
+  };
+}
+
+function normalizeCreditReservationRow(row) {
+  return {
+    ...row,
+    usage_id: row.usage_id || null,
+    amount: Number(row.amount || 0),
+    balance_after: Number(row.balance_after || 0),
+    status: String(row.status || "reserved"),
+    created_at: normalizeDateValue(row.created_at),
+    updated_at: normalizeDateValue(row.updated_at),
   };
 }
 

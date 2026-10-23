@@ -108,7 +108,9 @@ export function createCloudActionsController(deps = {}) {
     return withLoading(els.cloudExportDataBtn, "导出中", async () => {
       const data = await cloudRequest("/me/export", { method: "GET" });
       const date = dateProvider().toISOString().slice(0, 10);
-      downloadBlob(`mowen-cloud-export-${date}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
+      if (downloadBlob(`mowen-cloud-export-${date}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8") === false) {
+        throw new Error("浏览器未能开始下载，请检查下载权限后重试");
+      }
       toast("我的云端数据已导出");
       return data;
     });

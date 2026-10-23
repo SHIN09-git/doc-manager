@@ -9,12 +9,14 @@ export function loadEnv(source = process.env) {
     host: source.HOST || "127.0.0.1",
     port: toNumber(source.PORT, 8787),
     storeDriver: source.STORE_DRIVER || "json",
+    allowProductionJsonStore: source.ALLOW_PRODUCTION_JSON_STORE === "true",
     databaseUrl: source.DATABASE_URL || "",
     dataDir,
     dataFile: path.join(dataDir, "db.json"),
     encryptionSecret: source.APP_ENCRYPTION_SECRET || "dev-only-change-this-commercial-api-encryption-secret",
     sessionSecret: source.SESSION_SECRET || "dev-only-change-this-commercial-api-session-secret",
     sessionSecure: source.SESSION_SECURE === "true",
+    sessionSameSite: normalizeSameSite(source.SESSION_SAME_SITE || "Lax"),
     corsOrigin: source.CORS_ORIGIN
       ? normalizeCorsOrigin(source.CORS_ORIGIN)
       : (nodeEnv === "production" ? "" : "http://127.0.0.1:4173"),
@@ -139,6 +141,9 @@ function validateEnv(env) {
   if (!["disabled", "s3-compatible"].includes(env.backupObjectStorageMode)) {
     throw new Error("BACKUP_OBJECT_STORAGE_MODE must be disabled or s3-compatible");
   }
+  if (env.sessionSameSite === "None" && !env.sessionSecure) {
+    throw new Error("SESSION_SECURE=true is required when SESSION_SAME_SITE=None");
+  }
   if (env.backupObjectStorageMode === "s3-compatible") {
     if (!env.backupObjectStorageEndpoint) throw new Error("BACKUP_OBJECT_STORAGE_ENDPOINT is required when BACKUP_OBJECT_STORAGE_MODE=s3-compatible");
     if (!env.backupObjectStorageBucket) throw new Error("BACKUP_OBJECT_STORAGE_BUCKET is required when BACKUP_OBJECT_STORAGE_MODE=s3-compatible");
@@ -157,6 +162,9 @@ function validateEnv(env) {
   if (env.nodeEnv !== "production") return;
   assertStrongSecret("APP_ENCRYPTION_SECRET", env.encryptionSecret, "dev-only-change-this-commercial-api-encryption-secret");
   assertStrongSecret("SESSION_SECRET", env.sessionSecret, "dev-only-change-this-commercial-api-session-secret");
+  if (env.storeDriver !== "postgres" && !env.allowProductionJsonStore) {
+    throw new Error("STORE_DRIVER=postgres is required in production unless ALLOW_PRODUCTION_JSON_STORE=true is explicitly set");
+  }
   if (env.emailMode === "log") {
     throw new Error("EMAIL_MODE=webhook is required in production");
   }
@@ -174,6 +182,9 @@ function validateEnv(env) {
   }
   if (!isHttpsUrl(env.appUrl)) {
     throw new Error("APP_URL must be an HTTPS URL in production");
+  }
+  if (env.aiProxyMode !== "live") {
+    throw new Error("AI_PROXY_MODE=live is required in production");
   }
   if (env.aiProxyMode === "live") {
     assertHttpsUrl("AI_BASE_URL", env.aiBaseUrl);
@@ -211,6 +222,14 @@ function validateEnv(env) {
   assertOptionalHttpsUrl("MANUAL_PAYMENT_WECHAT_QR_URL", env.manualPaymentWechatQrUrl);
   assertOptionalHttpsUrl("MANUAL_PAYMENT_ALIPAY_QR_URL", env.manualPaymentAlipayQrUrl);
   assertOptionalHttpsUrl("BACKUP_FAILURE_WEBHOOK_URL", env.backupFailureWebhookUrl);
+}
+
+function normalizeSameSite(value) {
+  const normalized = String(value || "Lax").trim().toLowerCase();
+  if (normalized === "lax") return "Lax";
+  if (normalized === "strict") return "Strict";
+  if (normalized === "none") return "None";
+  throw new Error("SESSION_SAME_SITE must be Lax, Strict, or None");
 }
 
 function assertStrongSecret(name, value, defaultValue) {

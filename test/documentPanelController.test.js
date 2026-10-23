@@ -11,6 +11,9 @@ function element(initial = {}) {
     addEventListener(type, handler) {
       this.listeners[type] = handler;
     },
+    click() {
+      this.clickCount = (this.clickCount || 0) + 1;
+    },
   };
 }
 
@@ -26,6 +29,8 @@ function createHarness(options = {}) {
     docList: element(),
     exportDocBtn: element(),
     backupBtn: element(),
+    restoreBackupBtn: element(),
+    restoreBackupInput: element(),
     ...options.els,
   };
   const documentManager = {
@@ -86,6 +91,11 @@ function createHarness(options = {}) {
       calls.push(["backup"]);
       return "backup.json";
     },
+    restoreWorkspaceBackupFile: async (file) => {
+      calls.push(["restore-backup", file?.name]);
+      if (options.restoreError) throw new Error(options.restoreError);
+      return { docCount: 1, writerCount: 1 };
+    },
     ...options.documentManager,
   };
   let trashBound = 0;
@@ -125,6 +135,7 @@ function createHarness(options = {}) {
 
 test("document panel binds top actions, drops, and trash controller", async () => {
   const file = { name: "通知.docx" };
+  const backupFile = { name: "backup.json" };
   const harness = createHarness();
 
   harness.controller.bindEvents();
@@ -136,6 +147,10 @@ test("document panel binds top actions, drops, and trash controller", async () =
   await harness.els.importInput.listeners.change({ target: { files: [file], value: "chosen" } });
   await harness.els.exportDocBtn.listeners.click();
   harness.els.backupBtn.listeners.click();
+  harness.els.restoreBackupBtn.listeners.click();
+  await harness.els.restoreBackupInput.listeners.change({ target: { files: [backupFile], value: "chosen" } });
+
+  assert.equal(harness.els.restoreBackupInput.clickCount, 1);
 
   assert.deepEqual(harness.calls.filter((call) => call[0] !== "drop-bound"), [
     ["view", "editor"],
@@ -143,6 +158,7 @@ test("document panel binds top actions, drops, and trash controller", async () =
     ["import", ["通知.docx"]],
     ["export"],
     ["backup"],
+    ["restore-backup", "backup.json"],
   ]);
 });
 
@@ -209,4 +225,15 @@ test("exportCurrentDocument reports friendly errors", async () => {
   assert.equal(result, null);
   assert.deepEqual(harness.calls, [["export"]]);
   assert.deepEqual(harness.toasts, [{ message: "导出 Word 文档失败：生成失败", type: "error" }]);
+});
+
+test("restoreWorkspaceBackup clears the picker and reports friendly errors", async () => {
+  const harness = createHarness({ restoreError: "备份损坏" });
+  const input = { files: [{ name: "broken.json" }], value: "chosen" };
+
+  const result = await harness.controller.restoreWorkspaceBackup({ target: input });
+
+  assert.equal(result, null);
+  assert.equal(input.value, "");
+  assert.deepEqual(harness.toasts, [{ message: "恢复备份失败：备份损坏", type: "error" }]);
 });

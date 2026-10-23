@@ -17,6 +17,7 @@ export function createDocumentEditor(deps) {
     showSaveStatus = () => {},
     toast,
   } = deps;
+  let saveSequence = 0;
 
   function queueEditorSave() {
     const doc = getCurrentDoc();
@@ -34,25 +35,35 @@ export function createDocumentEditor(deps) {
     const doc = getCurrentDoc();
     if (!doc) {
       showSaveStatus("");
-      return;
+      return Promise.resolve(false);
     }
     if (doc.deletedAt) {
       showSaveStatus("在垃圾箱中", { title: "请先恢复文档再编辑或保存" });
-      return;
+      return Promise.resolve(false);
     }
+    showSaveStatus("保存中");
     doc.title = els.titleInput.value.trim() || "未命名文档";
-    doc.type = els.typeSelect.value || "custom";
+    const nextType = els.typeSelect.value || "custom";
+    if (doc.type !== nextType) doc.writingGenre = "";
+    doc.type = nextType;
     doc.folderId = els.folderSelect.value || state.folders[0]?.id || createDefaultFolder();
     doc.styleId = els.styleSelect.value || "";
     doc.content = els.contentEditor.value;
     doc.updatedAt = now();
     ui.selectedDocId = doc.id;
-    persist();
-    showSaveStatus("已保存", { transient: true, title: `保存位置：${getDocumentLocation(doc)}` });
+    const sequence = ++saveSequence;
+    const persistence = Promise.resolve(persist());
     eventBus.emit(EVENTS.RENDER_DOC_LIST);
-    if (showToast) {
-      showSaveLocation(doc);
-    }
+    return persistence.then((saved) => {
+      if (sequence !== saveSequence) return saved !== false;
+      if (saved === false) {
+        showSaveStatus("未保存", { title: "本机存储写入失败，请导出备份后重试" });
+        return false;
+      }
+      showSaveStatus("已保存", { transient: true, title: `保存位置：${getDocumentLocation(doc)}` });
+      if (showToast) showSaveLocation(doc);
+      return true;
+    });
   }
 
   function showSaveLocation(doc) {

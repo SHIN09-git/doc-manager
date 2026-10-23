@@ -4,12 +4,17 @@ import { loadEnv } from "../src/config/env.js";
 
 const PRODUCTION_ENV = {
   NODE_ENV: "production",
+  STORE_DRIVER: "postgres",
+  DATABASE_URL: "postgres://mowen:test@db.example.com:5432/mowen",
   APP_ENCRYPTION_SECRET: "production-encryption-secret-with-enough-length",
   SESSION_SECRET: "production-session-secret-with-enough-length",
   APP_URL: "https://mowen.example.com/index.html",
   CORS_ORIGIN: "https://mowen.example.com",
   EMAIL_MODE: "webhook",
   EMAIL_WEBHOOK_URL: "https://hooks.example.com/mowen-email",
+  AI_PROXY_MODE: "live",
+  AI_MODEL: "gpt-test",
+  PLATFORM_OPENAI_API_KEY: "sk-production-key",
 };
 
 test("APP_BASE_URL can configure the public app url alias", () => {
@@ -74,6 +79,35 @@ test("production mode requires secure session cookies", () => {
   assert.throws(() => loadEnv(PRODUCTION_ENV), /SESSION_SECURE=true/);
 });
 
+test("cross-site session cookies require Secure and normalize the policy", () => {
+  assert.throws(
+    () => loadEnv({ SESSION_SAME_SITE: "None" }),
+    /SESSION_SECURE=true/,
+  );
+  assert.equal(loadEnv({ SESSION_SAME_SITE: "strict" }).sessionSameSite, "Strict");
+  assert.equal(loadEnv({ SESSION_SAME_SITE: "none", SESSION_SECURE: "true" }).sessionSameSite, "None");
+  assert.throws(() => loadEnv({ SESSION_SAME_SITE: "unknown" }), /Lax, Strict, or None/);
+});
+
+test("production mode requires PostgreSQL unless JSON storage is explicitly acknowledged", () => {
+  assert.throws(() => loadEnv({
+    ...PRODUCTION_ENV,
+    STORE_DRIVER: "json",
+    DATABASE_URL: "",
+    SESSION_SECURE: "true",
+  }), /STORE_DRIVER=postgres is required/);
+
+  const env = loadEnv({
+    ...PRODUCTION_ENV,
+    STORE_DRIVER: "json",
+    DATABASE_URL: "",
+    ALLOW_PRODUCTION_JSON_STORE: "true",
+    SESSION_SECURE: "true",
+  });
+  assert.equal(env.storeDriver, "json");
+  assert.equal(env.allowProductionJsonStore, true);
+});
+
 test("production mode requires an explicit CORS origin", () => {
   const { CORS_ORIGIN, ...withoutCorsOrigin } = PRODUCTION_ENV;
   assert.throws(() => loadEnv({
@@ -128,44 +162,46 @@ test("production live AI mode requires an HTTPS AI base url", () => {
   assert.throws(() => loadEnv({
     ...PRODUCTION_ENV,
     SESSION_SECURE: "true",
-    AI_PROXY_MODE: "live",
     AI_BASE_URL: "http://api.example.com/v1",
   }), /AI_BASE_URL must be an HTTPS URL/);
 });
 
-test("production live AI mode requires an explicit key source", () => {
+test("production mode requires live AI proxy", () => {
   assert.throws(() => loadEnv({
     ...PRODUCTION_ENV,
     SESSION_SECURE: "true",
-    AI_PROXY_MODE: "live",
-    AI_MODEL: "gpt-test",
+    AI_PROXY_MODE: "mock",
+  }), /AI_PROXY_MODE=live is required/);
+});
+
+test("production live AI mode requires an explicit key source", () => {
+  const { PLATFORM_OPENAI_API_KEY, ...withoutKeySource } = PRODUCTION_ENV;
+  assert.throws(() => loadEnv({
+    ...withoutKeySource,
+    SESSION_SECURE: "true",
   }), /PLATFORM_OPENAI_API_KEY or ALLOW_ORGANIZATION_AI_KEYS=true/);
 
   const platformKeyEnv = loadEnv({
     ...PRODUCTION_ENV,
     SESSION_SECURE: "true",
-    AI_PROXY_MODE: "live",
-    AI_MODEL: "gpt-test",
     PLATFORM_OPENAI_API_KEY: "sk-production-key",
   });
   assert.equal(platformKeyEnv.platformOpenAiKey, "sk-production-key");
 
+  const { PLATFORM_OPENAI_API_KEY: _removedPlatformKey, ...organizationKeySource } = PRODUCTION_ENV;
   const organizationKeyEnv = loadEnv({
-    ...PRODUCTION_ENV,
+    ...organizationKeySource,
     SESSION_SECURE: "true",
-    AI_PROXY_MODE: "live",
-    AI_MODEL: "gpt-test",
     ALLOW_ORGANIZATION_AI_KEYS: "true",
   });
   assert.equal(organizationKeyEnv.allowOrganizationAiKeys, true);
 });
 
 test("production live AI mode requires a default model", () => {
+  const { AI_MODEL, ...withoutModel } = PRODUCTION_ENV;
   assert.throws(() => loadEnv({
-    ...PRODUCTION_ENV,
+    ...withoutModel,
     SESSION_SECURE: "true",
-    AI_PROXY_MODE: "live",
-    PLATFORM_OPENAI_API_KEY: "sk-production-key",
   }), /AI_MODEL is required/);
 });
 

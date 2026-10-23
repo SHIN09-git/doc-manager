@@ -290,6 +290,30 @@
   border-color: color-mix(in srgb, var(--accent) 18%, var(--line)) !important;
 }
 
+.feature-map-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: var(--font-semibold);
+  list-style-position: inside;
+}
+
+.feature-map-summary small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: var(--font-normal);
+}
+
+.feature-map-section[open] .feature-map-summary {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
 .feature-map-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1782,7 +1806,15 @@ button:disabled {
 }
 
 .type-field {
+  display: grid;
+  gap: 6px;
   min-width: 0;
+}
+
+.type-field > label {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
 }
 
 .type-control {

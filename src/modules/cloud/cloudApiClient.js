@@ -1,3 +1,5 @@
+import { getRuntimeApiBaseUrl } from "../../config/runtimeConfig.js";
+
 export const LOCAL_CLOUD_API_BASE_URL = "http://127.0.0.1:8787/api";
 
 export function isLocalDevelopmentHost(hostname) {
@@ -5,6 +7,8 @@ export function isLocalDevelopmentHost(hostname) {
 }
 
 export function getDefaultCloudApiBaseUrl(location = globalThis.window?.location) {
+  const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+  if (runtimeApiBaseUrl) return runtimeApiBaseUrl;
   if (!location || !["http:", "https:"].includes(location.protocol)) {
     return LOCAL_CLOUD_API_BASE_URL;
   }

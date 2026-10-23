@@ -1,4 +1,5 @@
 import { EVENTS } from "../../core/eventBus.js";
+import { MAX_SKILL_TRAINING_EXAMPLES } from "../../config/constants.js";
 import { clone, createId, escapeHtml, normalizeHandle, now } from "../../utils/helpers.js";
 
 export const BUILT_IN_SKILL_CATEGORIES = ["公文写作", "文风格式", "材料整理", "段落改写", "自定义"];
@@ -60,6 +61,7 @@ export function createSkillBuilderModalController(deps = {}) {
     els.skillDescriptionInput?.addEventListener("input", () => {
       if (ui.editingStyle) ui.editingStyle.description = els.skillDescriptionInput.value;
     });
+    els.skillAutoTestInput?.addEventListener("change", updateAutoTestState);
     els.addSourceDocsToSkillBtn?.addEventListener("click", addSelectedDocsAsExamples);
     els.skillEnabledInput?.addEventListener("change", () => {
       if (ui.editingStyle) ui.editingStyle.enabled = els.skillEnabledInput.checked;
@@ -87,6 +89,9 @@ export function createSkillBuilderModalController(deps = {}) {
     eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
     renderDocumentPicker();
     updateCategoryCustomState(ui.editingStyle.category);
+    if (els.skillAutoTestInput) els.skillAutoTestInput.checked = true;
+    if (els.skillBuilderTestPrompt) els.skillBuilderTestPrompt.value = "";
+    updateAutoTestState();
     if (els.skillBuilderModalTitle) {
       els.skillBuilderModalTitle.textContent = skill ? `重训：${skill.name || "未命名执笔人"}` : "新建执笔人";
     }
@@ -151,9 +156,23 @@ export function createSkillBuilderModalController(deps = {}) {
     if (els.skillCustomCategoryField) els.skillCustomCategoryField.hidden = !shouldUseCustom;
   }
 
+  function updateAutoTestState() {
+    if (!els.skillBuilderTestPrompt) return;
+    const enabled = els.skillAutoTestInput?.checked !== false;
+    els.skillBuilderTestPrompt.disabled = !enabled;
+    els.skillBuilderTestPrompt.setAttribute?.("aria-disabled", String(!enabled));
+  }
+
   function renderDocumentPicker() {
     if (!els.skillSourceDocSelect) return;
     const docs = (state.docs || []).filter((doc) => !doc.deletedAt && String(doc.content || "").trim());
+    const exampleCount = Array.isArray(ui.editingStyle?.examples) ? ui.editingStyle.examples.length : 0;
+    if (exampleCount >= MAX_SKILL_TRAINING_EXAMPLES) {
+      els.skillSourceDocSelect.innerHTML = `<option disabled>训练样本已达到 ${MAX_SKILL_TRAINING_EXAMPLES} 篇上限</option>`;
+      els.skillSourceDocSelect.disabled = true;
+      if (els.addSourceDocsToSkillBtn) els.addSourceDocsToSkillBtn.disabled = true;
+      return;
+    }
     if (docs.length === 0) {
       els.skillSourceDocSelect.innerHTML = '<option disabled>文档库暂无可用正文</option>';
       els.skillSourceDocSelect.disabled = true;
@@ -172,15 +191,21 @@ export function createSkillBuilderModalController(deps = {}) {
       toast("请先打开执笔人生成窗口", "warn");
       return 0;
     }
+    ui.editingStyle.examples = Array.isArray(ui.editingStyle.examples) ? ui.editingStyle.examples : [];
+    const remainingSlots = MAX_SKILL_TRAINING_EXAMPLES - ui.editingStyle.examples.length;
+    if (remainingSlots <= 0) {
+      toast(`每个执笔人最多保留 ${MAX_SKILL_TRAINING_EXAMPLES} 篇训练样本，请先移除旧样本`, "warn");
+      return 0;
+    }
     const selectedIds = Array.from(els.skillSourceDocSelect?.selectedOptions || []).map((option) => option.value);
     if (selectedIds.length === 0) {
       toast("请先选择要加入训练的文档", "warn");
       return 0;
     }
-    ui.editingStyle.examples = Array.isArray(ui.editingStyle.examples) ? ui.editingStyle.examples : [];
     const existingSourceIds = new Set(ui.editingStyle.examples.map((example) => example.sourceDocId).filter(Boolean));
     let addedCount = 0;
     selectedIds.forEach((docId) => {
+      if (addedCount >= remainingSlots) return;
       if (existingSourceIds.has(docId)) return;
       const doc = state.docs.find((item) => item.id === docId && !item.deletedAt);
       if (!doc || !String(doc.content || "").trim()) return;
@@ -201,7 +226,8 @@ export function createSkillBuilderModalController(deps = {}) {
     }
     renderStyleExamples();
     renderSkillDetailExamples();
-    toast(`已加入 ${addedCount} 份文档库样本`);
+    const skippedByLimit = selectedIds.length > addedCount && ui.editingStyle.examples.length >= MAX_SKILL_TRAINING_EXAMPLES;
+    toast(`已加入 ${addedCount} 份文档库样本${skippedByLimit ? `，其余已因 ${MAX_SKILL_TRAINING_EXAMPLES} 篇上限跳过` : ""}`);
     return addedCount;
   }
 
@@ -227,6 +253,7 @@ export function createSkillBuilderModalController(deps = {}) {
     handleKeydown,
     getSelectedCategory,
     updateCategoryCustomState,
+    updateAutoTestState,
     renderDocumentPicker,
     addSelectedDocsAsExamples,
   };

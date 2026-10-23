@@ -110,7 +110,13 @@ export function createSkillDetailController(deps = {}) {
         style.qualityReport || {},
         outputs.report,
       );
+      const saveAllowed = outputs.report?.overall_result?.save_allowed !== false &&
+        outputs.report?.overall_result?.passed !== false;
+      style.status = saveAllowed ? "ready" : "draft";
+      if (!saveAllowed) style.enabled = false;
       commitSkillToState(style);
+      eventBus.emit(EVENTS.RENDER_STYLE_SELECT);
+      eventBus.emit(EVENTS.RENDER_STYLE_LIST);
       eventBus.emit(EVENTS.RENDER_SKILL_TEST);
       eventBus.emit(EVENTS.RENDER_SKILL_QUALITY);
       toast(`测试结果已保存到：${getSkillLocation(ui.editingStyle)} / 测试记录`);

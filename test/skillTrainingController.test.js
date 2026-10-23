@@ -60,11 +60,13 @@ function createHarness(options = {}) {
           this.focusCount += 1;
         },
       },
+      skillAutoTestInput: { checked: options.autoTest !== false },
+      skillBuilderTestPrompt: { value: options.testPrompt || "" },
     },
     eventBus: { emit: (eventName) => events.push(eventName) },
     skillBuilder: {
       buildSkillWithAiChain: async (saved, progress, taskOptions) => {
-        calls.push(["build", saved.id, Boolean(taskOptions.signal)]);
+        calls.push(["build", saved.id, Boolean(taskOptions.signal), taskOptions.runTest, taskOptions.testInput]);
         progress.update("AI 构建中", 50);
         if (options.buildError) throw options.buildError;
         return outputs;
@@ -135,6 +137,26 @@ test("importStyleExamples imports text samples and clears the file input", async
   assert.match(harness.toasts.at(-1).message, /已添加 1 份示范/);
 });
 
+test("training sample imports enforce the eight-document limit", async () => {
+  const existing = Array.from({ length: 8 }, (_, index) => ({ id: `ex-${index}`, name: `${index}.txt`, text: "正文" }));
+  const harness = createHarness({ style: { id: "skill-1", name: "通知", examples: existing } });
+
+  const result = await harness.controller.importStyleExampleFiles([textFile("第九篇.txt", "正文")]);
+
+  assert.equal(result.importedCount, 0);
+  assert.equal(harness.style.examples.length, 8);
+  assert.match(harness.toasts.at(-1).message, /最多保留 8 篇/);
+});
+
+test("writer generation refuses legacy drafts with more than eight samples", async () => {
+  const examples = Array.from({ length: 9 }, (_, index) => ({ id: `ex-${index}`, name: `${index}.txt`, text: "正文" }));
+  const harness = createHarness({ style: { id: "skill-1", name: "通知", examples } });
+
+  assert.equal(await harness.controller.summarizeStyle(), null);
+  assert.equal(harness.calls.some((item) => item[0] === "build"), false);
+  assert.match(harness.toasts.at(-1).message, /超过 8 篇/);
+});
+
 test("importStyleDropFiles splits skill packages from training examples", async () => {
   const harness = createHarness({ style: { id: "skill-1", name: "通知", examples: [] } });
 
@@ -195,6 +217,7 @@ test("summarizeStyle runs the build chain, saves a ready writer, and cleans acti
   assert.equal(committed.description, "正式通知");
   assert.equal(committed.versions.length, 1);
   assert.equal(committed.lastTest.prompt, "AI 自动生成的执笔人测试");
+  assert.deepEqual(harness.calls.find((item) => item[0] === "build").slice(2), [true, true, ""]);
   assert.equal(harness.ui.selectedSkillCardId, "skill-1");
   assert.equal(harness.ui.activeTasks["skill-build:skill-1"], undefined);
   assert.deepEqual(harness.events, [EVENTS.RENDER_STYLE_EDITOR]);
@@ -203,6 +226,30 @@ test("summarizeStyle runs the build chain, saves a ready writer, and cleans acti
   assert.ok(harness.calls.some((item) => item[0] === "tab" && item[1] === "style"));
   assert.ok(harness.progressUpdates.some((item) => item.message === "正在保存执笔人版本"));
   assert.match(harness.toasts.at(-1).message, /已生成 v1/);
+});
+
+test("summarizeStyle saves an untested build as a disabled draft", async () => {
+  const style = {
+    id: "skill-1",
+    name: "学校通知",
+    handle: "notice",
+    enabled: true,
+    examples: [
+      { id: "ex-1", name: "样本一.txt", text: "通知正文一" },
+      { id: "ex-2", name: "样本二.txt", text: "通知正文二" },
+    ],
+    versions: [],
+  };
+  const harness = createHarness({ style, autoTest: false, testPrompt: "请起草一份值班通知" });
+
+  const committed = await harness.controller.summarizeStyle();
+
+  assert.equal(committed.status, "draft");
+  assert.equal(committed.enabled, false);
+  assert.equal(committed.lastTest, null);
+  assert.deepEqual(harness.calls.find((item) => item[0] === "build").slice(2), [true, false, "请起草一份值班通知"]);
+  assert.equal(harness.toasts.at(-1).tone, "warn");
+  assert.match(harness.toasts.at(-1).message, /待测试草案/);
 });
 
 test("summarizeStyle records failed builds without leaving an active task", async () => {

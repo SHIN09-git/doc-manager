@@ -21,8 +21,8 @@ export function createStaticServer() {
     try {
       const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
       const requestedPath = decodeURIComponent(url.pathname === "/" ? "/index.html" : url.pathname);
-      const filePath = path.resolve(root, `.${requestedPath}`);
-      if (!filePath.startsWith(root)) {
+      const filePath = resolveStaticFilePath(requestedPath);
+      if (!filePath) {
         response.writeHead(403);
         response.end("Forbidden");
         return;
@@ -32,6 +32,8 @@ export function createStaticServer() {
       const targetPath = info.isDirectory() ? path.join(filePath, "index.html") : filePath;
       response.writeHead(200, {
         "Content-Type": mimeTypes.get(path.extname(targetPath)) || "application/octet-stream",
+        "Cache-Control": targetPath.endsWith(".html") ? "no-cache" : "public, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
       });
       createReadStream(targetPath).pipe(response);
     } catch {
@@ -39,6 +41,13 @@ export function createStaticServer() {
       response.end("Not found");
     }
   });
+}
+
+export function resolveStaticFilePath(requestedPath, baseRoot = root) {
+  const filePath = path.resolve(baseRoot, `.${requestedPath}`);
+  const relative = path.relative(baseRoot, filePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
+  return filePath;
 }
 
 export function startStaticServer(options = {}) {

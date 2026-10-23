@@ -31,6 +31,16 @@ test("cloud base url helpers handle local, file, and deployed locations", () => 
   assert.equal(getDefaultCloudApiBaseUrl(locationLike("https://mowen.example/workbench")), "https://mowen.example/api");
 });
 
+test("cloud base url uses an explicit runtime deployment config", () => {
+  const previous = globalThis.__MOWEN_RUNTIME_CONFIG__;
+  globalThis.__MOWEN_RUNTIME_CONFIG__ = { apiBaseUrl: "https://api.mowen.example/api/" };
+  try {
+    assert.equal(getDefaultCloudApiBaseUrl(locationLike("https://web.mowen.example/")), "https://api.mowen.example/api");
+  } finally {
+    globalThis.__MOWEN_RUNTIME_CONFIG__ = previous;
+  }
+});
+
 test("normalizeCloudBaseUrl trims slashes and upgrades stale local defaults on deployed sites", () => {
   assert.equal(
     shouldReplaceLocalApiBaseUrl("http://localhost:8787/api", {

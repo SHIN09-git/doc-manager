@@ -1,9 +1,17 @@
 import { clone, createId, now, sanitizeFileName } from "../../utils/helpers.js";
+import { MAX_IMPORT_FILE_BYTES } from "../../config/constants.js";
 import { buildUnsupportedFileMessage, canImportFile, readImportFileText } from "../../utils/fileReaders.js";
 import { filterImportableFilesBySize } from "../../utils/importGuards.js";
 import { guessTypeFromName } from "../../utils/validation.js";
 import { EVENTS } from "../../core/eventBus.js";
 import { createDocxBlob, DOCX_MIME, prepareDocumentExport } from "./docxExporter.js";
+import { createGongwenDocxBlob } from "./gongwenDocxExporter.js";
+import { findPlaceholders } from "../../utils/placeholders.js";
+
+export const EXPORT_LAYOUTS = {
+  standard: { label: "通用版式", create: createDocxBlob },
+  gongwen: { label: "公文版式（GB/T 9704）", create: createGongwenDocxBlob },
+};
 
 export function createDocumentManager(deps) {
   const {
@@ -19,8 +27,12 @@ export function createDocumentManager(deps) {
     getDownloadLocation,
     getType,
     downloadBlob,
+    restoreWorkspaceState = () => {},
+    hasActiveTasks = () => false,
     toast,
+    confirmRestore = (message) => globalThis.window?.confirm?.(message) ?? true,
     confirmLargeImport = (message) => globalThis.window?.confirm?.(message) ?? true,
+    confirmExport = (message) => globalThis.window?.confirm?.(message) ?? true,
     withImportProgress = async (_message, task) => task({ update: () => {} }),
   } = deps;
 
@@ -58,6 +70,7 @@ export function createDocumentManager(deps) {
       type: seed.type || "notice",
       folderId: resolveTargetFolder(seed),
       styleId: seed.styleId || state.styles[0]?.id || "",
+      writingGenre: seed.writingGenre || "",
       content: seed.content || "",
       createdAt: now(),
       updatedAt: now(),
@@ -260,31 +273,67 @@ export function createDocumentManager(deps) {
     return importedCount;
   }
 
-  async function exportCurrentDocument() {
+  async function exportCurrentDocument({ layout = state.settings?.exportLayout } = {}) {
     saveEditor(false);
     const doc = getCurrentDoc();
     if (!doc) return null;
+    const exportLayout = EXPORT_LAYOUTS[layout] ? layout : "standard";
+    const placeholders = findPlaceholders(doc.content);
+    if (placeholders.length) {
+      const sample = [...new Set(placeholders.map((item) => item.text))].slice(0, 3).join("、");
+      const message = `文档中还有 ${placeholders.length} 处待填内容（如${sample}），导出后需要在 Word 中手动补全。仍要导出吗？`;
+      if (!confirmExport(message)) {
+        toast("已取消导出，可在“待填”清单中逐项补全", "warn");
+        return null;
+      }
+    }
     const type = getType(doc.type).name;
     const exportDoc = prepareDocumentExport(doc);
     const fileName = `${sanitizeFileName(exportDoc.title || "未命名文档")}.docx`;
-    const blob = await createDocxBlob(exportDoc);
-    downloadBlob(fileName, blob, DOCX_MIME);
-    toast(`已导出 ${type} Word 文档到：${getDownloadLocation(fileName)}`);
+    const blob = await EXPORT_LAYOUTS[exportLayout].create(exportDoc);
+    if (downloadBlob(fileName, blob, DOCX_MIME) === false) {
+      toast("浏览器未能开始下载，请检查下载权限后重试", "error");
+      return null;
+    }
+    toast(`已按${EXPORT_LAYOUTS[exportLayout].label}导出 ${type} Word 文档到：${getDownloadLocation(fileName)}`);
     return fileName;
   }
 
   function exportWorkspaceBackup() {
     saveEditor(false);
-    const backup = {
-      exportedAt: now(),
-      app: "mowen-nibi-workbench",
-      version: 1,
-      data: state,
-    };
+    const backup = createWorkspaceBackupPayload(state, now());
     const fileName = `摹文拟笔工作台备份-${new Date().toISOString().slice(0, 10)}.json`;
-    downloadBlob(fileName, JSON.stringify(backup, null, 2), "application/json;charset=utf-8");
+    if (downloadBlob(fileName, JSON.stringify(backup, null, 2), "application/json;charset=utf-8") === false) {
+      toast("浏览器未能开始下载，请检查下载权限后重试", "error");
+      return null;
+    }
     toast(`已导出备份到：${getDownloadLocation(fileName)}`);
     return fileName;
+  }
+
+  async function restoreWorkspaceBackupFile(file) {
+    if (!file) return null;
+    if (hasActiveTasks()) {
+      throw new Error("请先取消正在进行的生成或导入任务，再恢复备份");
+    }
+    if (Number(file.size || 0) > MAX_IMPORT_FILE_BYTES) {
+      throw new Error("备份文件超过 50 MB 安全上限");
+    }
+    const parsed = parseWorkspaceBackup(await file.text());
+    parsed.settings.apiKey = String(state.settings?.apiKey || "");
+    const docCount = parsed.docs.length;
+    const writerCount = parsed.styles.length;
+    const confirmed = await confirmRestore(`将用备份中的 ${docCount} 份文档和 ${writerCount} 个执笔人替换当前本机工作区。云端数据和本机 API Key 不会被覆盖。是否继续？`);
+    if (!confirmed) {
+      toast("已取消恢复备份", "warn");
+      return null;
+    }
+    restoreWorkspaceState(parsed);
+    selectFirstDocumentIfNeeded();
+    persist();
+    eventBus.emit(EVENTS.RENDER_ALL);
+    toast(`已恢复本机工作区：${docCount} 份文档、${writerCount} 个执笔人`);
+    return { docCount, writerCount };
   }
 
   return {
@@ -304,5 +353,60 @@ export function createDocumentManager(deps) {
     importDocumentFiles,
     exportCurrentDocument,
     exportWorkspaceBackup,
+    restoreWorkspaceBackupFile,
+  };
+}
+
+export function createWorkspaceBackupPayload(state, exportedAt = new Date().toISOString()) {
+  const settings = clone(state?.settings || {});
+  settings.apiKey = "";
+  return {
+    exportedAt,
+    app: "mowen-nibi-workbench",
+    version: 2,
+    scope: "local-workspace",
+    secretsExcluded: ["settings.apiKey", "cloudSession"],
+    data: {
+      folders: clone(Array.isArray(state?.folders) ? state.folders : []),
+      customTypes: clone(Array.isArray(state?.customTypes) ? state.customTypes : []),
+      styles: clone(Array.isArray(state?.styles) ? state.styles : []),
+      docs: clone(Array.isArray(state?.docs) ? state.docs : []),
+      settings,
+    },
+  };
+}
+
+export function parseWorkspaceBackup(value) {
+  let payload;
+  try {
+    payload = typeof value === "string" ? JSON.parse(value) : value;
+  } catch {
+    throw new Error("备份 JSON 格式不正确");
+  }
+  if (!payload || typeof payload !== "object" || payload.app !== "mowen-nibi-workbench") {
+    throw new Error("这不是摹文拟笔工作台备份");
+  }
+  if (![1, 2].includes(Number(payload.version))) {
+    throw new Error(`暂不支持备份版本 ${payload.version || "未知"}`);
+  }
+  const source = payload.data;
+  if (!source || typeof source !== "object") throw new Error("备份缺少工作区数据");
+  if (!Array.isArray(source.docs) || !Array.isArray(source.styles) || !Array.isArray(source.folders)) {
+    throw new Error("备份中的文档、执笔人或标签结构不完整");
+  }
+  if (source.docs.length > 10_000 || source.styles.length > 1_000 || source.folders.length > 1_000) {
+    throw new Error("备份中的项目数量超过安全上限");
+  }
+  if ([...source.docs, ...source.styles, ...source.folders].some((item) => !item || typeof item !== "object" || Array.isArray(item))) {
+    throw new Error("备份中包含无效的工作区项目");
+  }
+  const settings = clone(source.settings && typeof source.settings === "object" ? source.settings : {});
+  settings.apiKey = "";
+  return {
+    folders: clone(source.folders),
+    customTypes: clone(Array.isArray(source.customTypes) ? source.customTypes : []),
+    styles: clone(source.styles),
+    docs: clone(source.docs),
+    settings,
   };
 }

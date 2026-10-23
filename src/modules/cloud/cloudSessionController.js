@@ -119,6 +119,9 @@ export function createCloudSessionController(deps = {}) {
         }),
       });
       applyCloudSession(data);
+      if (data.email_verification_token && els.cloudEmailTokenInput) {
+        els.cloudEmailTokenInput.value = data.email_verification_token;
+      }
       await refreshCloudUsage({ silent: true });
       await refreshCloudBilling({ silent: true });
       persist();

@@ -36,7 +36,7 @@ test("initializeWorkspaceState seeds missing folders, writer, document, settings
   assert.equal(state.folders.length, 3);
   assert.equal(state.folders[0].id, "folder-a");
   assert.equal(state.folders[0].normalizedFolder, true);
-  assert.equal(state.styles.length, 1);
+  assert.equal(state.styles.length, 2);
   assert.equal(state.styles[0].id, "writer-a");
   assert.equal(state.styles[0].name, "通知写作");
   assert.equal(state.styles[0].normalizedSkill, true);

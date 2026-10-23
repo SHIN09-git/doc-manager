@@ -6,7 +6,13 @@ import path from "node:path";
 import { runMigrations } from "../src/db/migrations/migrationRunner.js";
 import { buildAdminPreferencesGetQuery, deleteAdminPreferences, getAdminPreferences, upsertAdminPreferences } from "../src/db/repositories/adminPreferenceRepository.js";
 import { buildAuditHistoryQuery, insertAuditLog, listAuditByOrganization } from "../src/db/repositories/auditRepository.js";
-import { grantCreditsForOrder, spendCreditsForUsage } from "../src/db/repositories/creditRepository.js";
+import {
+  grantCreditsForOrder,
+  refundAiCreditReservation,
+  reserveCreditsForAi,
+  settleAiCreditReservation,
+  spendCreditsForUsage,
+} from "../src/db/repositories/creditRepository.js";
 import { buildDocumentListQuery, listDocumentsByOrganization } from "../src/db/repositories/documentRepository.js";
 import {
   createFeedbackEvent,
@@ -19,6 +25,7 @@ import {
   reviewManualPaymentOrder,
 } from "../src/db/repositories/manualPaymentRepository.js";
 import { buildOpsTriageGetQuery, getOpsTriage, upsertOpsTriage } from "../src/db/repositories/opsTriageRepository.js";
+import { reserveAiQuota } from "../src/db/repositories/rateLimitRepository.js";
 import { createSystemEvent, updateSystemEventMetadata } from "../src/db/repositories/systemEventRepository.js";
 import { buildUsageHistoryQuery, insertUsageRecord, listUsageByOrganization } from "../src/db/repositories/usageRepository.js";
 import {
@@ -81,6 +88,170 @@ test("usage repository can scope history to one user before applying limit", asy
   assert.match(query.text, /status = \$4/);
   assert.match(query.text, /limit \$5/);
   assert.deepEqual(query.values, ["org_001", "usr_001", "draft", "success", 3]);
+});
+
+test("rate limit repository reserves quota after counting usage and reservations", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/from ai_usage/.test(text) && /user_id = \$1/.test(text)) return { rows: [{ count: "1" }] };
+      if (/from ai_usage/.test(text) && /organization_id = \$1/.test(text)) return { rows: [{ count: "1" }] };
+      if (/from rate_limits/.test(text) && /user_id = \$3/.test(text)) return { rows: [{ count: "1" }] };
+      if (/from rate_limits/.test(text) && /organization_id = \$3/.test(text)) return { rows: [{ count: "1" }] };
+      if (/from credit_accounts/.test(text)) return { rows: [{ balance: "0" }] };
+      if (/insert into rate_limits/.test(text)) {
+        return {
+          rows: [{
+            id: values[0],
+            organization_id: values[1],
+            user_id: values[2],
+            scope: values[3],
+            date: values[4],
+            count: values[5],
+            updated_at: new Date(values[6]),
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  const decision = await reserveAiQuota(pool, {
+    organizationId: "org_rate_repo",
+    userId: "usr_rate_repo",
+    date: "2026-06-10",
+    limits: { userDaily: 3, orgDaily: 4 },
+    plan: "free",
+    now: "2026-06-10T01:02:03.000Z",
+  });
+
+  assert.equal(decision.reserved, true);
+  assert.equal(decision.source, "plan");
+  assert.equal(decision.user_limited, false);
+  assert.equal(decision.org_limited, false);
+  assert.equal(decision.reservation.organization_id, "org_rate_repo");
+  assert.equal(calls.some((call) => /insert into rate_limits/.test(call.text)), true);
+});
+
+test("rate limit repository blocks quota reservation when daily limit is exhausted", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/from ai_usage/.test(text) && /user_id = \$1/.test(text)) return { rows: [{ count: "3" }] };
+      if (/from ai_usage/.test(text) && /organization_id = \$1/.test(text)) return { rows: [{ count: "3" }] };
+      if (/from rate_limits/.test(text)) return { rows: [{ count: "3" }] };
+      if (/insert into credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_rate_blocked",
+            organization_id: values[1],
+            user_id: values[2],
+            balance: 0,
+            updated_at: values[4],
+          }],
+        };
+      }
+      if (/update credit_accounts/.test(text)) return { rows: [] };
+      if (/insert into rate_limits/.test(text)) throw new Error("reservation should not be inserted");
+      if (/insert into ai_credit_reservations/.test(text)) throw new Error("credit reservation should not be inserted");
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  const decision = await reserveAiQuota(pool, {
+    organizationId: "org_rate_blocked",
+    userId: "usr_rate_blocked",
+    date: "2026-06-10",
+    limits: { userDaily: 3, orgDaily: 4 },
+    plan: "free",
+  });
+
+  assert.equal(decision.reserved, false);
+  assert.equal(decision.user_limited, true);
+  assert.equal(decision.org_limited, false);
+  assert.equal(decision.credit_allowed, false);
+  assert.equal(calls.some((call) => /insert into rate_limits/.test(call.text)), false);
+});
+
+test("rate limit repository atomically reserves purchased credit for overage", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/from ai_usage/.test(text)) return { rows: [{ count: "3" }] };
+      if (/from rate_limits/.test(text)) return { rows: [{ count: "3" }] };
+      if (/insert into credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_rate_credit",
+            organization_id: values[1],
+            user_id: values[2],
+            balance: 2,
+            updated_at: values[4],
+          }],
+        };
+      }
+      if (/update credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_rate_credit",
+            organization_id: values[0],
+            user_id: values[1],
+            balance: 1,
+            updated_at: values[3],
+          }],
+        };
+      }
+      if (/insert into ai_credit_reservations/.test(text)) {
+        return {
+          rows: [{
+            id: values[0],
+            organization_id: values[1],
+            user_id: values[2],
+            usage_id: values[3],
+            amount: values[4],
+            balance_after: values[5],
+            status: values[6],
+            created_at: new Date(values[7]),
+            updated_at: new Date(values[8]),
+          }],
+        };
+      }
+      if (/insert into rate_limits/.test(text)) {
+        return {
+          rows: [{
+            id: values[0],
+            organization_id: values[1],
+            user_id: values[2],
+            scope: values[3],
+            date: values[4],
+            count: values[5],
+            updated_at: new Date(values[6]),
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  const decision = await reserveAiQuota(pool, {
+    organizationId: "org_rate_credit",
+    userId: "usr_rate_credit",
+    date: "2026-06-10",
+    limits: { userDaily: 3, orgDaily: 4 },
+    plan: "free",
+    now: "2026-06-10T01:02:03.000Z",
+  });
+
+  assert.equal(decision.reserved, true);
+  assert.equal(decision.source, "credit");
+  assert.equal(decision.credit_allowed, true);
+  assert.equal(decision.credit_reservation.status, "reserved");
+  assert.equal(decision.credit_reservation.balance_after, 1);
+  assert.ok(calls.findIndex((call) => /update credit_accounts/.test(call.text)) <
+    calls.findIndex((call) => /insert into rate_limits/.test(call.text)));
 });
 
 test("usage repository normalizes PostgreSQL rows without exposing other organizations", async () => {
@@ -284,6 +455,182 @@ test("credit repository reports skipped spends without writing a ledger", async 
   assert.equal(result.account.balance, 0);
   assert.equal(result.ledger, null);
   assert.equal(calls.length, 2);
+});
+
+test("credit repository reserves credit before an AI call", async () => {
+  const calls = [];
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/insert into credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_reserve",
+            organization_id: values[1],
+            user_id: values[2],
+            balance: 2,
+            updated_at: values[4],
+          }],
+        };
+      }
+      if (/update credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_reserve",
+            organization_id: values[0],
+            user_id: values[1],
+            balance: 1,
+            updated_at: values[3],
+          }],
+        };
+      }
+      if (/insert into ai_credit_reservations/.test(text)) {
+        return {
+          rows: [{
+            id: values[0],
+            organization_id: values[1],
+            user_id: values[2],
+            usage_id: values[3],
+            amount: values[4],
+            balance_after: values[5],
+            status: values[6],
+            created_at: new Date(values[7]),
+            updated_at: new Date(values[8]),
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  const result = await reserveCreditsForAi(pool, {
+    organizationId: "org_reserve",
+    userId: "usr_reserve",
+    amount: 1,
+    now: "2026-05-24T04:30:00.000Z",
+  });
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.account.balance, 1);
+  assert.equal(result.reservation.status, "reserved");
+  assert.equal(result.reservation.usage_id, null);
+  assert.equal(calls.some((call) => /insert into credit_ledger/.test(call.text)), false);
+});
+
+test("credit repository settles a reservation into the usage ledger", async () => {
+  const calls = [];
+  const reservedRow = {
+    id: "acr_settle",
+    organization_id: "org_settle",
+    user_id: "usr_settle",
+    usage_id: null,
+    amount: 1,
+    balance_after: 4,
+    status: "reserved",
+    created_at: "2026-05-24T05:00:00.000Z",
+    updated_at: "2026-05-24T05:00:00.000Z",
+  };
+  const pool = {
+    async query(text, values) {
+      calls.push({ text, values });
+      if (/from ai_credit_reservations/.test(text) && /for update/.test(text)) {
+        return { rows: [reservedRow] };
+      }
+      if (/update ai_credit_reservations/.test(text)) {
+        return {
+          rows: [{
+            ...reservedRow,
+            usage_id: values[3],
+            status: "settled",
+            updated_at: values[4],
+          }],
+        };
+      }
+      if (/insert into credit_ledger/.test(text)) {
+        return {
+          rows: [{
+            id: values[0],
+            organization_id: values[1],
+            user_id: values[2],
+            order_id: values[3],
+            usage_id: values[4],
+            direction: values[5],
+            amount: values[6],
+            balance_after: values[7],
+            reason: values[8],
+            created_at: values[9],
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  const result = await settleAiCreditReservation(pool, {
+    organizationId: "org_settle",
+    userId: "usr_settle",
+    reservationId: "acr_settle",
+    usageId: "use_settle",
+    now: "2026-05-24T05:01:00.000Z",
+  });
+
+  assert.equal(result.reservation.status, "settled");
+  assert.equal(result.reservation.usage_id, "use_settle");
+  assert.equal(result.ledger.usage_id, "use_settle");
+  assert.equal(result.ledger.balance_after, 4);
+});
+
+test("credit repository refunds a reserved credit after an AI failure", async () => {
+  const reservedRow = {
+    id: "acr_refund",
+    organization_id: "org_refund",
+    user_id: "usr_refund",
+    usage_id: null,
+    amount: 1,
+    balance_after: 2,
+    status: "reserved",
+    created_at: "2026-05-24T06:00:00.000Z",
+    updated_at: "2026-05-24T06:00:00.000Z",
+  };
+  const pool = {
+    async query(text, values) {
+      if (/from ai_credit_reservations/.test(text) && /for update/.test(text)) {
+        return { rows: [reservedRow] };
+      }
+      if (/update credit_accounts/.test(text)) {
+        return {
+          rows: [{
+            id: "crd_refund",
+            organization_id: values[0],
+            user_id: values[1],
+            balance: 3,
+            updated_at: values[3],
+          }],
+        };
+      }
+      if (/update ai_credit_reservations/.test(text)) {
+        return {
+          rows: [{
+            ...reservedRow,
+            status: "refunded",
+            updated_at: values[3],
+          }],
+        };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  const result = await refundAiCreditReservation(pool, {
+    organizationId: "org_refund",
+    userId: "usr_refund",
+    reservationId: "acr_refund",
+    now: "2026-05-24T06:01:00.000Z",
+  });
+
+  assert.equal(result.skipped, false);
+  assert.equal(result.reservation.status, "refunded");
+  assert.equal(result.account.balance, 3);
 });
 
 test("credit repository grants credits and records an in ledger", async () => {
