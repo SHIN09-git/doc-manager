@@ -61,7 +61,10 @@ function createHarness(options = {}) {
     skillBuilder: {
       testSkillOnGeneration: async (styleArg, skillJson, input, optionsArg) => {
         calls.push(["test-skill", styleArg.id, skillJson.name, input.用户测试任务, Boolean(optionsArg.signal)]);
-        return { document: "测试文档", report: { overall_result: { passed: true, score: 92 } } };
+        return {
+          document: "测试文档",
+          report: options.testReport || { overall_result: { passed: true, score: 92, save_allowed: true } },
+        };
       },
       normalizeSkillQualityReport: (styleArg, aggregationData, qualityReport, report) => {
         calls.push(["normalize-quality", styleArg.id, Boolean(aggregationData), Boolean(qualityReport), report.overall_result.score]);
@@ -140,12 +143,47 @@ test("runGenerationTest validates input and saves the generated report", async (
   assert.equal(result.result, "测试文档");
   assert.equal(harness.style.lastTest.prompt, "请写一份通知");
   assert.equal(harness.style.qualityReport.normalized, true);
-  assert.deepEqual(harness.events, [EVENTS.RENDER_SKILL_TEST, EVENTS.RENDER_SKILL_QUALITY]);
+  assert.deepEqual(harness.events, [
+    EVENTS.RENDER_STYLE_SELECT,
+    EVENTS.RENDER_STYLE_LIST,
+    EVENTS.RENDER_SKILL_TEST,
+    EVENTS.RENDER_SKILL_QUALITY,
+  ]);
+  assert.equal(harness.style.status, "ready");
   assert.deepEqual(harness.progressUpdates, [
     { message: "步骤 1/2：正在生成测试文档", progress: 35 },
     { message: "正在保存测试报告", progress: 86 },
   ]);
   assert.match(harness.toasts.at(-1).message, /测试结果已保存到/);
+});
+
+test("runGenerationTest keeps a failed test disabled as a draft", async () => {
+  const harness = createHarness({
+    style: {
+      id: "skill-1",
+      name: "学校通知",
+      skillJson: "{\"name\":\"学校通知\"}",
+      aggregationData: {},
+      qualityReport: {},
+      feedbacks: [],
+      enabled: true,
+      status: "ready",
+    },
+    testReport: {
+      overall_result: {
+        passed: false,
+        score: 60,
+        save_allowed: false,
+        fabrication_risk_count: 1,
+      },
+    },
+  });
+
+  await harness.controller.runGenerationTest();
+
+  assert.equal(harness.style.status, "draft");
+  assert.equal(harness.style.enabled, false);
+  assert.ok(harness.calls.some((item) => item[0] === "commit"));
 });
 
 test("saveFeedback stores long-term feedback and opens retrain modal", () => {

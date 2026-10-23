@@ -71,6 +71,22 @@ test("persist falls back to localStorage when IndexedDB writes fail", async () =
   assert.equal(ui.storageMode, "localStorage");
 });
 
+test("persist keeps using the selected localStorage fallback after IndexedDB fails", async () => {
+  let indexedDbAttempts = 0;
+  const { controller, calls } = createHarness({
+    writeWorkspaceState: async () => {
+      indexedDbAttempts += 1;
+      throw new Error("quota");
+    },
+  });
+
+  assert.equal(await controller.persist(), true);
+  assert.equal(await controller.persist(), true);
+
+  assert.equal(indexedDbAttempts, 1);
+  assert.equal(calls.filter(([type]) => type === "write-legacy").length, 2);
+});
+
 test("fallback storage failure shows a clear user-facing error", () => {
   const { controller, calls } = createHarness({
     writeLegacyLocalStorageState: () => {

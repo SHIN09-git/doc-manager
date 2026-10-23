@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pruneOperationalData } from "./operationalDataRetention.js";
 
 export const EMPTY_DATA = {
   users: [],
@@ -16,6 +17,7 @@ export const EMPTY_DATA = {
   ai_usage: [],
   manual_payment_orders: [],
   credit_accounts: [],
+  ai_credit_reservations: [],
   credit_ledger: [],
   ops_triage: [],
   api_keys: [],
@@ -32,15 +34,28 @@ export class JsonStore {
     this.filePath = filePath;
     this.data = structuredClone(EMPTY_DATA);
     this.ready = false;
+    this.initPromise = null;
     this.writeQueue = Promise.resolve();
   }
 
   async init() {
     if (this.ready) return;
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = this.initialize();
+    try {
+      await this.initPromise;
+    } finally {
+      this.initPromise = null;
+    }
+  }
+
+  async initialize() {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     try {
       const raw = await readFile(this.filePath, "utf8");
       this.data = normalizeData(JSON.parse(raw));
+      const cleanup = pruneOperationalData(this.data);
+      if (cleanup.changed) await this.save();
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
       this.data = structuredClone(EMPTY_DATA);
@@ -60,6 +75,7 @@ export class JsonStore {
       const draft = structuredClone(this.data);
       const result = await mutator(draft);
       this.data = normalizeData(draft);
+      pruneOperationalData(this.data);
       await this.save();
       return result;
     });
@@ -99,6 +115,15 @@ export function normalizeData(data = {}) {
   next.credit_accounts = next.credit_accounts.map((account) => ({
     ...account,
     balance: Number(account.balance || 0),
+  }));
+  next.ai_credit_reservations = next.ai_credit_reservations.map((reservation) => ({
+    ...reservation,
+    usage_id: reservation.usage_id || null,
+    amount: Math.max(1, Math.floor(Number(reservation.amount || 1))),
+    balance_after: Number(reservation.balance_after || 0),
+    status: ["reserved", "settled", "refunded"].includes(reservation.status)
+      ? reservation.status
+      : "reserved",
   }));
   next.manual_payment_orders = next.manual_payment_orders.map((order) => ({
     ...order,

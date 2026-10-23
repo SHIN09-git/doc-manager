@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { collectStaticFileCopies } from "../scripts/build-static.mjs";
+import { buildRuntimeConfig, collectStaticFileCopies, serializeRuntimeConfig } from "../scripts/build-static.mjs";
 import { buildProductionChecks, parseDotEnv } from "../scripts/verify-production.mjs";
 
 test("parseDotEnv reads simple quoted and unquoted values", () => {
@@ -13,6 +13,16 @@ test("parseDotEnv reads simple quoted and unquoted values", () => {
     B: "two",
     C: "three",
   });
+});
+
+test("static runtime config accepts a separate HTTPS API deployment", () => {
+  const config = buildRuntimeConfig({ PUBLIC_API_BASE_URL: "https://mowen-api.example/api/" });
+  assert.deepEqual(config, { apiBaseUrl: "https://mowen-api.example/api" });
+  assert.match(serializeRuntimeConfig(config), /mowen-api\.example\/api/);
+  assert.throws(
+    () => buildRuntimeConfig({ PUBLIC_API_BASE_URL: "http://public.example/api" }),
+    /必须使用 HTTPS/,
+  );
 });
 
 test("production checks accept APP_BASE_URL alias when required launch fields are set", () => {
@@ -32,9 +42,32 @@ test("production checks accept APP_BASE_URL alias when required launch fields ar
     MANUAL_PAYMENT_WECHAT_QR_URL: "https://mowen.realhost.test/wechat.png",
     MANUAL_PAYMENT_ALIPAY_QR_URL: "https://mowen.realhost.test/alipay.png",
     BACKUP_ENCRYPTION_KEY: "b".repeat(40),
-    AI_PROXY_MODE: "mock",
+    AI_PROXY_MODE: "live",
+    AI_MODEL: "gpt-test",
+    PLATFORM_OPENAI_API_KEY: "sk-production-key",
   });
   assert.deepEqual(checks.filter((item) => item.level === "error" && !item.ok), []);
+});
+
+test("production checks reject mock AI before public launch", () => {
+  const checks = buildProductionChecks({
+    NODE_ENV: "production",
+    STORE_DRIVER: "postgres",
+    DATABASE_URL: "postgres://mowen:secret@db.realhost.test:5432/mowen",
+    SESSION_SECRET: "s".repeat(40),
+    APP_ENCRYPTION_SECRET: "e".repeat(40),
+    APP_URL: "https://mowen.realhost.test/index.html",
+    CORS_ORIGIN: "https://mowen.realhost.test",
+    SESSION_SECURE: "true",
+    EMAIL_MODE: "webhook",
+    EMAIL_PROVIDER: "generic-webhook",
+    EMAIL_WEBHOOK_URL: "https://mail.realhost.test/send",
+    MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "pro_month", title: "Pro", type: "plan", plan: "pro", duration_days: 30, amount_cny: 29 }]),
+    AI_PROXY_MODE: "mock",
+  });
+  const failedNames = checks.filter((item) => item.level === "error" && !item.ok).map((item) => item.name);
+  assert.ok(failedNames.includes("loadEnv"));
+  assert.ok(failedNames.includes("AI_PROXY_MODE"));
 });
 
 test("production checks reject placeholder launch configuration", () => {
@@ -73,7 +106,9 @@ test("production checks reject manual payment packages that normalize away", () 
     EMAIL_PROVIDER: "generic-webhook",
     EMAIL_WEBHOOK_URL: "https://mail.realhost.test/send",
     MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "empty_credits", title: "Empty", type: "credits", credits: 0, amount_cny: 29 }]),
-    AI_PROXY_MODE: "mock",
+    AI_PROXY_MODE: "live",
+    AI_MODEL: "gpt-test",
+    PLATFORM_OPENAI_API_KEY: "sk-production-key",
   });
   const failedNames = checks.filter((item) => item.level === "error" && !item.ok).map((item) => item.name);
   assert.ok(failedNames.includes("MANUAL_PAYMENT_PACKAGES"));
@@ -93,7 +128,9 @@ test("production checks reject manual payment packages for the free plan", () =>
     EMAIL_PROVIDER: "generic-webhook",
     EMAIL_WEBHOOK_URL: "https://mail.realhost.test/send",
     MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "free_month", title: "Free", type: "plan", plan: "free", duration_days: 30, amount_cny: 9 }]),
-    AI_PROXY_MODE: "mock",
+    AI_PROXY_MODE: "live",
+    AI_MODEL: "gpt-test",
+    PLATFORM_OPENAI_API_KEY: "sk-production-key",
   });
   const failedNames = checks.filter((item) => item.level === "error" && !item.ok).map((item) => item.name);
   assert.ok(failedNames.includes("MANUAL_PAYMENT_PACKAGES"));
@@ -113,7 +150,9 @@ test("production checks reject webhook checkout without signed price mapping", (
     EMAIL_PROVIDER: "generic-webhook",
     EMAIL_WEBHOOK_URL: "https://mail.realhost.test/send",
     MANUAL_PAYMENT_PACKAGES: JSON.stringify([{ id: "pro_month", title: "Pro", type: "plan", plan: "pro", duration_days: 30, amount_cny: 29 }]),
-    AI_PROXY_MODE: "mock",
+    AI_PROXY_MODE: "live",
+    AI_MODEL: "gpt-test",
+    PLATFORM_OPENAI_API_KEY: "sk-production-key",
     PAYMENT_CHECKOUT_MODE: "webhook",
     PAYMENT_CHECKOUT_URL: "https://pay.realhost.test/checkout",
   });
@@ -201,6 +240,12 @@ test("static build manifest includes admin page module dependencies", async () =
   imports.forEach((source) => {
     assert.ok(copiedSources.has(source), `${source} must be copied for dist/admin.html`);
   });
+});
+
+test("static and Windows application payloads include license notices", async () => {
+  const sources = new Set((await collectStaticFileCopies()).map(([source]) => source));
+  assert.ok(sources.has("LICENSE"));
+  assert.ok(sources.has("THIRD_PARTY_NOTICES.md"));
 });
 
 test("static build manifest recursively includes transitive module dependencies", async () => {

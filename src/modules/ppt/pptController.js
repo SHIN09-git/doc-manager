@@ -203,7 +203,9 @@ export function createPptController({
       progress.update("正在生成 PowerPoint 文件", 68);
       const fileName = `${sanitizeFileName(spec.title || els.pptTitleInput.value || "演示稿")}.pptx`;
       const blob = await createPptxBlob(spec);
-      downloadBlob(fileName, blob, "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+      if (downloadBlob(fileName, blob, "application/vnd.openxmlformats-officedocument.presentationml.presentation") === false) {
+        throw new Error("浏览器未能开始下载，请检查下载权限后重试");
+      }
       progress.update("已完成", 100);
       toast(`已导出原生 PPTX 到：${getDownloadLocation(fileName)}`);
     }));

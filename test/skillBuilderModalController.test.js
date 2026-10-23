@@ -62,6 +62,8 @@ function createHarness(options = {}) {
     skillCustomCategoryInput: element(),
     skillCustomCategoryField: element({ hidden: true }),
     skillDescriptionInput: element(),
+    skillAutoTestInput: element({ checked: true }),
+    skillBuilderTestPrompt: element({ value: "旧测试任务" }),
     addSourceDocsToSkillBtn: element(),
     skillEnabledInput: element({ checked: true }),
     skillAnalysisInput: element(),
@@ -140,6 +142,9 @@ test("skill builder modal opens existing skill in retrain mode", () => {
   assert.equal(harness.els.deleteStyleBtn.hidden, false);
   assert.equal(harness.els.skillBuilderModal.hidden, false);
   assert.equal(harness.els.styleNameInput.focusCount, 1);
+  assert.equal(harness.els.skillAutoTestInput.checked, true);
+  assert.equal(harness.els.skillBuilderTestPrompt.value, "");
+  assert.equal(harness.els.skillBuilderTestPrompt.disabled, false);
 });
 
 test("skill builder modal opens a blank new writer and hides edit-only buttons", () => {
@@ -201,6 +206,23 @@ test("adding selected workspace documents creates training examples without dupl
   assert.equal(harness.toasts.at(-1).message, "所选文档已在训练样本中");
 });
 
+test("document picker disables additions after eight training samples", () => {
+  const harness = createHarness();
+  harness.ui.editingStyle = {
+    id: "skill-1",
+    examples: Array.from({ length: 8 }, (_, index) => ({ id: `ex-${index}`, name: `${index}.txt` })),
+  };
+
+  harness.controller.renderDocumentPicker();
+  const added = harness.controller.addSelectedDocsAsExamples();
+
+  assert.equal(harness.els.skillSourceDocSelect.disabled, true);
+  assert.equal(harness.els.addSourceDocsToSkillBtn.disabled, true);
+  assert.match(harness.els.skillSourceDocSelect.innerHTML, /8 篇上限/);
+  assert.equal(added, 0);
+  assert.match(harness.toasts.at(-1).message, /最多保留 8 篇/);
+});
+
 test("bindEvents wires modal controls and draft field syncing", () => {
   const calls = [];
   const harness = createHarness({
@@ -229,6 +251,10 @@ test("bindEvents wires modal controls and draft field syncing", () => {
   harness.els.skillEnabledInput.listeners.change();
   assert.equal(harness.ui.editingStyle.enabled, false);
   assert.deepEqual(harness.events.slice(-2), [EVENTS.RENDER_STYLE_SELECT, EVENTS.RENDER_STYLE_LIST]);
+
+  harness.els.skillAutoTestInput.checked = false;
+  harness.els.skillAutoTestInput.listeners.change();
+  assert.equal(harness.els.skillBuilderTestPrompt.disabled, true);
 
   harness.els.summarizeStyleBtn.listeners.click();
   harness.els.saveStyleBtn.listeners.click();

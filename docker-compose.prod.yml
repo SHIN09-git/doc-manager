@@ -20,7 +20,7 @@ services:
     environment:
       POSTGRES_DB: mowen
       POSTGRES_USER: mowen
-      POSTGRES_PASSWORD: change-this-postgres-password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the deployment environment}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mowen -d mowen"]
       interval: 10s

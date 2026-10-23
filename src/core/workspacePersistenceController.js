@@ -33,14 +33,18 @@ export function createWorkspacePersistenceController({
     ui.persistPromise = (ui.persistPromise || Promise.resolve())
       .catch(() => null)
       .then(async () => {
+        if (ui.storageMode === "localStorage") {
+          return tryLocalStorageFallback(snapshot);
+        }
         await writeWorkspaceState(snapshot);
         writeStorageBootstrap(snapshot);
         clearLegacyLocalStorageState();
         ui.storageMode = "indexedDB";
+        return true;
       })
       .catch((error) => {
         logger.error?.("保存工作台数据失败", error);
-        tryLocalStorageFallback(snapshot);
+        return tryLocalStorageFallback(snapshot);
       });
     return ui.persistPromise;
   }

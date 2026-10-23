@@ -58,6 +58,7 @@ export function buildProductionChecks(source) {
   add("error", "STORE_DRIVER", envSource.STORE_DRIVER === "postgres", "STORE_DRIVER should be postgres before public launch");
   add("error", "SESSION_SECURE", envSource.SESSION_SECURE === "true", "SESSION_SECURE should be true behind HTTPS");
   add("error", "EMAIL_MODE", envSource.EMAIL_MODE === "webhook", "EMAIL_MODE should be webhook before public launch");
+  add("error", "AI_PROXY_MODE", envSource.AI_PROXY_MODE === "live", "AI_PROXY_MODE must be live before public launch");
 
   const configuredManualPackages = parseJsonArray(envSource.MANUAL_PAYMENT_PACKAGES);
   const manualPackages = configuredManualPackages.length

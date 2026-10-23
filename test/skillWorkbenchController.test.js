@@ -185,6 +185,26 @@ test("invokeFromCard inserts an @handle into the generation prompt and opens gen
   assert.equal(harness.toasts.at(-1).message, "已插入 @notice，可继续补充生成要求");
 });
 
+test("draft writers cannot be invoked or enabled before a passing test", () => {
+  const harness = createHarness({
+    state: {
+      styles: [{
+        id: "skill-1",
+        name: "学校通知",
+        handle: "notice",
+        enabled: false,
+        status: "draft",
+      }],
+    },
+  });
+
+  assert.equal(harness.controller.invokeFromCard("skill-1"), "");
+  assert.equal(harness.els.generatePrompt.value, "");
+  assert.equal(harness.controller.toggleEnabledFromCard("skill-1", true), null);
+  assert.equal(harness.state.styles[0].enabled, false);
+  assert.match(harness.toasts.at(-1).message, /先运行生成测试/);
+});
+
 test("copyHandleFromCard writes the mention to clipboard", async () => {
   const harness = createHarness();
 

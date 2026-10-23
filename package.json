@@ -5,9 +5,12 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.js --bundle --format=iife --target=es2022 --outfile=build/bundle.js",
+    "start": "npm run build && node scripts/start-local.mjs",
+    "build": "node scripts/build-gongwen-assets.mjs && esbuild src/main.js --bundle --format=iife --target=es2022 --outfile=build/bundle.js",
     "build:static": "npm run build && node scripts/build-static.mjs",
-    "check": "node --check app.js && node --check src/main.js && node --check src/admin/adminPage.js && node --check e2e/serve-static.mjs && node --check e2e/run-e2e.mjs && node --check playwright.config.js && node --check scripts/build-static.mjs && node --check scripts/health-check.mjs && node --check scripts/verify-production.mjs && node --check build/bundle.js && npm run server:check",
+    "build:sites": "npm run build:static && node scripts/build-sites.mjs",
+    "package:windows": "npm run build:static && node scripts/build-windows-package.mjs",
+    "check": "node --check app.js && node --check src/main.js && node --check src/admin/adminPage.js && node --check e2e/serve-static.mjs && node --check e2e/run-e2e.mjs && node --check playwright.config.js && node --check scripts/start-local.mjs && node --check scripts/build-static.mjs && node --check scripts/build-sites.mjs && node --check scripts/build-windows-package.mjs && node --check scripts/health-check.mjs && node --check scripts/verify-production.mjs && node --check sites/worker.js && node --check build/bundle.js && npm run server:check",
     "test": "node --test test/*.test.js && npm run server:test",
     "serve:static": "node e2e/serve-static.mjs",
     "start:api": "node server/src/server.js",
@@ -23,13 +26,13 @@
     "test:e2e": "npm run build && node e2e/run-e2e.mjs"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0",
-    "esbuild": "^0.25.12"
+    "@playwright/test": "^1.64.0",
+    "esbuild": "^0.28.2"
   },
   "dependencies": {
-    "jszip": "^3.10.1",
-    "mammoth": "^1.12.0",
-    "pg": "^8.13.1",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.13.0",
+    "pg": "^8.23.1",
     "pptxgenjs": "^4.0.1"
   },
   "overrides": {

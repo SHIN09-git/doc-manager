@@ -38,6 +38,7 @@ export function createDocumentRenderer(deps) {
     els.docCount.textContent = String(docs.length);
     if (els.trashCount) els.trashCount.textContent = String(trashCount);
     els.trashTopBtn?.classList.toggle("has-trash", trashCount > 0);
+    els.trashTopBtn?.setAttribute?.("aria-label", `打开垃圾箱，${trashCount} 份文档`);
     els.docList.setAttribute("role", "listbox");
     els.docList.setAttribute("aria-label", "文档列表");
 

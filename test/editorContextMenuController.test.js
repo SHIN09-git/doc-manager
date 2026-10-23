@@ -73,7 +73,10 @@ function createHarness(options = {}) {
       styleSelect: options.styleSelect || { value: "" },
     },
     toast: (message, type) => toasts.push({ message, type }),
-    generationController: options.generationController || { rewriteSelection: async () => {} },
+    generationController: options.generationController || {
+      rewriteSelection: async () => {},
+      focusRevisionInput: () => {},
+    },
     getCurrentDoc: options.getCurrentDoc || (() => null),
     isSkillEnabled: options.isSkillEnabled || (() => true),
     recordEditorUndoPoint: () => { undoCount += 1; },
@@ -228,6 +231,25 @@ test("handleAction passes rewrite mode and selected skill to generation controll
   assert.equal(calls[0].mode, "shorten");
   assert.equal(calls[0].skillId, "skill-1");
   assert.equal(harness.editorMenu.hidden, true);
+});
+
+test("custom revision action closes the menu and focuses the inline instruction field", async () => {
+  let focusCount = 0;
+  const documentState = {};
+  const reviseButton = createButton("revise-custom", {}, documentState);
+  const harness = createHarness({
+    buttons: [reviseButton],
+    generationController: {
+      rewriteSelection: async () => {},
+      focusRevisionInput: () => { focusCount += 1; },
+    },
+  });
+  harness.editorMenu.hidden = false;
+
+  await harness.controller.handleAction({ target: reviseButton });
+
+  assert.equal(harness.editorMenu.hidden, true);
+  assert.equal(focusCount, 1);
 });
 
 test("handleKeydown moves focus through menu items and restores focus on escape", () => {

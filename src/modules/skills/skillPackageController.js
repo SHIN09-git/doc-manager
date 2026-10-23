@@ -32,7 +32,10 @@ export function createSkillPackageController(deps = {}) {
     });
     const content = skill.summary || `# ${skill.name}\n\n`;
     const fileName = `${sanitizeFileName(skill.name)}-执笔人说明.md`;
-    downloadBlob(fileName, content, "text/markdown;charset=utf-8");
+    if (downloadBlob(fileName, content, "text/markdown;charset=utf-8") === false) {
+      toast("浏览器未能开始下载，请检查下载权限后重试", "error");
+      return null;
+    }
     toast(`已导出执笔人说明.md 到：${getDownloadLocation(fileName)}`);
     return { fileName, content };
   }
@@ -44,7 +47,10 @@ export function createSkillPackageController(deps = {}) {
     });
     const content = normalizeSkillJsonText(els.skillJsonInput?.value || "{}", skill);
     const fileName = `${sanitizeFileName(skill.name)}-执笔人规则.json`;
-    downloadBlob(fileName, content, "application/json;charset=utf-8");
+    if (downloadBlob(fileName, content, "application/json;charset=utf-8") === false) {
+      toast("浏览器未能开始下载，请检查下载权限后重试", "error");
+      return null;
+    }
     toast(`已导出执笔人规则 JSON 到：${getDownloadLocation(fileName)}`);
     return { fileName, content };
   }
@@ -63,7 +69,10 @@ export function createSkillPackageController(deps = {}) {
     }
     const fileName = `${sanitizeFileName(skill.name)}.skill.json`;
     const content = JSON.stringify(packageData, null, 2);
-    downloadBlob(fileName, content, "application/json;charset=utf-8");
+    if (downloadBlob(fileName, content, "application/json;charset=utf-8") === false) {
+      toast("浏览器未能开始下载，请检查下载权限后重试", "error");
+      return null;
+    }
     toast(`已导出执笔人包到：${getDownloadLocation(fileName)}`);
     return { fileName, packageData };
   }

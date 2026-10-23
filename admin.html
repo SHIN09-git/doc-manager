@@ -7,22 +7,32 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230f766e'/%3E%3Cpath d='M18 16h22l8 8v24H18z' fill='%23ffffff'/%3E%3Cpath d='M40 16v10h10' fill='none' stroke='%230f766e' stroke-width='4'/%3E%3C/svg%3E" />
     <script>
       (() => {
-        const savedTheme = localStorage.getItem("school-doc-manager:theme");
+        let savedTheme = "";
+        try {
+          savedTheme = localStorage.getItem("school-doc-manager:theme") || "";
+        } catch {
+          // Restricted storage should not block the admin shell.
+        }
         const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
         document.documentElement.dataset.theme = savedTheme || systemTheme;
       })();
     </script>
     <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./ui-refresh.css" />
+    <script src="./runtime-config.js"></script>
     <script type="module" src="./src/admin/adminPage.js"></script>
   </head>
   <body class="admin-page">
     <main class="cloud-admin-workspace admin-standalone" id="adminWorkspace">
       <div class="cloud-admin-workspace-shell">
         <header class="cloud-admin-workspace-head admin-standalone-head">
-          <div>
-            <p class="admin-eyebrow">摹文拟笔工作台</p>
-            <h1 id="adminTitle">管理后台</h1>
-            <span id="adminSubtitle">连接云端后查看组织、用量、审计、反馈、邮件、账单和错误事件。</span>
+          <div class="admin-brand">
+            <span class="admin-brand-mark" aria-hidden="true">文</span>
+            <div>
+              <p class="admin-eyebrow">摹文拟笔工作台</p>
+              <h1 id="adminTitle">管理后台</h1>
+              <span id="adminSubtitle">连接云端后查看组织、用量、审计、反馈、邮件、账单和错误事件。</span>
+            </div>
           </div>
           <div class="cloud-admin-workspace-actions">
             <label class="admin-api-field">
@@ -36,21 +46,33 @@
         </header>
 
         <section class="admin-login-card" id="adminLoginView">
-          <div>
-            <h2>登录管理员账号</h2>
-            <p>只有组织 owner/admin 可以进入此页面。未登录或无权限时，后台数据不会加载。</p>
+          <div class="admin-login-intro">
+            <span class="admin-login-seal" aria-hidden="true">文</span>
+            <p class="admin-eyebrow">组织管理中枢</p>
+            <h2>让每一次发布都有迹可循</h2>
+            <p>统一查看组织成员、AI 用量、审计日志与运行状态，在安静的工作台里完成关键管理动作。</p>
+            <ul>
+              <li><i data-lucide="shield-check"></i><span>仅组织 owner / admin 可访问</span></li>
+              <li><i data-lucide="scan-search"></i><span>敏感操作保留完整审计记录</span></li>
+              <li><i data-lucide="database-zap"></i><span>云端服务异常不会影响本地文档</span></li>
+            </ul>
           </div>
-          <label>
-            <span>邮箱</span>
-            <input id="adminEmailInput" type="email" autocomplete="email" />
-          </label>
-          <label>
-            <span>密码</span>
-            <input id="adminPasswordInput" type="password" autocomplete="current-password" />
-          </label>
-          <button class="primary-action" id="adminLoginBtn" type="button">登录后台</button>
-          <p class="admin-inline-note" id="adminLoginHint">没有账号时，请先返回主工作台，在“云端”栏目注册；第一个注册账号会成为该工作区所有者。</p>
-          <a class="icon-button" href="./index.html#cloud">前往主工作台注册</a>
+          <div class="admin-login-form">
+            <p class="admin-eyebrow">管理员登录</p>
+            <h2>欢迎回来</h2>
+            <p>使用组织管理员账号进入后台；未登录或无权限时不会加载任何后台数据。</p>
+            <label>
+              <span>邮箱</span>
+              <input id="adminEmailInput" type="email" autocomplete="email" placeholder="name@organization.cn" />
+            </label>
+            <label>
+              <span>密码</span>
+              <input id="adminPasswordInput" type="password" autocomplete="current-password" placeholder="输入管理员密码" />
+            </label>
+            <button class="primary-action" id="adminLoginBtn" type="button">登录后台</button>
+            <p class="admin-inline-note" id="adminLoginHint">没有账号时，请先返回主工作台，在“云端”栏目注册；第一个注册账号会成为该工作区所有者。</p>
+            <a class="icon-button admin-register-link" href="./index.html#cloud">前往主工作台注册</a>
+          </div>
         </section>
 
         <section class="admin-denied-card" id="adminDeniedView" hidden>

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import JSZip from "jszip";
 
 const STORAGE_KEY = "school-doc-manager:v1";
 const STORAGE_BOOTSTRAP_KEY = `${STORAGE_KEY}:bootstrap`;
@@ -57,6 +58,34 @@ test("imports a document through drag and drop", async ({ page }) => {
   await expect(page.locator("#contentEditor")).toHaveValue(/导入正文/);
 });
 
+test("imports Word tables and PPTX slides through the document picker", async ({ page }) => {
+  const docx = await createOfficeDocxFixture();
+  const pptx = await createOfficePptxFixture();
+  await page.goto("/index.html");
+
+  await page.locator("#importInput").setInputFiles([
+    {
+      name: "工作台表格.docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      buffer: Buffer.from(docx),
+    },
+    {
+      name: "季度汇报.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      buffer: Buffer.from(pptx),
+    },
+  ]);
+
+  await expect(page.locator("#docList")).toContainText("工作台表格");
+  await expect(page.locator("#docList")).toContainText("季度汇报");
+  await page.locator(".doc-item", { hasText: "工作台表格" }).click();
+  await expect(page.locator("#contentEditor")).toHaveValue(/\| 部门 \| 任务 \|/);
+  await expect(page.locator("#contentEditor")).toHaveValue(/\| 综合部 \| 准备材料 \|/);
+  await page.locator(".doc-item", { hasText: "季度汇报" }).click();
+  await expect(page.locator("#contentEditor")).toHaveValue(/# 幻灯片 1/);
+  await expect(page.locator("#contentEditor")).toHaveValue(/季度工作复盘/);
+});
+
 test("exports the current document as Word by default", async ({ page }) => {
   await page.goto("/index.html");
 
@@ -66,6 +95,41 @@ test("exports the current document as Word by default", async ({ page }) => {
   const download = await downloadPromise;
 
   expect(download.suggestedFilename()).toMatch(/word-export\.docx$/);
+});
+
+test("restores a local workspace backup through the top toolbar", async ({ page }) => {
+  await page.goto("/index.html");
+  const backup = {
+    app: "mowen-nibi-workbench",
+    version: 2,
+    scope: "local-workspace",
+    data: {
+      folders: [{ id: "folder-restored", name: "恢复标签", kind: "tag", color: "#2563eb" }],
+      customTypes: [],
+      styles: [],
+      docs: [{
+        id: "doc-restored",
+        title: "已恢复文档",
+        type: "notice",
+        folderId: "folder-restored",
+        content: "这是从备份恢复的正文。",
+        createdAt: "2026-07-17T00:00:00.000Z",
+        updatedAt: "2026-07-17T00:00:00.000Z",
+      }],
+      settings: { apiKey: "must-not-import" },
+    },
+  };
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#restoreBackupInput").setInputFiles({
+    name: "workspace-backup.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(backup)),
+  });
+
+  await expect(page.locator("#titleInput")).toHaveValue("已恢复文档");
+  await expect(page.locator("#contentEditor")).toHaveValue("这是从备份恢复的正文。");
+  await expect(page.locator("#toastRegion")).toContainText("已恢复本机工作区");
 });
 
 test("selecting a document highlights it without reordering the list", async ({ page }) => {
@@ -357,7 +421,7 @@ test("routes PPT panel drops into the PPT material box", async ({ page }) => {
   await expect(page.locator("#pptPromptInput")).toHaveValue(/PPT 素材正文/);
 });
 
-test("drags a document card into the AI generation prompt", async ({ page }) => {
+test("drags a document card into the AI generation references", async ({ page }) => {
   await page.goto("/index.html");
   await page.locator('[data-tab="generate"]').click();
 
@@ -372,8 +436,10 @@ test("drags a document card into the AI generation prompt", async ({ page }) => 
   await page.dispatchEvent("#generatePrompt", "drop", { dataTransfer });
   await dataTransfer.dispose();
 
-  await expect(page.locator("#generatePrompt")).toHaveValue(/引用文档：drag-source/);
-  await expect(page.locator("#generatePrompt")).toHaveValue(/这是一段可用于起草的正文素材/);
+  await expect(page.locator("#referenceList .reference-chip")).toHaveCount(1);
+  await expect(page.locator("#referenceList")).toContainText("drag-source");
+  await expect(page.locator("#referenceSummary")).toContainText("1 份");
+  await expect(page.locator("#generatePrompt")).toHaveValue("");
 });
 
 test("PPT panel supports custom count, custom style skill, and structure check", async ({ page }) => {
@@ -471,6 +537,28 @@ test("workspace columns can be resized from the editor handles", async ({ page }
   expect(after).toBeLessThan(before);
 });
 
+test("custom document types can be added, renamed, and removed", async ({ page }) => {
+  await page.goto("/index.html");
+  await page.locator("#typeSelect").selectOption("custom");
+
+  const dialogAnswers = ["内部简报", "背景、重点事项、执行要求", "工作简报", "背景、工作进展、下一步安排", true];
+  page.on("dialog", async (dialog) => {
+    const answer = dialogAnswers.shift();
+    if (answer === true) await dialog.accept();
+    else await dialog.accept(String(answer || ""));
+  });
+  await page.locator("#addTypeBtn").click();
+  await expect(page.locator("#typeSelect")).toHaveValue(/custom-/);
+  await expect(page.locator("#typeSelect option", { hasText: "内部简报" })).toHaveCount(1);
+
+  await page.locator("#renameTypeBtn").click();
+  await expect(page.locator("#typeSelect option", { hasText: "工作简报" })).toHaveCount(1);
+
+  await page.locator("#deleteTypeBtn").click();
+  await expect(page.locator("#typeSelect")).toHaveValue("custom");
+  await expect(page.locator("#typeSelect option", { hasText: "工作简报" })).toHaveCount(0);
+});
+
 test("editor context menu supports menu roles arrow navigation and escape", async ({ page }) => {
   await page.goto("/index.html");
   await page.locator("#contentEditor").click({ button: "right" });
@@ -535,6 +623,241 @@ test("editor context menu rewrites selection with a chosen skill preset", async 
   await page.getByRole("menuitem", { name: /改文风/ }).click();
 
   await expect(page.locator("#contentEditor")).toHaveValue(/会议要求各相关人员持续推进项目/);
+});
+
+test("inline AI revision replaces the selected paragraph and can be undone", async ({ page }) => {
+  const originalContent = "第一段保持不变。\n第二段写得比较啰嗦，需要压缩。\n第三段也保持不变。";
+  const snapshot = {
+    selectedFolderId: "all",
+    selectedDocId: "doc-revise",
+    folders: [{ id: "folder-1", name: "标签", kind: "tag", color: "#0f766e" }],
+    docs: [
+      { id: "doc-revise", title: "原位修改测试", type: "notice", folderId: "folder-1", content: originalContent },
+    ],
+    styles: [],
+    settings: {
+      provider: "openai-compatible",
+      baseUrl: "http://127.0.0.1:4173/mock-ai",
+      endpointPath: "/chat/completions",
+      model: "test-model",
+    },
+  };
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, state }) => {
+      localStorage.setItem(storageKey, JSON.stringify(state));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, state: snapshot },
+  );
+  await page.route("**/mock-ai/chat/completions", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ choices: [{ message: { content: "第二段需要压缩。" } }] }),
+    });
+  });
+
+  await page.goto("/index.html");
+  await page.locator("#contentEditor").evaluate((editor) => {
+    const target = "第二段写得比较啰嗦，需要压缩。";
+    const start = editor.value.indexOf(target);
+    editor.focus();
+    editor.setSelectionRange(start, start + target.length);
+    editor.dispatchEvent(new Event("select", { bubbles: true }));
+  });
+  await expect(page.locator("#aiRevisionTarget")).toContainText("已选中");
+  await page.locator("#aiRevisionPrompt").fill("压缩为一句话，保留原意。");
+  await page.locator("#aiRevisionBtn").click();
+
+  await expect(page.locator("#contentEditor")).toHaveValue("第一段保持不变。\n第二段需要压缩。\n第三段也保持不变。");
+  await expect(page.locator("#titleInput")).toHaveValue("原位修改测试");
+  await page.locator("#undoEditBtn").click();
+  await expect(page.locator("#contentEditor")).toHaveValue(originalContent);
+});
+
+test("AI drafting supports new, overwrite, and cursor insertion modes", async ({ page }) => {
+  const snapshot = createAiWorkspaceSnapshot({
+    docs: [{
+      id: "doc-a",
+      title: "原通知",
+      type: "notice",
+      folderId: "folder-1",
+      content: "原正文第一段。\n原正文第二段。",
+    }],
+  });
+  await seedWorkspace(page, snapshot);
+  const requests = await installDeterministicAiRoute(page);
+
+  await page.goto("/index.html");
+  await page.locator('[data-tab="generate"]').click();
+  await page.locator("#generatePrompt").fill("请起草一份校内培训通知");
+  await page.locator("#generateDocBtn").click();
+
+  await expect(page.locator("#titleInput")).toHaveValue("校内培训通知");
+  await expect(page.locator("#contentEditor")).toHaveValue("请各部门按要求组织参训，时间和地点为【可替换占位符】。");
+  await expect(page.locator("#contentEditor")).not.toHaveValue(/校内培训通知/);
+
+  await page.locator("#generatePrompt").fill("覆盖为一份校内值班通知");
+  await page.locator("#overwriteDraftBtn").click();
+  await expect(page.locator("#titleInput")).toHaveValue("校内值班通知");
+  await expect(page.locator("#contentEditor")).toHaveValue("请相关人员按值班安排到岗，具体时间为【可替换占位符】。");
+
+  await page.locator("#contentEditor").evaluate((editor) => {
+    editor.focus();
+    editor.setSelectionRange(editor.value.length, editor.value.length);
+  });
+  await page.locator("#generatePrompt").fill("插入一条补充提醒");
+  await page.locator("#insertDraftBtn").click();
+  await expect(page.locator("#contentEditor")).toHaveValue(/请提前确认联系方式。$/);
+  expect(requests.filter((item) => item.taskType === "document_generation")).toHaveLength(3);
+});
+
+test("API connection test retries a 429 response and recovers", async ({ page }) => {
+  let attempts = 0;
+  await page.route("**/retry-ai/chat/completions", async (route) => {
+    attempts += 1;
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 429,
+        headers: { "retry-after": "0.01" },
+        contentType: "application/json",
+        body: JSON.stringify({ error: { message: "rate limited" } }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ choices: [{ message: { content: "连接正常" } }] }),
+    });
+  });
+  await page.goto("/index.html");
+  await page.locator("#apiTopBtn").click();
+  await page.locator("#baseUrlInput").fill("http://127.0.0.1:4173/retry-ai");
+  await page.locator("#endpointPathInput").fill("/chat/completions");
+  await page.locator("#modelInput").fill("retry-model");
+  await page.locator("#testApiBtn").click();
+
+  await expect.poll(() => attempts).toBe(2);
+  await expect(page.locator("#toastRegion")).toContainText("接口返回：连接正常");
+  await expect(page.locator("#aiStatus")).toContainText("已配置");
+});
+
+test("long AI drafting can be cancelled from the primary button", async ({ page }) => {
+  await seedWorkspace(page, createAiWorkspaceSnapshot());
+  let releaseRequest = null;
+  await page.route("**/mock-ai/chat/completions", async (route) => {
+    await new Promise((resolve) => {
+      releaseRequest = async () => {
+        try {
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ choices: [{ message: { content: "不应写入的迟到结果" } }] }),
+          });
+        } catch {
+          // The browser may already have cancelled the request.
+        }
+        resolve();
+      };
+    });
+  });
+
+  await page.goto("/index.html");
+  await page.locator('[data-tab="generate"]').click();
+  await page.locator("#generatePrompt").fill("开始一个可以取消的长任务");
+  await page.locator("#generateDocBtn").click();
+  await expect(page.locator("#generateDocBtn")).toContainText("点击取消");
+  await expect.poll(() => Boolean(releaseRequest)).toBe(true);
+  await page.locator("#generateDocBtn").click();
+  await releaseRequest();
+
+  await expect(page.locator("#generateDocBtn")).toContainText("生成新文档");
+  await expect(page.locator("#toastRegion")).toContainText("已取消本次文档生成");
+  await expect(page.locator("#titleInput")).not.toHaveValue("不应写入的迟到结果");
+});
+
+test("writer builder completes the AI chain and the generated writer can be invoked", async ({ page }) => {
+  const snapshot = createAiWorkspaceSnapshot({
+    docs: [
+      {
+        id: "doc-a",
+        title: "培训通知样本一",
+        type: "notice",
+        folderId: "folder-1",
+        content: "关于开展培训的通知。各部门按要求报名，并按时参加。",
+      },
+      {
+        id: "doc-b",
+        title: "培训通知样本二",
+        type: "notice",
+        folderId: "folder-1",
+        content: "关于组织专题学习的通知。请各部门明确人员，做好准备。",
+      },
+    ],
+  });
+  await seedWorkspace(page, snapshot);
+  const requests = await installDeterministicAiRoute(page, { delayMs: 45 });
+
+  await page.goto("/index.html");
+  await page.locator("#newStyleBtn").click();
+  await page.locator("#styleNameInput").fill("学校通知执笔人");
+  await page.locator("#skillSourceDocSelect").selectOption(["doc-a", "doc-b"]);
+  await page.locator("#addSourceDocsToSkillBtn").click();
+  await expect(page.locator("#styleExampleList .example-item")).toHaveCount(2);
+  await page.locator(".skill-builder-advanced summary").click();
+  await page.locator("#skillBuilderTestPrompt").fill("请起草一份校内值班通知，缺失信息保留占位符");
+  await page.locator("#summarizeStyleBtn").click();
+
+  await expect(page.locator("#skillBuilderModal")).toBeHidden();
+  const card = page.locator("[data-skill-card]", { hasText: "学校通知执笔人" });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("已启用", { timeout: 15_000 });
+  await expect(card).toContainText("已生成 v1");
+  await expect(card).toContainText("强规则 1 条");
+  await expect.poll(() => requests.some((item) => item.prompt.includes("校内值班通知，缺失信息保留占位符"))).toBe(true);
+
+  await card.locator("[data-invoke-skill]").click();
+  await expect(page.locator("#generatePrompt")).toHaveValue(/@学校通知执笔人/);
+  await page.locator("#generatePrompt").fill("@学校通知执笔人 请起草一份培训通知");
+  await expect(page.locator("#skillInputStatus")).toHaveText("必填 0/2");
+  await page.locator('[data-skill-input="事项"]').fill("专项培训");
+  await page.locator('[data-skill-input="对象"]').fill("各部门负责人");
+  await page.locator("#generateDocBtn").click();
+  await expect(page.locator("#titleInput")).toHaveValue("校内培训通知");
+  expect(requests.filter((item) => item.taskType === "document_generation").at(-1).prompt).toContain("- 对象：各部门负责人");
+
+  await expect.poll(async () => page.evaluate(
+    ({ storageKey }) => {
+      const stored = JSON.parse(localStorage.getItem(storageKey));
+      const writer = stored.styles.find((item) => item.name === "学校通知执笔人");
+      return writer ? `${writer.status}:${writer.versions.length}:${Boolean(writer.lastTest)}` : "missing";
+    },
+    { storageKey: STORAGE_KEY },
+  )).toBe("ready:1:true");
+});
+
+test("AI-generated PPT can be edited in-page and downloaded as native pptx", async ({ page }) => {
+  await seedWorkspace(page, createAiWorkspaceSnapshot());
+  await installDeterministicAiRoute(page);
+
+  await page.goto("/index.html");
+  await page.locator('[data-tab="ppt"]').click();
+  await page.locator("#pptTitleInput").fill("年度工作复盘");
+  await page.locator("#pptAutoSlideCountInput").check();
+  await page.locator("#pptPromptInput").fill("总结年度重点工作、关键数据和下一步计划");
+  await page.locator("#generatePptBtn").click();
+
+  await expect(page.locator("[data-ppt-slide-card]")).toHaveCount(3);
+  await expect(page.locator("#pptQualityReport")).toContainText("自动页数");
+  const firstTitle = page.locator('[data-ppt-slide-index="0"][data-ppt-slide-field="title"]');
+  await firstTitle.fill("年度工作复盘（修订）");
+  await expect(page.locator("#pptOutput")).toHaveValue(/年度工作复盘（修订）/);
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#downloadPptBtn").click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/年度工作复盘\.pptx$/);
 });
 
 test("skill packages can be exported and imported", async ({ page }) => {
@@ -769,6 +1092,7 @@ test("cloud panel keeps local mode safe before login", async ({ page }) => {
   await expect(page.locator("#cloudBillingReport")).toContainText("登录云端后显示套餐");
   await expect(page.locator("#featureMapGrid")).toContainText("文档管理");
   await expect(page.locator("#featureMapGrid")).toContainText("套餐与充值");
+  await page.locator(".feature-map-summary").click();
   await page.locator('[data-feature-action="draft"]').click();
   await expect(page.locator("#editorPanel")).toHaveAttribute("data-main-view", "editor");
   await expect(page.locator("#generatePanel")).toHaveClass(/active/);
@@ -777,6 +1101,74 @@ test("cloud panel keeps local mode safe before login", async ({ page }) => {
   await page.locator("#cloudBackToEditorBtn").click();
   await expect(page.locator("#editorPanel")).toHaveAttribute("data-main-view", "editor");
   await expect(page.locator("#contentEditor")).toBeVisible();
+});
+
+test("cloud user journey registers, verifies, syncs, recharges, and submits feedback", async ({ page }) => {
+  const snapshot = createAiWorkspaceSnapshot({
+    styles: [{
+      id: "style-cloud",
+      name: "云端通知执笔人",
+      handle: "cloud-notice",
+      category: "公文写作",
+      description: "云端同步测试",
+      enabled: true,
+      summary: "# 云端通知执笔人",
+      skillJson: JSON.stringify({ name: "云端通知执笔人", handle: "cloud-notice" }),
+      examples: [],
+      versions: [],
+    }],
+  });
+  snapshot.cloud = {
+    apiBaseUrl: "http://127.0.0.1:4173/mock-cloud",
+    authenticated: false,
+    user: null,
+    activeOrganization: null,
+    membership: null,
+  };
+  await seedWorkspace(page, snapshot);
+  const cloudMock = await installMockCloudRoute(page);
+
+  await page.goto("/index.html");
+  await page.locator("#cloudTopBtn").click();
+  await expect(page.locator("#cloudBaseUrlInput")).toHaveValue("http://127.0.0.1:4173/mock-cloud");
+  await page.locator("#cloudEmailInput").fill("qa-cloud@example.com");
+  await page.locator("#cloudPasswordInput").fill("Qa-cloud-2026!");
+  await page.locator("#cloudNameInput").fill("云端测试员");
+  await page.locator("#cloudRegisterBtn").click();
+
+  await expect(page.locator("#cloudAccountCard")).toContainText("qa-cloud@example.com");
+  await expect(page.locator("#cloudEmailTokenInput")).toHaveValue("verify-cloud-token");
+  await page.locator("#cloudVerifyEmailBtn").click();
+  await expect(page.locator("#cloudAccountCard")).toContainText("邮箱已验证");
+
+  await page.locator("#cloudSaveDocBtn").click();
+  await page.locator("#cloudSaveWriterBtn").click();
+  await expect.poll(() => cloudMock.documents.length).toBe(1);
+  await expect.poll(() => cloudMock.writers.length).toBe(1);
+  cloudMock.documents.push({
+    id: "cloud-doc-extra",
+    title: "云端新增文档",
+    type: "notice",
+    content: "从另一台设备同步的正文",
+    metadata: {},
+    version: 1,
+    created_at: "2026-07-17T00:00:00.000Z",
+    updated_at: "2026-07-17T00:00:00.000Z",
+  });
+  await page.locator("#cloudPullDocsBtn").click();
+  await expect(page.locator("#docList")).toContainText("云端新增文档");
+
+  await page.locator("#cloudManualPackageSelect").selectOption("credits_1000");
+  await page.locator("#cloudManualOrderNoteInput").fill("微信尾号 1234");
+  await page.locator("#cloudManualProofInput").fill("交易单号 QA-20260717");
+  await page.locator("#cloudManualOrderBtn").click();
+  await expect(page.locator("#cloudBillingReport")).toContainText("待确认");
+  await expect(page.locator("#cloudBillingReport")).toContainText("1000 点 AI 额度");
+
+  await page.locator("#cloudFeedbackInput").fill("云端操作旅程测试反馈");
+  await page.locator("#cloudSendFeedbackBtn").click();
+  await expect(page.locator("#cloudFeedbackInput")).toHaveValue("");
+  expect(cloudMock.feedbacks).toEqual(["云端操作旅程测试反馈"]);
 });
 
 test("admin workspace hash is guarded before login", async ({ page }) => {
@@ -1085,3 +1477,567 @@ async function dropTextFile(page, selector, name, text) {
   await page.dispatchEvent(selector, "drop", { dataTransfer });
   await dataTransfer.dispose();
 }
+
+function createAiWorkspaceSnapshot(overrides = {}) {
+  return {
+    selectedFolderId: "all",
+    selectedDocId: overrides.docs?.[0]?.id || "doc-a",
+    folders: [{ id: "folder-1", name: "工作文档", kind: "tag", color: "#0f766e" }],
+    docs: overrides.docs || [{
+      id: "doc-a",
+      title: "工作素材",
+      type: "notice",
+      folderId: "folder-1",
+      content: "这是用于测试的工作素材。",
+    }],
+    styles: overrides.styles || [],
+    settings: {
+      provider: "openai-compatible",
+      baseUrl: "http://127.0.0.1:4173/mock-ai",
+      endpointPath: "/chat/completions",
+      model: "deterministic-test-model",
+    },
+  };
+}
+
+async function seedWorkspace(page, state) {
+  await page.addInitScript(
+    ({ bootstrapKey, storageKey, snapshot }) => {
+      localStorage.setItem(storageKey, JSON.stringify(snapshot));
+      localStorage.setItem(bootstrapKey, JSON.stringify({ storage: "localStorage" }));
+      Object.defineProperty(window, "indexedDB", { configurable: true, value: undefined });
+    },
+    { bootstrapKey: STORAGE_BOOTSTRAP_KEY, storageKey: STORAGE_KEY, snapshot: state },
+  );
+}
+
+async function installDeterministicAiRoute(page, options = {}) {
+  const requests = [];
+  await page.route("**/mock-ai/chat/completions", async (route) => {
+    const body = route.request().postDataJSON();
+    const prompt = (body.messages || []).map((message) => message.content || "").join("\n");
+    requests.push({ prompt, taskType: body.task_type || "chat" });
+    if (options.delayMs) await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+
+    let content;
+    if (prompt.includes("单篇文档分析器")) {
+      content = JSON.stringify({
+        document_type: "通知",
+        scenario: "校内工作安排",
+        title_format: "关于事项的通知",
+        body_structure: ["背景", "分条安排", "执行要求"],
+        tone_style: ["正式", "清晰"],
+        candidate_rules: [{
+          category: "structure",
+          rule: "正文使用分条表达",
+          support_count: 1,
+          confidence: "medium",
+        }],
+        case_specific_items: [],
+        privacy_or_sensitive_items: [],
+        forbidden_to_reuse: [],
+      });
+    } else if (prompt.includes("多篇聚合器")) {
+      content = JSON.stringify({
+        document_count: 2,
+        overall_confidence: "medium",
+        mixed_sample_warning: false,
+        detected_document_types: ["通知"],
+        detected_scenarios: ["校内工作安排"],
+        aggregation_policy: "按同类样本提炼稳定结构、文风和格式规则",
+        common_structure: ["标题、正文安排、执行要求"],
+        common_style: ["正式清晰"],
+        common_format: ["分条表达"],
+        strong_rules: [{
+          category: "structure",
+          rule: "正文使用分条表达",
+          support_count: 2,
+          support_doc_ids: ["doc-a", "doc-b"],
+          scope: "document_type",
+          confidence: "medium",
+        }],
+        candidate_rules: [],
+        conflicts: [],
+        case_specific_exclusions: [],
+        privacy_findings: [],
+      });
+    } else if (prompt.includes("执笔人草案生成器")) {
+      content = JSON.stringify({
+        markdown: "# 学校通知执笔人\n\n用于生成校内正式通知。",
+        skill_json: {
+          name: "学校通知执笔人",
+          handle: "学校通知执笔人",
+          category: "公文写作",
+          description: "按分条结构起草清晰、可执行的学校通知。",
+          confidence: "medium",
+          style_rules: { must: ["正文使用分条表达"], recommended: ["语气正式清晰"], optional: [] },
+          rule_evidence: {
+            "正文使用分条表达": {
+              support_count: 2,
+              support_doc_ids: ["doc-a", "doc-b"],
+              scope: "document_type",
+              confidence: "medium",
+            },
+          },
+          input_contract: {
+            required_fields: ["事项", "对象"],
+            optional_fields: ["时间", "地点"],
+            missing_fact_policy: "事实缺失时使用【可替换占位符】",
+          },
+          forbidden: ["不得编造事实"],
+          privacy_filters: [],
+          case_specific_exclusions: [],
+        },
+        quality_report: { confidence: "medium", strong_rule_count: 1, candidate_rule_count: 0 },
+        example_input: { 事项: "值班安排" },
+      });
+    } else if (prompt.includes("生成测试与规则命中检查器")) {
+      content = JSON.stringify({
+        test_cases: [
+          { case_id: "normal_test", passed: true, score: 96, issues: [], test_document_markdown: "# 测试通知\n\n一、工作安排" },
+          { case_id: "missing_fact_test", passed: true, score: 95, issues: [], test_document_markdown: "时间：【可替换占位符】" },
+          { case_id: "leakage_test", passed: true, score: 98, issues: [], test_document_markdown: "未复用样本个案" },
+        ],
+        overall_result: {
+          passed: true,
+          score: 96,
+          must_rule_miss_count: 0,
+          privacy_leak_count: 0,
+          case_specific_leak_count: 0,
+          fabrication_risk_count: 0,
+          save_allowed: true,
+        },
+      });
+    } else if (prompt.includes("归藏 PPT 执笔人")) {
+      content = JSON.stringify({
+        title: "年度工作复盘",
+        style: "officialBlue",
+        slides: [
+          { type: "cover", title: "年度工作复盘", body: "重点工作与下一步计划", notes: "开场说明" },
+          { type: "data", title: "关键成果", bullets: ["重点任务完成率 92%", "材料按期交付"], notes: "说明数据口径" },
+          { type: "roadmap", title: "下一步计划", bullets: ["完善流程", "按月复盘"], notes: "明确责任分工" },
+        ],
+      });
+    } else if (prompt.includes("覆盖为一份校内值班通知")) {
+      content = "校内值班通知\n\n请相关人员按值班安排到岗，具体时间为【可替换占位符】。";
+    } else if (prompt.includes("插入一条补充提醒")) {
+      content = "补充提醒\n\n请提前确认联系方式。";
+    } else {
+      content = "校内培训通知\n\n请各部门按要求组织参训，时间和地点为【可替换占位符】。";
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ choices: [{ message: { content } }] }),
+    });
+  });
+  return requests;
+}
+
+async function installMockCloudRoute(page) {
+  const state = {
+    authenticated: false,
+    verified: false,
+    documents: [],
+    writers: [],
+    orders: [],
+    feedbacks: [],
+  };
+  const user = { id: "user-cloud", email: "qa-cloud@example.com", name: "云端测试员", email_verified_at: null };
+  const organization = { id: "org-cloud", name: "云端测试员工作区", plan: "free" };
+  const membership = { id: "member-cloud", role: "owner", organization_id: organization.id, user_id: user.id };
+  const manualPayment = {
+    packages: [
+      { id: "pro_monthly", title: "Pro 月度会员", amount_cny: 29, plan: "pro", duration_days: 30 },
+      { id: "credits_1000", title: "1000 点 AI 额度", amount_cny: 50, credits: 1000 },
+    ],
+    methods: [{ id: "wechat", label: "微信", qr_url: "", receiver: "测试收款方" }],
+  };
+
+  await page.route("**/mock-cloud/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname.replace("/mock-cloud", "") || "/";
+    const method = request.method();
+    let body = {};
+    try {
+      body = request.postDataJSON();
+    } catch {
+      body = {};
+    }
+    const json = (status, payload) => route.fulfill({
+      status,
+      contentType: "application/json",
+      body: JSON.stringify(payload),
+    });
+    const sessionPayload = () => ({
+      authenticated: state.authenticated,
+      user: { ...user, email_verified_at: state.verified ? "2026-07-17T00:00:00.000Z" : null },
+      organization,
+      organizations: [organization],
+      membership,
+    });
+
+    if (path === "/me" && method === "GET") {
+      return json(200, state.authenticated ? sessionPayload() : { authenticated: false });
+    }
+    if (path === "/auth/register" && method === "POST") {
+      state.authenticated = true;
+      return json(201, { ...sessionPayload(), email_verification_token: "verify-cloud-token" });
+    }
+    if (path === "/auth/verify-email" && method === "POST") {
+      state.verified = body.token === "verify-cloud-token";
+      return json(200, { user: sessionPayload().user });
+    }
+    if (path === "/usage/current" && method === "GET") {
+      return json(200, {
+        usage: { request_count: 2, failed_count: 0, total_tokens: 900, estimated_cost: 0.02, by_task_type: { draft: 2 } },
+        limits: { user_daily: 100, org_daily: 500, plan: "free" },
+      });
+    }
+    if (path === "/billing/summary" && method === "GET") {
+      return json(200, {
+        organization,
+        limits: { user_daily: 100, org_daily: 500 },
+        usage: { request_count: 2, failed_count: 0, estimated_cost: 0.02 },
+        manual_payment: manualPayment,
+        manual_orders: state.orders,
+        credits: { balance: 0 },
+        credit_ledger: [],
+        checkout: { enabled: false, available_plans: [] },
+      });
+    }
+    if (path === "/documents" && method === "POST") {
+      const document = {
+        id: `cloud-doc-${state.documents.length + 1}`,
+        ...body,
+        metadata: body.metadata || {},
+        version: 1,
+        created_at: "2026-07-17T00:00:00.000Z",
+        updated_at: "2026-07-17T00:00:00.000Z",
+      };
+      state.documents.push(document);
+      return json(201, { document });
+    }
+    if (path === "/documents" && method === "GET") return json(200, { documents: state.documents });
+    if (path === "/writers" && method === "POST") {
+      const writer = {
+        id: `cloud-writer-${state.writers.length + 1}`,
+        ...body,
+        version: 1,
+        created_at: "2026-07-17T00:00:00.000Z",
+        updated_at: "2026-07-17T00:00:00.000Z",
+      };
+      state.writers.push(writer);
+      return json(201, { writer });
+    }
+    if (path === "/writers" && method === "GET") return json(200, { writers: state.writers });
+    if (path === "/billing/manual-orders" && method === "POST") {
+      const order = {
+        id: `manual-${state.orders.length + 1}`,
+        title: "1000 点 AI 额度",
+        package_id: body.package_id,
+        amount_cny: 50,
+        credits: 1000,
+        payment_channel: body.payment_channel,
+        status: "pending",
+        created_at: "2026-07-17T00:00:00.000Z",
+      };
+      state.orders.push(order);
+      return json(201, { order });
+    }
+    if (path === "/feedback" && method === "POST") {
+      state.feedbacks.push(body.message);
+      return json(201, { feedback: { id: `feedback-${state.feedbacks.length}`, message: body.message } });
+    }
+    return json(404, { error: { message: `missing route ${method} ${path}` } });
+  });
+  return state;
+}
+
+async function createOfficeDocxFixture() {
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`,
+  );
+  zip.folder("_rels").file(
+    ".rels",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`,
+  );
+  zip.folder("word").file(
+    "document.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>工作任务表</w:t></w:r></w:p>
+    <w:tbl>
+      <w:tr><w:tc><w:p><w:r><w:t>部门</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>任务</w:t></w:r></w:p></w:tc></w:tr>
+      <w:tr><w:tc><w:p><w:r><w:t>综合部</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>准备材料</w:t></w:r></w:p></w:tc></w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>`,
+  );
+  return zip.generateAsync({ type: "uint8array" });
+}
+
+async function createOfficePptxFixture() {
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>`,
+  );
+  zip.folder("ppt").folder("slides").file(
+    "slide1.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>季度工作复盘</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
+</p:sld>`,
+  );
+  return zip.generateAsync({ type: "uint8array" });
+}
+
+test("references and the writer form are sent as facts with the drafting prompt", async ({ page }) => {
+  const snapshot = createAiWorkspaceSnapshot({
+    docs: [
+      { id: "doc-a", title: "培训会议纪要", type: "minutes", folderId: "folder-1", content: "周三下午三点在三楼会议室开展专项培训。" },
+      { id: "doc-b", title: "上级通知", type: "notice", folderId: "folder-1", content: "各单位须于月底前完成全员培训。" },
+    ],
+    styles: [{
+      id: "style-form",
+      name: "培训通知",
+      handle: "培训通知",
+      category: "公文写作",
+      description: "起草培训类通知",
+      enabled: true,
+      status: "ready",
+      skillJson: JSON.stringify({
+        name: "培训通知",
+        handle: "培训通知",
+        input_contract: { required_fields: ["主题", "对象"], optional_fields: ["语气"] },
+      }),
+      examples: [],
+      versions: [],
+    }],
+  });
+  await seedWorkspace(page, snapshot);
+  const requests = await installDeterministicAiRoute(page);
+
+  await page.goto("/index.html");
+  await page.locator('[data-tab="generate"]').click();
+  await page.locator("#generatePrompt").fill("@培训通知 起草一份培训通知");
+
+  await expect(page.locator("#skillInputForm")).toBeVisible();
+  await expect(page.locator("#skillInputFields [data-skill-input]")).toHaveCount(3);
+  await expect(page.locator("#skillInputStatus")).toHaveText("必填 0/2");
+
+  await page.locator("#addCurrentReferenceBtn").click();
+  await page.locator("#pickReferenceBtn").click();
+  await page.locator('[data-reference-option="doc-b"]').check();
+  await expect(page.locator("#referenceList .reference-chip")).toHaveCount(2);
+  await expect(page.locator("#referenceSummary")).toHaveText("2 份");
+
+  await page.locator("#generateDocBtn").click();
+  await expect(page.locator("#skillInputWarning")).toBeVisible();
+  await expect(page.locator("#skillInputWarning")).toContainText("主题、对象");
+  await expect(page.locator('[data-skill-input="主题"]')).toBeFocused();
+  expect(requests.filter((item) => item.taskType === "document_generation")).toHaveLength(0);
+
+  await page.locator('[data-skill-input="主题"]').fill("专项业务培训");
+  await expect(page.locator("#skillInputStatus")).toHaveText("必填 1/2");
+  await page.locator("#generateDocBtn").click();
+  await expect(page.locator("#skillInputWarning")).toContainText("对象");
+  await page.locator("#generateDocBtn").click();
+
+  await expect(page.locator("#titleInput")).toHaveValue("校内培训通知");
+  const draftRequests = requests.filter((item) => item.taskType === "document_generation");
+  expect(draftRequests).toHaveLength(1);
+  expect(draftRequests[0].prompt).toContain("- 主题：专项业务培训");
+  expect(draftRequests[0].prompt).toContain("- 对象：【未填写】");
+  expect(draftRequests[0].prompt).toContain("【资料 1】培训会议纪要");
+  expect(draftRequests[0].prompt).toContain("周三下午三点在三楼会议室开展专项培训。");
+  expect(draftRequests[0].prompt).toContain("【资料 2】上级通知");
+  await expect(page.locator("#toastRegion")).toContainText("还有 1 处待填内容");
+});
+
+test("placeholder checklist locates and fills pending content", async ({ page }) => {
+  await seedWorkspace(page, createAiWorkspaceSnapshot({
+    docs: [{
+      id: "doc-a",
+      title: "培训通知",
+      type: "notice",
+      folderId: "folder-1",
+      content: "请于【培训时间】到【培训地点】报到。\n培训时间：【培训时间】。",
+    }],
+  }));
+
+  await page.goto("/index.html");
+  await expect(page.locator("#placeholderToggleBtn")).toBeVisible();
+  await expect(page.locator("#placeholderCount")).toHaveText("3");
+
+  await page.locator("#contentEditor").evaluate((editor) => {
+    editor.focus();
+    editor.setSelectionRange(0, 0);
+  });
+  await page.locator("#contentEditor").press("F8");
+  expect(await page.locator("#contentEditor").evaluate((editor) => editor.value.slice(editor.selectionStart, editor.selectionEnd))).toBe("【培训时间】");
+  await page.locator("#contentEditor").press("F8");
+  expect(await page.locator("#contentEditor").evaluate((editor) => editor.value.slice(editor.selectionStart, editor.selectionEnd))).toBe("【培训地点】");
+
+  await page.locator("#placeholderToggleBtn").click();
+  await expect(page.locator("#placeholderPanel")).toBeVisible();
+  await expect(page.locator("#placeholderSummary")).toHaveText("3 处 · 2 项");
+  const timeRow = page.locator('[data-placeholder-token="【培训时间】"]');
+  await timeRow.locator("input").fill("5 月 20 日上午 9:00");
+  await timeRow.locator("input").press("Enter");
+
+  await expect(page.locator("#contentEditor")).toHaveValue("请于5 月 20 日上午 9:00到【培训地点】报到。\n培训时间：5 月 20 日上午 9:00。");
+  await expect(page.locator("#placeholderCount")).toHaveText("1");
+  await page.locator("#undoEditBtn").click();
+  await expect(page.locator("#contentEditor")).toHaveValue(/【培训时间】/);
+});
+
+test("export reminds about pending placeholders and supports the GB/T 9704 layout", async ({ page }) => {
+  await seedWorkspace(page, createAiWorkspaceSnapshot({
+    docs: [{
+      id: "doc-a",
+      title: "关于开展专项培训的通知",
+      type: "notice",
+      folderId: "folder-1",
+      content: "各部门：\n\n一、培训安排\n请于【培训时间】报到。\n\n综合办公室\n2026年5月14日",
+    }],
+  }));
+
+  await page.goto("/index.html");
+  let dialogMessage = "";
+  page.once("dialog", async (dialog) => {
+    dialogMessage = dialog.message();
+    await dialog.dismiss();
+  });
+  await page.locator("#exportDocBtn").click();
+  await expect.poll(() => dialogMessage).toContain("还有 1 处待填内容");
+  await expect(page.locator("#toastRegion")).toContainText("已取消导出");
+
+  await page.locator("#exportFormatBtn").click();
+  await expect(page.locator("#exportFormatMenu")).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator('[data-export-layout="gongwen"]').click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("关于开展专项培训的通知.docx");
+  await expect(page.locator("#exportFormatMenu")).toBeHidden();
+  await expect(page.locator("#exportDocBtn")).toHaveAttribute("data-export-layout", "gongwen");
+
+  const zip = await JSZip.loadAsync(await readDownload(download));
+  const documentXml = await zip.file("word/document.xml").async("string");
+  expect(documentXml).toContain('w:eastAsia="方正小标宋简体"');
+  expect(documentXml).toContain('w:eastAsia="黑体"');
+  expect(documentXml).toContain('w:linePitch="579"');
+  expect(zip.file("word/footer2.xml")).toBeTruthy();
+});
+
+async function readDownload(download) {
+  const stream = await download.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+for (const mode of ["overwrite", "insert"]) {
+  test(`${mode} protects against cross-document writes while generation is pending`, async ({ page }) => {
+    await seedWorkspace(page, createAiWorkspaceSnapshot({
+      docs: [
+        { id: "doc-a", title: "通知 A", type: "notice", folderId: "folder-1", content: "文档 A 原文。" },
+        { id: "doc-b", title: "通知 B", type: "notice", folderId: "folder-1", content: "文档 B 原文。" },
+      ],
+    }));
+    let release;
+    const responseReady = new Promise((resolve) => { release = resolve; });
+    await page.route("**/mock-ai/chat/completions", async (route) => {
+      await responseReady;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ choices: [{ message: { content: "通知 A 新稿\n\n为 A 生成的内容。" } }] }),
+      });
+    });
+    await page.goto("/index.html");
+    await page.locator('[data-tab="generate"]').click();
+    await page.locator("#generatePrompt").fill("为文档 A 生成通知");
+    const requested = page.waitForRequest("**/mock-ai/chat/completions");
+    await page.locator(mode === "overwrite" ? "#overwriteDraftBtn" : "#insertDraftBtn").click();
+    await requested;
+    try {
+      await page.locator('[data-doc-id="doc-b"]').click();
+    } finally {
+      release();
+    }
+
+    await expect(page.locator("#toastRegion")).toContainText("本次生成结果未写入");
+    await expect(page.locator("#titleInput")).toHaveValue("通知 B");
+    await expect(page.locator("#contentEditor")).toHaveValue("文档 B 原文。");
+    await page.locator('[data-doc-id="doc-a"]').click();
+    await expect(page.locator("#contentEditor")).toHaveValue("文档 A 原文。");
+  });
+}
+
+test("placeholder checklist clears cross-document drafts even when closed", async ({ page }) => {
+  await seedWorkspace(page, createAiWorkspaceSnapshot({
+    docs: [
+      { id: "doc-a", title: "通知 A", type: "notice", folderId: "folder-1", content: "A 的时间：【时间】。" },
+      { id: "doc-b", title: "通知 B", type: "notice", folderId: "folder-1", content: "B 的时间：【时间】。" },
+    ],
+  }));
+  await page.goto("/index.html");
+  await page.locator("#placeholderToggleBtn").click();
+  const input = page.locator("#placeholderList input");
+  await input.fill("A 的日期");
+  await page.locator("#saveDocBtn").click();
+  await expect(input).toHaveValue("A 的日期");
+
+  await page.locator('[data-doc-id="doc-b"]').click();
+  await expect(input).toHaveValue("");
+  await input.fill("B 的日期");
+  await page.locator("#placeholderCloseBtn").click();
+  await page.locator('[data-doc-id="doc-a"]').click();
+  await page.locator("#placeholderToggleBtn").click();
+  await expect(input).toHaveValue("");
+  await input.fill("A 的新日期");
+  await input.press("Enter");
+  await expect(page.locator("#contentEditor")).toHaveValue("A 的时间：A 的新日期。");
+  await page.locator('[data-doc-id="doc-b"]').click();
+  await expect(page.locator("#contentEditor")).toHaveValue("B 的时间：【时间】。");
+});
+
+test("an empty required field before a newline still blocks the first generation attempt", async ({ page }) => {
+  await seedWorkspace(page, createAiWorkspaceSnapshot({
+    styles: [{
+      id: "style-required", name: "培训通知", handle: "培训通知", enabled: true, status: "ready",
+      examples: [], versions: [],
+      skillJson: JSON.stringify({
+        name: "培训通知", handle: "培训通知",
+        input_contract: { required_fields: ["时间", "地点"] },
+      }),
+    }],
+  }));
+  const requests = await installDeterministicAiRoute(page);
+  await page.goto("/index.html");
+  await page.locator('[data-tab="generate"]').click();
+  await page.locator("#generatePrompt").fill("@培训通知\n时间：\n地点：三楼会议室");
+  await expect(page.locator("#skillInputStatus")).toHaveText("必填 1/2");
+  await page.locator("#generateDocBtn").click();
+  await expect(page.locator("#skillInputWarning")).toContainText("时间");
+  await expect(page.locator('[data-skill-input="时间"]')).toBeFocused();
+  expect(requests).toHaveLength(0);
+});

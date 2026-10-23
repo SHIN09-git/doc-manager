@@ -1,4 +1,5 @@
 import { EVENTS } from "../../core/eventBus.js";
+import { MAX_SKILL_TRAINING_EXAMPLES } from "../../config/constants.js";
 import { buildUnsupportedFileMessage, canImportFile, readImportFileText } from "../../utils/fileReaders.js";
 import { createId, now } from "../../utils/helpers.js";
 import { filterImportableFilesBySize } from "../../utils/importGuards.js";
@@ -64,6 +65,10 @@ export function createSkillTrainingController(deps = {}) {
       return { importedCount: 0, skippedFiles: [], sizeSkipped: [] };
     }
     ui.editingStyle.examples = Array.isArray(ui.editingStyle.examples) ? ui.editingStyle.examples : [];
+    if (ui.editingStyle.examples.length >= MAX_SKILL_TRAINING_EXAMPLES) {
+      toast(`每个执笔人最多保留 ${MAX_SKILL_TRAINING_EXAMPLES} 篇训练样本，请先移除旧样本`, "warn");
+      return { importedCount: 0, skippedFiles: files.map((file) => file?.name || "未命名文件"), sizeSkipped: [] };
+    }
     const { accepted: importFiles, skipped: sizeSkipped } = await filterImportableFilesBySize(files, {
       confirm: confirmLargeImport,
       notify: toast,
@@ -75,6 +80,10 @@ export function createSkillTrainingController(deps = {}) {
     await withProgress(`正在导入 ${importFiles.length} 个示范文件`, async (progress) => {
       for (const [index, file] of importFiles.entries()) {
         progress.update(`正在读取 ${file.name}`, Math.round((index / importFiles.length) * 78) + 10);
+        if (ui.editingStyle.examples.length >= MAX_SKILL_TRAINING_EXAMPLES) {
+          skippedFiles.push(file.name);
+          continue;
+        }
         if (!canImportFile(file.name)) {
           skippedFiles.push(file.name);
           continue;
@@ -110,6 +119,8 @@ export function createSkillTrainingController(deps = {}) {
 
   async function summarizeStyle() {
     const style = syncEditingStyleFromInputs();
+    const runAutoTest = els.skillAutoTestInput?.checked !== false;
+    const customTestPrompt = String(els.skillBuilderTestPrompt?.value || "").trim();
     if (!String(style?.name || "").trim()) {
       toast("请输入执笔人名称", "warn");
       els.styleNameInput?.focus?.();
@@ -122,6 +133,10 @@ export function createSkillTrainingController(deps = {}) {
     if (style.examples.length < 2) {
       const ok = confirmUnstableDraft("只有 1 篇示范只能生成不稳定草案，建议至少 3-5 篇。是否继续生成草案？");
       if (!ok) return null;
+    }
+    if (style.examples.length > MAX_SKILL_TRAINING_EXAMPLES) {
+      toast(`训练样本超过 ${MAX_SKILL_TRAINING_EXAMPLES} 篇，请移除超额样本后再生成`, "warn");
+      return null;
     }
     const findings = scanPrivacyRisksInObject(
       (style.examples || []).map((example) => ({ name: example.name, text: example.text })),
@@ -166,7 +181,11 @@ export function createSkillTrainingController(deps = {}) {
     const progress = createSkillCardProgress(saved.id);
 
     try {
-      const outputs = await skillBuilder.buildSkillWithAiChain(saved, progress, { signal: controller.signal });
+      const outputs = await skillBuilder.buildSkillWithAiChain(saved, progress, {
+        signal: controller.signal,
+        runTest: runAutoTest,
+        testInput: customTestPrompt,
+      });
       throwIfTaskAborted(controller.signal);
       const version = skillBuilder.createSkillVersion(saved, outputs);
       progress.update("正在保存执笔人版本", 92);
@@ -181,23 +200,31 @@ export function createSkillTrainingController(deps = {}) {
         qualityReport: outputs.qualityReport,
         summary: outputs.markdown,
         skillJson: outputs.skillJson,
-        status: "ready",
+        enabled: runAutoTest ? saved.enabled !== false : false,
+        status: runAutoTest ? "ready" : "draft",
         buildProgress: null,
         lastBuildError: "",
         lastBuildAt: now(),
-        lastTest: {
-          id: createId(),
-          createdAt: now(),
-          prompt: "AI 自动生成的执笔人测试",
-          result: outputs.testDoc,
-          report: outputs.testReport,
-        },
+        lastTest: runAutoTest
+          ? {
+              id: createId(),
+              createdAt: now(),
+              prompt: customTestPrompt || "AI 自动生成的执笔人测试",
+              result: outputs.testDoc,
+              report: outputs.testReport,
+            }
+          : null,
         versions: [...(saved.versions || []), version].slice(-30),
       };
       nextStyle.lastBuildResult = getSkillBuildResult(nextStyle, version, outputs);
       const committed = commitSkillToState(nextStyle);
       eventBus.emit(EVENTS.RENDER_STYLE_EDITOR);
-      toast(`已生成 v${version.version} 并保存到：${getSkillLocation(committed)}`);
+      toast(
+        runAutoTest
+          ? `已生成 v${version.version} 并保存到：${getSkillLocation(committed)}`
+          : `已生成 v${version.version} 待测试草案；通过测试后才能启用：${getSkillLocation(committed)}`,
+        runAutoTest ? "info" : "warn",
+      );
       return committed;
     } catch (error) {
       const isCanceled = isTaskAbortError(error) || controller.signal?.aborted;

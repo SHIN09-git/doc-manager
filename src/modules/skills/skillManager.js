@@ -4,6 +4,7 @@ import { coerceArray } from "../../utils/validation.js";
 import { EVENTS } from "../../core/eventBus.js";
 import { MISSING_FACT_PLACEHOLDER, SKILL_RUNTIME_PRIORITY_RULES } from "../../config/constants.js";
 import { scanPrivacyRisksInObject } from "../../utils/privacyScan.js";
+import { buildGongwenPrompt, isGongwenWriter, GONGWEN_LICENSE } from "./gongwenWriter.js";
 
 const DEFAULT_MISSING_FACT_POLICY = `事实缺失时使用${MISSING_FACT_PLACEHOLDER}，不编造具体人名、时间、地点、单位、数据、结论、政策依据和落款。`;
 export const SKILL_PACKAGE_SCHEMA = "mowen-nibi-workbench.skill-package.v1";
@@ -54,6 +55,7 @@ export function createSkillPackage(skill = {}) {
   const name = String(skill.name || "未命名执笔人").trim();
   const handle = normalizeHandle(skill.handle || name);
   const ruleJson = parseRuleJsonForPackage(skill.skillJson, skill);
+  if (isGongwenWriter(skill)) ruleJson.third_party_license = GONGWEN_LICENSE;
   return {
     schema: SKILL_PACKAGE_SCHEMA,
     version: 1,
@@ -371,7 +373,7 @@ export function createSkillManager(deps) {
           }))
         : [],
       lastTest: style.lastTest || null,
-      status: ["building", "failed", "ready"].includes(style.status) ? style.status : "",
+      status: ["building", "failed", "draft", "ready"].includes(style.status) ? style.status : "",
       buildProgress: style.buildProgress && typeof style.buildProgress === "object"
         ? {
             message: style.buildProgress.message || "",
@@ -649,7 +651,7 @@ export function createSkillManager(deps) {
     return skills;
   }
 
-  function buildSkillPromptForDocumentGeneration(skills) {
+  function buildSkillPromptForDocumentGeneration(skills, options = {}) {
     const enabledSkills = (skills || []).filter(isSkillEnabled);
     if (enabledSkills.length === 0) return "";
     return [
@@ -666,6 +668,7 @@ export function createSkillManager(deps) {
           skill.summary ? `用户可编辑说明.md：\n${String(skill.summary).slice(0, 4000)}` : "",
           `规则置信度：${skillJson.confidence || skill.qualityReport?.confidence || "low"}`,
           `程序调用执行卡 JSON：\n${JSON.stringify(payload, null, 2)}`,
+          isGongwenWriter(skill) ? buildGongwenPrompt(options) : "",
         ]
           .filter(Boolean)
           .join("\n");

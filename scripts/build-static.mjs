@@ -1,12 +1,17 @@
-import { cp, mkdir, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const STATIC_FILE_COPIES = [
+  ["LICENSE", "LICENSE"],
+  ["THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"],
   ["index.html", "index.html"],
   ["admin.html", "admin.html"],
+  ["workbench.css", "workbench.css"],
   ["styles.css", "styles.css"],
+  ["ui-refresh.css", "ui-refresh.css"],
+  ["runtime-config.js", "runtime-config.js"],
   ["build/bundle.js", "build/bundle.js"],
 ];
 
@@ -29,7 +34,40 @@ export async function buildStaticSite({ root = process.cwd(), dist = path.join(r
     await cp(path.join(root, "assets"), path.join(dist, "assets"), { recursive: true });
   }
 
+  const runtimeConfig = buildRuntimeConfig(process.env);
+  await writeFile(path.join(dist, "runtime-config.js"), serializeRuntimeConfig(runtimeConfig), "utf8");
+
   return dist;
+}
+
+export function buildRuntimeConfig(env = {}) {
+  return {
+    apiBaseUrl: normalizePublicApiBaseUrl(env.PUBLIC_API_BASE_URL || ""),
+  };
+}
+
+export function serializeRuntimeConfig(config) {
+  const json = JSON.stringify(config, null, 2).replace(/</g, "\\u003c");
+  return `globalThis.__MOWEN_RUNTIME_CONFIG__ = Object.freeze(${json});\n`;
+}
+
+function normalizePublicApiBaseUrl(value) {
+  const candidate = String(value || "").trim().replace(/\/+$/, "");
+  if (!candidate) return "";
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error("PUBLIC_API_BASE_URL 必须是完整的 HTTPS API 地址");
+  }
+  const isLocalHttp = url.protocol === "http:" && ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname);
+  if (url.protocol !== "https:" && !isLocalHttp) {
+    throw new Error("PUBLIC_API_BASE_URL 在非本地环境必须使用 HTTPS");
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("PUBLIC_API_BASE_URL 不得包含账号、查询参数或片段");
+  }
+  return candidate;
 }
 
 export async function collectStaticFileCopies({

@@ -5,8 +5,10 @@ import {
   formatManualPaymentChannel,
 } from "../modules/cloud/billingFormatters.js";
 import { copyTextToClipboard, sanitizeUrl } from "../utils/helpers.js";
+import { readStorageValue, writeStorageValue } from "../utils/safeStorage.js";
 import { buildCsv } from "./adminCsv.js";
 import { triggerDownload } from "./adminDownload.js";
+import { getRuntimeApiBaseUrl } from "../config/runtimeConfig.js";
 
 const LOCAL_API_BASE_URL = "http://127.0.0.1:8787/api";
 const DEFAULT_API_BASE_URL = getDefaultApiBaseUrl();
@@ -49,7 +51,7 @@ const els = {};
 document.addEventListener("DOMContentLoaded", async () => {
   bindElements();
   bindEvents();
-  state.apiBaseUrl = normalizeBaseUrl(localStorage.getItem(API_BASE_STORAGE_KEY) || DEFAULT_API_BASE_URL);
+  state.apiBaseUrl = normalizeBaseUrl(readStorageValue(globalThis.localStorage, API_BASE_STORAGE_KEY, DEFAULT_API_BASE_URL));
   state.savedAuditFilters = loadSavedAuditFilters();
   els.adminBaseUrlInput.value = state.apiBaseUrl;
   await refreshSession({ silent: true });
@@ -93,8 +95,8 @@ function bindEvents() {
   els.adminBaseUrlInput.addEventListener("change", () => {
     state.apiBaseUrl = normalizeBaseUrl(els.adminBaseUrlInput.value);
     els.adminBaseUrlInput.value = state.apiBaseUrl;
-    localStorage.setItem(API_BASE_STORAGE_KEY, state.apiBaseUrl);
-    toast("API 地址已保存");
+    const saved = writeStorageValue(globalThis.localStorage, API_BASE_STORAGE_KEY, state.apiBaseUrl);
+    toast(saved ? "API 地址已保存" : "当前浏览器不允许保存 API 地址，本次会话仍可使用", saved ? "info" : "warn");
   });
   els.adminLoginBtn.addEventListener("click", login);
   els.adminPasswordInput.addEventListener("keydown", (event) => {
@@ -153,7 +155,7 @@ async function refreshSession(options = {}) {
 async function login() {
   await withLoading(els.adminLoginBtn, "登录中", async () => {
     state.apiBaseUrl = normalizeBaseUrl(els.adminBaseUrlInput.value);
-    localStorage.setItem(API_BASE_STORAGE_KEY, state.apiBaseUrl);
+    writeStorageValue(globalThis.localStorage, API_BASE_STORAGE_KEY, state.apiBaseUrl);
     const data = await apiRequest("/auth/login", {
       method: "POST",
       body: JSON.stringify({
@@ -1435,7 +1437,7 @@ function daysUntil(dateText) {
 
 function loadSavedAuditFilters() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(ADMIN_AUDIT_FILTERS_STORAGE_KEY) || "[]");
+    const parsed = JSON.parse(readStorageValue(globalThis.localStorage, ADMIN_AUDIT_FILTERS_STORAGE_KEY, "[]"));
     if (!Array.isArray(parsed)) return [];
     return parsed
       .map((item) => ({
@@ -1506,7 +1508,7 @@ function normalizeSavedAuditFilters(value) {
 }
 
 function persistAuditFilters() {
-  localStorage.setItem(ADMIN_AUDIT_FILTERS_STORAGE_KEY, JSON.stringify(state.savedAuditFilters));
+  return writeStorageValue(globalThis.localStorage, ADMIN_AUDIT_FILTERS_STORAGE_KEY, JSON.stringify(state.savedAuditFilters));
 }
 
 function confirmAdminAction(options = {}) {
@@ -1743,6 +1745,8 @@ function normalizeBaseUrl(value) {
 }
 
 function getDefaultApiBaseUrl() {
+  const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+  if (runtimeApiBaseUrl) return runtimeApiBaseUrl;
   const location = window.location;
   if (!location || !["http:", "https:"].includes(location.protocol)) {
     return LOCAL_API_BASE_URL;

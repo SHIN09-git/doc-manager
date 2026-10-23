@@ -54,3 +54,60 @@ test("testSkillOnGeneration requires three lightweight test cases and preserves 
   assert.equal(result.report.overall_result.save_allowed, false);
   assert.match(result.document, /missing_fact_test/);
 });
+
+test("buildSkillWithAiChain can create a gated draft without running the generation test", async () => {
+  const labels = [];
+  const builder = createSkillBuilder({
+    callAiJsonWithRepair: async (_messages, label) => {
+      labels.push(label);
+      if (label.includes("单篇")) {
+        return {
+          document_name: label,
+          document_type: "通知",
+          scenario: "校内安排",
+          candidate_rules: [{ rule: "正文使用分条表达", confidence: "medium" }],
+        };
+      }
+      if (label.includes("聚合")) {
+        return {
+          document_count: 2,
+          overall_confidence: "medium",
+          detected_document_types: ["通知"],
+          strong_rules: [{
+            category: "structure",
+            rule: "正文使用分条表达",
+            support_count: 2,
+            support_doc_ids: ["doc-1", "doc-2"],
+            confidence: "medium",
+          }],
+          candidate_rules: [],
+        };
+      }
+      return {
+        markdown: "# 通知执笔人",
+        skill_json: {
+          name: "通知执笔人",
+          handle: "notice",
+          style_rules: { must: ["正文使用分条表达"], recommended: [], optional: [] },
+        },
+        quality_report: { confidence: "medium" },
+        example_input: {},
+      };
+    },
+    normalizeSkillJsonText: (value) => value,
+  });
+
+  const result = await builder.buildSkillWithAiChain({
+    name: "通知执笔人",
+    handle: "notice",
+    examples: [
+      { id: "doc-1", name: "一.txt", text: "通知一" },
+      { id: "doc-2", name: "二.txt", text: "通知二" },
+    ],
+  }, null, { runTest: false });
+
+  assert.equal(labels.filter((label) => label.includes("生成测试")).length, 0);
+  assert.equal(labels.length, 4);
+  assert.equal(JSON.parse(result.testReport).skipped, true);
+  assert.equal(JSON.parse(result.testReport).overall_result.save_allowed, false);
+});

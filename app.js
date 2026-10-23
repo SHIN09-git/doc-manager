@@ -21,6 +21,12 @@ import { createDocumentTypeController } from "./src/modules/documents/documentTy
 import { createFindReplaceController } from "./src/modules/editor/findReplaceController.js";
 import { createEditorContextMenuController } from "./src/modules/editor/editorContextMenuController.js";
 import { createGenerationController } from "./src/modules/generation/generationController.js";
+import { createReferenceController } from "./src/modules/generation/referenceMaterials.js";
+import { createSkillInputFormController } from "./src/modules/generation/skillInputForm.js";
+import { createPlaceholderController } from "./src/modules/editor/placeholderController.js";
+import { createExportMenuController } from "./src/modules/documents/exportMenuController.js";
+import { isGongwenWriter } from "./src/modules/skills/gongwenWriter.js";
+import { createGongwenController } from "./src/modules/skills/gongwenController.js";
 import { createImportDropController } from "./src/modules/imports/importDropController.js";
 import { createBrowserFileSystemAdapter } from "./src/modules/folders/fileSystemAdapter.js";
 import { createFolderManager } from "./src/modules/folders/folderManager.js";
@@ -63,6 +69,7 @@ import {
 } from "./src/utils/helpers.js";
 import { buildUnsupportedFileMessage, canImportFile, readImportFileText } from "./src/utils/fileReaders.js";
 import { filterImportableFilesBySize } from "./src/utils/importGuards.js";
+import { triggerDownload } from "./src/utils/download.js";
 
 const state = {};
 const ui = {
@@ -399,6 +406,25 @@ const documentManager = createDocumentManager({
   getDownloadLocation,
   getType,
   downloadBlob,
+  hasActiveTasks: () => Object.keys(ui.activeTasks || {}).length > 0,
+  restoreWorkspaceState: (snapshot) => {
+    state.folders = clone(snapshot.folders || []);
+    state.customTypes = clone(snapshot.customTypes || []);
+    state.styles = clone(snapshot.styles || []);
+    state.docs = clone(snapshot.docs || []);
+    state.settings = clone(snapshot.settings || {});
+    ui.selectedFolderId = "all";
+    ui.selectedDocId = null;
+    ui.selectedSkillCardId = null;
+    ui.skillMarkdownDirty = false;
+    ui.skillMarkdownDirtySkillId = null;
+    ui.generatedDraft = "";
+    ui.pptDraft = "";
+    ui.pptDeckSpec = null;
+    resetEditorUndoHistory();
+    initializeMissingData();
+    return state;
+  },
   toast,
   confirmLargeImport,
   withImportProgress: withProgress,
@@ -443,6 +469,21 @@ const documentRenderer = createDocumentRenderer({
   onPermanentlyDeleteDocument: documentPanelController.permanentlyDeleteDocument,
   onClearTrash: documentPanelController.clearTrashDocuments,
 });
+const gongwenController = createGongwenController({ els, getCurrentDoc, resolveInvokedSkills });
+const referenceController = createReferenceController({ els, ui, state, toast, setupDocumentDrop });
+const skillInputFormController = createSkillInputFormController({
+  els,
+  ui,
+  resolveInvokedSkills,
+  parseSkillJsonObject,
+  isGongwenWriter,
+  toast,
+});
+const placeholderController = createPlaceholderController({
+  els, toast, recordEditorUndoPoint, saveEditor,
+  getCurrentDocId: () => getCurrentDoc()?.id ?? null,
+});
+const exportMenuController = createExportMenuController({ els, state, persist, exportCurrentDocument });
 const generationController = createGenerationController({
   els,
   ui,
@@ -463,6 +504,9 @@ const generationController = createGenerationController({
   saveEditor,
   getDocumentLocation,
   getSelectionOrLine,
+  getReferenceContext: referenceController.getContext,
+  skillInputForm: skillInputFormController,
+  onDocumentGenerated: gongwenController.onDocumentGenerated,
 });
 const editorContextMenuController = createEditorContextMenuController({
   state,
@@ -598,7 +642,11 @@ function bindElements() {
     "newDocBtn",
     "importInput",
     "exportDocBtn",
+    "exportFormatBtn",
+    "exportFormatMenu",
     "backupBtn",
+    "restoreBackupBtn",
+    "restoreBackupInput",
     "trashTopBtn",
     "trashModal",
     "trashModalCount",
@@ -640,13 +688,47 @@ function bindElements() {
     "findNextBtn",
     "replaceNextBtn",
     "replaceAllBtn",
+    "placeholderToggleBtn",
+    "placeholderCount",
+    "placeholderPanel",
+    "placeholderSummary",
+    "placeholderPrevBtn",
+    "placeholderNextBtn",
+    "placeholderCloseBtn",
+    "placeholderList",
+    "aiRevisionBar",
+    "aiRevisionTarget",
+    "aiRevisionPrompt",
+    "aiRevisionBtn",
     "contentEditor",
     "editorMenu",
     "editorSkillSelect",
     "aiStatus",
     "generatePanel",
     "generatePrompt",
+    "gongwenOptions",
+    "gongwenGenreSelect",
+    "gongwenCheckBtn",
+    "gongwenCheckPanel",
+    "gongwenCheckGenre",
+    "gongwenCheckCloseBtn",
+    "gongwenCheckBody",
     "skillMentionPanel",
+    "skillInputForm",
+    "skillInputTitle",
+    "skillInputStatus",
+    "clearSkillInputBtn",
+    "skillInputFields",
+    "skillInputWarning",
+    "referencePanel",
+    "referenceSummary",
+    "clearReferencesBtn",
+    "referenceList",
+    "addCurrentReferenceBtn",
+    "pickReferenceBtn",
+    "referencePicker",
+    "referenceSearchInput",
+    "referenceOptions",
     "generateDocBtn",
     "overwriteDraftBtn",
     "insertDraftBtn",
@@ -842,8 +924,13 @@ function bindEvents() {
   skillMentionController.bindEvents();
 
   generationController.bindEvents();
-  setupDocumentDrop(els.generatePanel, appendDocumentToGeneratePrompt);
-  setupDocumentDrop(els.generatePrompt, appendDocumentToGeneratePrompt);
+  gongwenController.bindEvents();
+  referenceController.bindEvents();
+  skillInputFormController.bindEvents();
+  placeholderController.bindEvents();
+  exportMenuController.bindEvents();
+  setupDocumentDrop(els.generatePanel, (docId) => referenceController.addReference(docId));
+  setupDocumentDrop(els.generatePrompt, (docId) => referenceController.addReference(docId));
   pptController.bindEvents();
 
   skillBuilderModalController.bindEvents();
@@ -888,6 +975,7 @@ function render() {
   renderDocList();
   documentTypeController.renderTypeSelect();
   renderEditor();
+  generationController.syncRevisionTarget();
   renderApiSettings();
   renderCloudPanel();
   renderStyleEditor();
@@ -912,10 +1000,13 @@ function renderFolderSelect() {
 
 function renderStyleSelect() {
   skillRenderer.renderStyleSelect();
+  gongwenController.sync();
+  skillInputFormController.sync();
 }
 
 function renderDocList() {
   documentRenderer.renderDocList();
+  referenceController.render();
 }
 
 function renderTrashModal() {
@@ -924,6 +1015,9 @@ function renderTrashModal() {
 
 function renderEditor() {
   documentRenderer.renderEditor();
+  gongwenController.invalidate();
+  gongwenController.sync();
+  placeholderController.refresh();
   resetEditorUndoHistory();
   const currentDoc = getCurrentDoc();
   if (currentDoc && !currentDoc.deletedAt) {
@@ -943,15 +1037,6 @@ function normalizeCloudBaseUrl(value) {
 async function cloudRequest(path, options = {}) {
   return cloudApiClient.request(path, options);
 }
-
-function debounce(fn, delay = 250) {
-  let timer = null;
-  return (...args) => {
-    window.clearTimeout(timer);
-    timer = window.setTimeout(() => fn(...args), delay);
-  };
-}
-
 
 function getCloudSettingsLocation() {
   return `${normalizeCloudBaseUrl(state.cloud?.apiBaseUrl || DEFAULT_CLOUD_API_BASE_URL)} / 当前工作区`;
@@ -1051,6 +1136,8 @@ function queueSearchRender() {
 }
 
 function saveEditor(showToast) {
+  gongwenController.invalidate();
+  placeholderController.refresh();
   return documentEditor.saveEditor(showToast);
 }
 
@@ -1148,17 +1235,6 @@ async function syncDocumentToRealFolder(doc) {
   return folderManager.syncDocumentToRealFolder(doc);
 }
 
-function appendDocumentToGeneratePrompt(docId) {
-  const doc = state.docs.find((item) => item.id === docId);
-  if (!doc) return;
-  const block = [`# 引用文档：${doc.title || "未命名文档"}`, "", doc.content || "（空白文档）"].join("\n");
-  const separator = els.generatePrompt.value.trim() ? "\n\n---\n\n" : "";
-  els.generatePrompt.value = `${els.generatePrompt.value}${separator}${block}`;
-  els.generatePrompt.focus();
-  els.generatePrompt.dispatchEvent(new Event("input", { bubbles: true }));
-  toast(`已把“${doc.title || "未命名文档"}”加入生成提示词`);
-}
-
 async function importDocuments(event) {
   return documentPanelController.importDocuments(event);
 }
@@ -1167,8 +1243,8 @@ async function importDocumentFiles(files) {
   return documentPanelController.importDocumentFiles(files);
 }
 
-async function exportCurrentDocument() {
-  return documentPanelController.exportCurrentDocument();
+async function exportCurrentDocument(options) {
+  return documentPanelController.exportCurrentDocument(options);
 }
 
 function exportWorkspaceBackup() {
@@ -1243,28 +1319,12 @@ function cancelSkillBuild(skillId) {
   return skillWorkbenchController.cancelBuild(skillId);
 }
 
-function exportSkillMarkdown() {
-  return skillPackageController.exportMarkdown();
-}
-
-function exportSkillJson() {
-  return skillPackageController.exportJson();
-}
-
 function exportSkillPackage() {
   return skillPackageController.exportPackage();
 }
 
-async function importSkillPackages(event) {
-  return skillPackageController.importPackages(event);
-}
-
 async function importSkillPackageFiles(files) {
   return skillPackageController.importPackageFiles(files);
-}
-
-function confirmSkillPackageImport(fileName, preview) {
-  return skillPackageController.confirmPackageImport(fileName, preview);
 }
 
 function confirmPrivacyRiskNotice(intro, findings = []) {
@@ -1558,12 +1618,12 @@ function resolveInvokedSkills(text, fallbackSkillId) {
   return skillManager.resolveInvokedSkills(text, fallbackSkillId);
 }
 
-function formatSkillPrompt(skills) {
-  return buildSkillPromptForDocumentGeneration(skills);
+function formatSkillPrompt(skills, options) {
+  return buildSkillPromptForDocumentGeneration(skills, options);
 }
 
-function buildSkillPromptForDocumentGeneration(skills) {
-  return skillManager.buildSkillPromptForDocumentGeneration(skills);
+function buildSkillPromptForDocumentGeneration(skills, options) {
+  return skillManager.buildSkillPromptForDocumentGeneration(skills, options);
 }
 
 function isSkillEnabled(skill) {
@@ -1644,41 +1704,7 @@ function getDownloadLocation(fileName) {
 }
 
 function downloadBlob(fileName, content, type) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function downloadCsv(fileName, rows) {
-  const content = rows.map((row) => row.map(csvCell).join(",")).join("\n");
-  downloadBlob(fileName, `\ufeff${content}\n`, "text/csv;charset=utf-8");
-}
-
-function csvCell(value) {
-  const text = String(value ?? "");
-  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-async function copyTextToClipboard(text) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-  const input = document.createElement("textarea");
-  input.value = text;
-  input.setAttribute("readonly", "");
-  input.style.position = "fixed";
-  input.style.left = "-9999px";
-  document.body.appendChild(input);
-  input.select();
-  document.execCommand("copy");
-  input.remove();
+  return triggerDownload(fileName, content, type);
 }
 
 function toast(message, tone = "info") {

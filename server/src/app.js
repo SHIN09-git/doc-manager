@@ -35,6 +35,7 @@ import {
   sendNoContent,
   setSecurityHeaders,
 } from "./utils/http.js";
+import { sanitizeRequestUrl } from "./utils/requestLogging.js";
 
 const SESSION_COOKIE = "mowen_session";
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 14;
@@ -45,6 +46,7 @@ const LOGIN_FAIL_LIMIT = 5;
 const EMAIL_REQUEST_WINDOW_MS = 1000 * 60 * 10;
 const EMAIL_REQUEST_LIMIT = 3;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const DUMMY_PASSWORD_HASH = "pbkdf2$210000$dW5rbm93bi11c2VyLXNhbHQ$HsoqoShQk9x4I-dSoT9TluJsMi6SS-O1csTamvnNYOs";
 const ADMIN_ROLES = new Set(["owner", "admin"]);
 const ADMIN_VIEW_ROLES = new Set(["owner", "admin", "operator"]);
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -79,6 +81,9 @@ export function createApp(options = {}) {
     let context = null;
     try {
       await store.init();
+      if (typeof store.refresh === "function") {
+        await store.refresh();
+      }
       const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
       context = {
         env,
@@ -242,6 +247,7 @@ async function register(ctx) {
   const name = String(body.name || "").trim() || email.split("@")[0];
   if (!EMAIL_RE.test(email)) throw new HttpError(400, "请输入有效邮箱", "invalid_email");
   if (password.length < 8) throw new HttpError(400, "密码至少需要 8 位", "weak_password");
+  const passwordHash = await hashPassword(password);
 
   const payload = await ctx.store.write((data) => {
     if (data.users.some((user) => user.email === email && !user.disabled_at)) {
@@ -253,7 +259,7 @@ async function register(ctx) {
       email,
       name,
       avatar_url: "",
-      password_hash: hashPassword(password),
+      password_hash: passwordHash,
       email_verified_at: null,
       created_at: now,
       updated_at: now,
@@ -314,14 +320,15 @@ async function login(ctx) {
   const email = normalizeEmail(body.email);
   const password = String(body.password || "");
   const ipHash = hashClientIp(ctx);
-  const payload = await ctx.store.write((data) => {
+  const payload = await ctx.store.write(async (data) => {
     const throttleError = getLoginThrottleError(data, email, ipHash);
     if (throttleError) {
       addSystemEvent(data, null, null, "warn", "auth.login.throttled", "登录失败次数过多", { email });
       return { error: throttleError };
     }
     const user = data.users.find((item) => item.email === email && !item.disabled_at);
-    if (!user || !verifyPassword(password, user.password_hash)) {
+    const passwordMatches = await verifyPassword(password, user?.password_hash || DUMMY_PASSWORD_HASH);
+    if (!user || !passwordMatches) {
       recordLoginAttempt(data, email, ipHash, false);
       addSystemEvent(data, null, user?.id || null, "warn", "auth.login.failed", "邮箱或密码不正确", { email });
       return { error: new HttpError(401, "邮箱或密码不正确", "invalid_credentials") };
@@ -353,7 +360,7 @@ async function logout(ctx) {
       data.sessions = data.sessions.filter((session) => session.token_hash !== tokenHash);
     });
   }
-  ctx.response.setHeader("Set-Cookie", clearSessionCookie(SESSION_COOKIE, { secure: ctx.env.sessionSecure }));
+  ctx.response.setHeader("Set-Cookie", clearSessionCookie(SESSION_COOKIE, sessionCookieOptions(ctx.env)));
   sendNoContent(ctx.response);
 }
 
@@ -362,7 +369,7 @@ async function logoutAll(ctx) {
     data.sessions = data.sessions.filter((session) => session.user_id !== ctx.auth.user.id);
     addAudit(data, null, ctx.auth.user.id, "auth.logout_all", "user", ctx.auth.user.id, {});
   });
-  ctx.response.setHeader("Set-Cookie", clearSessionCookie(SESSION_COOKIE, { secure: ctx.env.sessionSecure }));
+  ctx.response.setHeader("Set-Cookie", clearSessionCookie(SESSION_COOKIE, sessionCookieOptions(ctx.env)));
   sendNoContent(ctx.response);
 }
 
@@ -463,6 +470,7 @@ async function resetPassword(ctx) {
   const tokenHash = body.token ? sha256(String(body.token)) : "";
   if (!EMAIL_RE.test(email) || !tokenHash) throw new HttpError(400, "请填写邮箱和重置码", "missing_reset_token");
   if (password.length < 8) throw new HttpError(400, "密码至少需要 8 位", "weak_password");
+  const passwordHash = await hashPassword(password);
   await ctx.store.write((data) => {
     const user = data.users.find((item) => item.email === email && !item.disabled_at);
     if (!user) throw new HttpError(400, "重置码无效或已过期", "invalid_reset_token");
@@ -474,7 +482,7 @@ async function resetPassword(ctx) {
     if (!reset) throw new HttpError(400, "重置码无效或已过期", "invalid_reset_token");
     const now = new Date().toISOString();
     reset.used_at = now;
-    user.password_hash = hashPassword(password);
+    user.password_hash = passwordHash;
     user.updated_at = now;
     data.sessions = data.sessions.filter((session) => session.user_id !== user.id);
     addAudit(data, null, user.id, "auth.password_reset.complete", "user", user.id, {});
@@ -1198,8 +1206,9 @@ async function deleteApiKey(ctx, id) {
 }
 
 async function chatProxy(ctx) {
+  requireVerifiedUser(ctx);
   const body = await readJsonBody(ctx.request, ctx.env.maxJsonBodyBytes);
-  const { data, organization } = await loadOrg(ctx);
+  const { organization } = await loadOrg(ctx);
   const messages = Array.isArray(body.messages) ? body.messages : [];
   if (messages.length === 0) throw new HttpError(400, "messages 不能为空", "missing_messages");
   const provider = String(body.provider || "openai-compatible");
@@ -1210,8 +1219,13 @@ async function chatProxy(ctx) {
 
   const startedAt = new Date().toISOString();
   let usageRecord = null;
+  let creditSettled = false;
+  let creditRefunded = false;
+  let creditRefundError = null;
+  let responsePayload = null;
   try {
-    const providerKey = getProviderKey(data, organization.id, provider, ctx.env);
+    const providerData = await ctx.store.read();
+    const providerKey = getProviderKey(providerData, organization.id, provider, ctx.env);
     const result = await callAiProvider({ env: ctx.env, providerKey, body: { ...body, messages, model } });
     usageRecord = await recordUsage(ctx, {
       organization_id: organization.id,
@@ -1227,11 +1241,68 @@ async function chatProxy(ctx) {
       created_at: startedAt,
     });
     if (quotaDecision.source === "credit") {
-      await spendCreditsForUsage(ctx, organization.id, ctx.auth.user.id, usageRecord.id, 1);
+      await settleReservedAiCredits(ctx, {
+        organizationId: organization.id,
+        userId: ctx.auth.user.id,
+        reservationId: quotaDecision.credit_reservation.id,
+        usageId: usageRecord.id,
+      });
+      creditSettled = true;
     }
-    sendJson(ctx.response, 200, { reply: result.reply, mocked: result.mocked, usage: publicUsage(usageRecord) });
+    responsePayload = { reply: result.reply, mocked: result.mocked, usage: publicUsage(usageRecord) };
   } catch (error) {
-    if (isCreditSpendFailedError(error) && usageRecord?.status === "success") {
+    if (quotaDecision.source === "credit" && quotaDecision.credit_reservation && !creditSettled) {
+      for (let attempt = 0; attempt < 2 && !creditRefunded; attempt += 1) {
+        try {
+          const refund = await refundReservedAiCredits(ctx, {
+            organizationId: organization.id,
+            userId: ctx.auth.user.id,
+            reservationId: quotaDecision.credit_reservation.id,
+            reason: usageRecord?.status === "success" ? "credit_settlement_failed" : "ai_request_failed",
+          });
+          creditRefunded = !refund?.skipped;
+          creditRefundError = null;
+        } catch (refundError) {
+          creditRefundError = refundError;
+        }
+      }
+      if (creditRefundError) {
+        await recordSystemEvent(ctx, {
+          organizationId: organization.id,
+          userId: ctx.auth.user.id,
+          level: "error",
+          type: "billing.credit.refund_failed",
+          message: refundError.message || "AI 预留额度退回失败",
+          metadata: {
+            reservation_id: quotaDecision.credit_reservation.id,
+            original_error: error.message || "",
+          },
+        }).catch(() => null);
+      }
+    }
+    if (usageRecord?.status === "success") {
+      await recordSystemEvent(ctx, {
+        organizationId: organization.id,
+        userId: ctx.auth.user.id,
+        level: "error",
+        type: "billing.credit.settlement_failed",
+        message: error.message || "AI 额度结算失败",
+        metadata: {
+          usage_id: usageRecord.id,
+          reservation_id: quotaDecision.credit_reservation?.id || null,
+          credit_refunded: creditRefunded,
+        },
+      }).catch(() => null);
+      if (error instanceof HttpError) throw error;
+      throw new HttpError(503, creditRefunded
+        ? "额度结算失败，本次预留额度已退回，请重试"
+        : "额度结算异常，系统已记录，请联系管理员处理", creditRefunded
+        ? "credit_settlement_failed"
+        : "credit_refund_failed", {
+        usage_id: usageRecord.id,
+      });
+    }
+    if (error instanceof HttpError && error.code === "credit_spend_failed") {
       throw error;
     }
     usageRecord = await recordUsage(ctx, {
@@ -1260,9 +1331,16 @@ async function chatProxy(ctx) {
         usage_id: usageRecord.id,
       },
     });
+    if (creditRefundError) {
+      throw new HttpError(503, "AI 调用失败且预留额度退回异常，系统已记录，请联系管理员处理", "credit_refund_failed", {
+        reservation_id: quotaDecision.credit_reservation?.id || null,
+        usage_id: usageRecord.id,
+      });
+    }
     if (error instanceof HttpError) throw error;
     throw new HttpError(502, friendlyAiError(error), "ai_proxy_failed");
   }
+  sendJson(ctx.response, 200, responsePayload);
 }
 
 async function currentUsage(ctx) {
@@ -2140,7 +2218,7 @@ async function deleteOwnAccount(ctx) {
       archived_empty_organization_resources: archivedResources,
     });
   });
-  ctx.response.setHeader("Set-Cookie", clearSessionCookie(SESSION_COOKIE, { secure: ctx.env.sessionSecure }));
+  ctx.response.setHeader("Set-Cookie", clearSessionCookie(SESSION_COOKIE, sessionCookieOptions(ctx.env)));
   sendNoContent(ctx.response);
 }
 
@@ -2337,9 +2415,16 @@ function recordLoginAttempt(data, email, ipHash, success) {
 
 function setSession(response, env, token) {
   response.setHeader("Set-Cookie", createSessionCookie(SESSION_COOKIE, token, {
-    secure: env.sessionSecure,
+    ...sessionCookieOptions(env),
     maxAgeSeconds: SESSION_TTL_MS / 1000,
   }));
+}
+
+function sessionCookieOptions(env) {
+  return {
+    secure: env.sessionSecure,
+    sameSite: env.sessionSameSite,
+  };
 }
 
 function requireAuth(ctx) {
@@ -2871,22 +2956,52 @@ function grantCredits(data, { organizationId, userId, orderId = null, amount, re
   return account;
 }
 
-async function spendCreditsForUsage(ctx, organizationId, userId, usageId, amount) {
-  let result;
-  if (typeof ctx.store.spendCreditsForUsage === "function") {
-    result = await ctx.store.spendCreditsForUsage({ organizationId, userId, usageId, amount });
-    if (result?.skipped) throw new HttpError(402, "可用 AI 额度不足，请刷新后重试", "credit_spend_failed", { usage_id: usageId, amount: result.amount });
-    return result;
+async function reserveAiCredits(ctx, { organizationId, userId, amount = 1 }) {
+  if (typeof ctx.store.reserveAiCredit === "function") {
+    return ctx.store.reserveAiCredit({ organizationId, userId, amount });
   }
-  result = await ctx.store.write((data) => {
+  return ctx.store.write((data) => {
     const creditAmount = Math.max(1, Math.floor(Number(amount || 1)));
     const account = ensureCreditAccount(data, organizationId, userId);
     if (account.balance < creditAmount) {
-      addSystemEvent(data, organizationId, userId, "warn", "billing.credit.spend_skipped", "额度扣减失败，余额不足", { usage_id: usageId, amount: creditAmount });
-      return { account, ledger: null, skipped: true, amount: creditAmount };
+      return { account, reservation: null, skipped: true, amount: creditAmount };
     }
     account.balance -= creditAmount;
     account.updated_at = new Date().toISOString();
+    const reservation = {
+      id: createId("acr"),
+      organization_id: organizationId,
+      user_id: userId,
+      usage_id: null,
+      amount: creditAmount,
+      balance_after: account.balance,
+      status: "reserved",
+      created_at: account.updated_at,
+      updated_at: account.updated_at,
+    };
+    data.ai_credit_reservations.push(reservation);
+    return { account, reservation, skipped: false, amount: creditAmount };
+  });
+}
+
+async function settleReservedAiCredits(ctx, { organizationId, userId, reservationId, usageId }) {
+  if (typeof ctx.store.settleAiCreditReservation === "function") {
+    return ctx.store.settleAiCreditReservation({ organizationId, userId, reservationId, usageId });
+  }
+  return ctx.store.write((data) => {
+    const reservation = data.ai_credit_reservations.find((item) =>
+      item.id === reservationId &&
+      item.organization_id === organizationId &&
+      item.user_id === userId);
+    if (!reservation) throw new Error(`AI credit reservation ${reservationId} not found`);
+    if (reservation.status === "settled") return { reservation, ledger: null, alreadySettled: true };
+    if (reservation.status !== "reserved") {
+      throw new Error(`AI credit reservation ${reservationId} cannot be settled from ${reservation.status}`);
+    }
+    const now = new Date().toISOString();
+    reservation.status = "settled";
+    reservation.usage_id = usageId;
+    reservation.updated_at = now;
     const ledger = {
       id: createId("led"),
       organization_id: organizationId,
@@ -2894,21 +3009,54 @@ async function spendCreditsForUsage(ctx, organizationId, userId, usageId, amount
       order_id: null,
       usage_id: usageId,
       direction: "out",
-      amount: creditAmount,
-      balance_after: account.balance,
+      amount: reservation.amount,
+      balance_after: reservation.balance_after,
       reason: "ai_quota_overage",
-      created_at: account.updated_at,
+      created_at: now,
     };
     data.credit_ledger.push(ledger);
-    addAudit(data, organizationId, userId, "billing.credit.spend", "ai_usage", usageId, { amount: creditAmount, balance_after: account.balance });
-    return { account, ledger, skipped: false, amount: creditAmount };
+    addAudit(data, organizationId, userId, "billing.credit.settle", "ai_usage", usageId, {
+      reservation_id: reservationId,
+      amount: reservation.amount,
+      balance_after: reservation.balance_after,
+    });
+    return { reservation, ledger, alreadySettled: false };
   });
-  if (result?.skipped) throw new HttpError(402, "可用 AI 额度不足，请刷新后重试", "credit_spend_failed", { usage_id: usageId, amount: result.amount });
-  return result;
 }
 
-function isCreditSpendFailedError(error) {
-  return error instanceof HttpError && error.code === "credit_spend_failed";
+async function refundReservedAiCredits(ctx, { organizationId, userId, reservationId, reason = "ai_request_failed" }) {
+  if (typeof ctx.store.refundAiCreditReservation === "function") {
+    return ctx.store.refundAiCreditReservation({ organizationId, userId, reservationId, reason });
+  }
+  return ctx.store.write((data) => {
+    const reservation = data.ai_credit_reservations.find((item) =>
+      item.id === reservationId &&
+      item.organization_id === organizationId &&
+      item.user_id === userId);
+    if (!reservation) throw new Error(`AI credit reservation ${reservationId} not found`);
+    if (reservation.status === "refunded") {
+      return { reservation, account: null, alreadyRefunded: true, skipped: false };
+    }
+    if (reservation.status !== "reserved") {
+      return { reservation, account: null, alreadyRefunded: false, skipped: true };
+    }
+    const account = ensureCreditAccount(data, organizationId, userId);
+    account.balance += Number(reservation.amount || 0);
+    account.updated_at = new Date().toISOString();
+    reservation.status = "refunded";
+    reservation.updated_at = account.updated_at;
+    addAudit(data, organizationId, userId, "billing.credit.refund", "ai_credit_reservation", reservationId, {
+      amount: reservation.amount,
+      balance_after: account.balance,
+      reason,
+    });
+    addSystemEvent(data, organizationId, userId, "info", "billing.credit.refunded", "AI 调用未完成，预留额度已退回", {
+      reservation_id: reservationId,
+      amount: reservation.amount,
+      reason,
+    });
+    return { reservation, account, alreadyRefunded: false, skipped: false };
+  });
 }
 
 function getOrganizationCreditSummary(data, organizationId) {
@@ -2933,9 +3081,7 @@ function getEmailRequestThrottleError(data, email, template) {
 
 function normalizePaymentEvent(body, env = {}) {
   const eventType = String(body.event_type || body.type || "").trim();
-  const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
-  const data = body.data && typeof body.data === "object" ? body.data : {};
-  const organizationId = String(body.organization_id || payload.organization_id || data.organization_id || "").trim();
+  const organizationId = findPaymentOrganizationId(body);
   const plan = resolvePaymentPlan(body, env);
   const normalized = {
     organization_id: organizationId,
@@ -2948,6 +3094,9 @@ function normalizePaymentEvent(body, env = {}) {
     return { ...normalized, action: plan ? "activate_plan" : "record", event_name: "billing.plan.event", message: "收到套餐变更事件" };
   }
   if (["subscription.deleted", "subscription.cancelled", "subscription.canceled"].includes(eventType)) {
+    if (!plan) {
+      return { ...normalized, action: "record", event_name: "billing.subscription.unmapped", message: "收到未匹配套餐的订阅取消事件，未自动降级" };
+    }
     return { ...normalized, action: "downgrade_plan", plan: "free", event_name: "billing.subscription.cancelled", message: "订阅取消，组织套餐已降级为 free" };
   }
   if (["invoice.payment_failed", "payment.failed"].includes(eventType)) {
@@ -2968,6 +3117,43 @@ function resolvePaymentPlan(body, env = {}) {
   const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
   const data = body.data && typeof body.data === "object" ? body.data : {};
   return normalizePlan(body.plan || payload.plan || data.plan || data.metadata?.plan || "");
+}
+
+function findPaymentOrganizationId(body) {
+  const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
+  const data = body.data && typeof body.data === "object" ? body.data : {};
+  const object = data.object && typeof data.object === "object" ? data.object : {};
+  const metadata = body.metadata && typeof body.metadata === "object" ? body.metadata : {};
+  const payloadMetadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
+  const dataMetadata = data.metadata && typeof data.metadata === "object" ? data.metadata : {};
+  const objectMetadata = object.metadata && typeof object.metadata === "object" ? object.metadata : {};
+  const candidates = [
+    body.organization_id,
+    body.organizationId,
+    payload.organization_id,
+    payload.organizationId,
+    data.organization_id,
+    data.organizationId,
+    object.organization_id,
+    object.organizationId,
+    body.client_reference_id,
+    body.clientReferenceId,
+    payload.client_reference_id,
+    payload.clientReferenceId,
+    data.client_reference_id,
+    data.clientReferenceId,
+    object.client_reference_id,
+    object.clientReferenceId,
+    metadata.organization_id,
+    metadata.organizationId,
+    payloadMetadata.organization_id,
+    payloadMetadata.organizationId,
+    dataMetadata.organization_id,
+    dataMetadata.organizationId,
+    objectMetadata.organization_id,
+    objectMetadata.organizationId,
+  ];
+  return String(candidates.find((item) => item !== undefined && item !== null && String(item).trim()) || "").trim();
 }
 
 function findPaymentPriceId(body) {
@@ -3150,27 +3336,87 @@ async function recordSystemEvent(ctx, {
 
 async function enforceRateLimit(ctx, organizationId) {
   const today = todayKey();
+  const data = await ctx.store.read();
+  const organization = data.organizations.find((item) => item.id === organizationId);
+  const plan = getEffectivePlan(organization);
+  const limits = getPlanLimits(plan, ctx.env);
+  if (typeof ctx.store.reserveAiQuota === "function") {
+    const decision = await ctx.store.reserveAiQuota({
+      organizationId,
+      userId: ctx.auth.user.id,
+      scope: "ai.chat",
+      date: today,
+      limits,
+      plan,
+    });
+    if (decision.user_limited && !decision.credit_allowed) {
+      throw new HttpError(429, "今日个人 AI 额度已用完", "user_rate_limited");
+    }
+    if (decision.org_limited && !decision.credit_allowed) {
+      throw new HttpError(429, "今日组织 AI 额度已用完", "org_rate_limited");
+    }
+    let creditReservation = decision.credit_reservation || null;
+    if (decision.source === "credit" && !creditReservation) {
+      const credit = await reserveAiCredits(ctx, {
+        organizationId,
+        userId: ctx.auth.user.id,
+        amount: 1,
+      });
+      if (credit.skipped || !credit.reservation) {
+        throw new HttpError(402, "可用 AI 额度不足，请刷新后重试", "credit_spend_failed", {
+          amount: credit.amount || 1,
+        });
+      }
+      creditReservation = credit.reservation;
+    }
+    return {
+      source: decision.source,
+      plan,
+      user_limited: decision.user_limited,
+      org_limited: decision.org_limited,
+      credit_reservation: creditReservation,
+    };
+  }
   return ctx.store.write((data) => {
-    const organization = data.organizations.find((item) => item.id === organizationId);
-    const plan = getEffectivePlan(organization);
-    const limits = getPlanLimits(plan, ctx.env);
-    const userCount = data.ai_usage.filter((item) =>
+    const userUsageCount = data.ai_usage.filter((item) =>
       item.user_id === ctx.auth.user.id &&
       item.created_at?.startsWith(today)).length;
-    const orgCount = data.ai_usage.filter((item) =>
+    const orgUsageCount = data.ai_usage.filter((item) =>
       item.organization_id === organizationId &&
       item.created_at?.startsWith(today)).length;
+    const userReservationCount = countRateLimitReservations(data, { userId: ctx.auth.user.id, date: today });
+    const orgReservationCount = countRateLimitReservations(data, { organizationId, date: today });
+    const userCount = Math.max(userUsageCount, userReservationCount);
+    const orgCount = Math.max(orgUsageCount, orgReservationCount);
     const userLimited = userCount >= limits.userDaily;
     const orgLimited = orgCount >= limits.orgDaily;
     const account = getCreditAccount(data, organizationId, ctx.auth.user.id);
     const creditAllowed = Number(account.balance || 0) > 0;
     let source = "plan";
+    let creditReservation = null;
     if ((userLimited || orgLimited) && creditAllowed) source = "credit";
     if (userLimited && !creditAllowed) {
       throw new HttpError(429, "今日个人 AI 额度已用完", "user_rate_limited");
     }
     if (orgLimited && !creditAllowed) {
       throw new HttpError(429, "今日组织 AI 额度已用完", "org_rate_limited");
+    }
+    if (source === "credit") {
+      const reservedAccount = ensureCreditAccount(data, organizationId, ctx.auth.user.id);
+      reservedAccount.balance -= 1;
+      reservedAccount.updated_at = new Date().toISOString();
+      creditReservation = {
+        id: createId("acr"),
+        organization_id: organizationId,
+        user_id: ctx.auth.user.id,
+        usage_id: null,
+        amount: 1,
+        balance_after: reservedAccount.balance,
+        status: "reserved",
+        created_at: reservedAccount.updated_at,
+        updated_at: reservedAccount.updated_at,
+      };
+      data.ai_credit_reservations.push(creditReservation);
     }
     data.rate_limits.push({
       id: createId("lim"),
@@ -3181,8 +3427,23 @@ async function enforceRateLimit(ctx, organizationId) {
       count: 1,
       updated_at: new Date().toISOString(),
     });
-    return { source, plan, user_limited: userLimited, org_limited: orgLimited };
+    return {
+      source,
+      plan,
+      user_limited: userLimited,
+      org_limited: orgLimited,
+      credit_reservation: creditReservation,
+    };
   });
+}
+
+function countRateLimitReservations(data, { organizationId = "", userId = "", date }) {
+  return (data.rate_limits || []).reduce((sum, item) => {
+    if (item.scope !== "ai.chat" || item.date !== date) return sum;
+    if (organizationId && item.organization_id !== organizationId) return sum;
+    if (userId && item.user_id !== userId) return sum;
+    return sum + Math.max(1, Math.floor(Number(item.count || 1)));
+  }, 0);
 }
 
 function resolveAiModel(requestedModel, env) {
@@ -3482,7 +3743,7 @@ async function recordRequestError(store, ctx, request, error) {
       message: error.message || "接口异常",
       metadata: {
         method: request.method,
-        url: request.url,
+        url: sanitizeRequestUrl(request.url),
         status,
       },
     });
@@ -3492,7 +3753,7 @@ async function recordRequestError(store, ctx, request, error) {
     const organizationId = resolveRequestErrorOrganizationId(ctx, data);
     addSystemEvent(data, organizationId, ctx?.auth?.user?.id || null, "error", "http.request.failed", error.message || "接口异常", {
       method: request.method,
-      url: request.url,
+      url: sanitizeRequestUrl(request.url),
       status,
     });
   });
@@ -3517,7 +3778,7 @@ function logRequest(env, request, response, startedAt) {
   const entry = {
     time: new Date().toISOString(),
     method: request.method,
-    url: request.url,
+    url: sanitizeRequestUrl(request.url),
     status: response.statusCode,
     duration_ms: Date.now() - startedAt,
   };

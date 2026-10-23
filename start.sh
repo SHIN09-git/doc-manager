@@ -1,36 +1,24 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -e
+cd "$(dirname "$0")"
 
 echo "========================================"
-echo "  摹文拟笔工作台 - 启动服务器"
+echo "  摹文拟笔工作台 - 一键启动"
 echo "========================================"
 echo ""
 
-# 检查 Python 是否安装
-if ! command -v python3 &> /dev/null && ! command -v python &> /dev/null; then
-    echo "[错误] 未检测到 Python"
-    echo ""
-    echo "请先安装 Python 3.x: https://www.python.org/downloads/"
-    echo ""
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    echo "[错误] 请先安装 Node.js 20 或更高版本：https://nodejs.org/"
     exit 1
 fi
 
-# 使用 python3 或 python
-if command -v python3 &> /dev/null; then
-    PYTHON_CMD="python3"
-else
-    PYTHON_CMD="python"
+if [ ! -d node_modules ]; then
+    echo "[信息] 首次运行，正在安装依赖..."
+    npm install
 fi
 
-echo "[信息] 正在启动 HTTP 服务器..."
-echo "[信息] 端口: 8000"
+echo "[信息] 正在构建并启动工作台与本地 API..."
+echo "[信息] 启动后将自动打开 http://127.0.0.1:4173/index.html"
+echo "[信息] 按 Ctrl+C 可停止本次启动的服务。"
 echo ""
-echo "========================================"
-echo "  请在浏览器中访问:"
-echo "  http://localhost:8000"
-echo "========================================"
-echo ""
-echo "按 Ctrl+C 停止服务器"
-echo ""
-
-# 启动 Python HTTP 服务器
-$PYTHON_CMD -m http.server 8000
+npm start

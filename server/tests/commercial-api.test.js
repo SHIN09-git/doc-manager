@@ -1,12 +1,13 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import http from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createApp } from "../src/app.js";
 import { normalizeData } from "../src/db/jsonStore.js";
-import { sha256 } from "../src/utils/crypto.js";
+import { encryptSecret, sha256 } from "../src/utils/crypto.js";
 
 let server;
 let baseUrl;
@@ -76,6 +77,20 @@ test("email verification gates sensitive team and API key actions", async () => 
   });
   assert.equal(blockedInvite.status, 403);
   assert.equal(blockedInvite.json.error.code, "email_not_verified");
+  const blockedApiKey = await api("/api/api-keys", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { provider: "openai-compatible", api_key: "sk-unverified-blocked" },
+  });
+  assert.equal(blockedApiKey.status, 403);
+  assert.equal(blockedApiKey.json.error.code, "email_not_verified");
+  const blockedAi = await api("/api/ai/chat", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { task_type: "unverified_ai", messages: [{ role: "user", content: "should be blocked" }] },
+  });
+  assert.equal(blockedAi.status, 403);
+  assert.equal(blockedAi.json.error.code, "email_not_verified");
 
   const requested = await api("/api/auth/request-email-verification", {
     method: "POST",
@@ -177,6 +192,7 @@ test("production email mode sends through webhook without returning tokens", asy
   const emailServer = createApp({
     env: {
       NODE_ENV: "production",
+      ALLOW_PRODUCTION_JSON_STORE: "true",
       DATA_DIR: temp,
       APP_ENCRYPTION_SECRET: "production-encryption-secret-with-enough-length",
       SESSION_SECRET: "production-session-secret-with-enough-length",
@@ -185,7 +201,9 @@ test("production email mode sends through webhook without returning tokens", asy
       CORS_ORIGIN: "https://mowen.example.com",
       EMAIL_MODE: "webhook",
       EMAIL_WEBHOOK_URL: receiverUrl,
-      AI_PROXY_MODE: "mock",
+      AI_PROXY_MODE: "live",
+      AI_MODEL: "gpt-test",
+      PLATFORM_OPENAI_API_KEY: "sk-production-key",
     },
   });
   await new Promise((resolve) => emailServer.listen(0, "127.0.0.1", resolve));
@@ -219,6 +237,7 @@ test("registration survives verification email delivery failure", async () => {
   const emailServer = createApp({
     env: {
       NODE_ENV: "production",
+      ALLOW_PRODUCTION_JSON_STORE: "true",
       DATA_DIR: temp,
       APP_ENCRYPTION_SECRET: "production-encryption-secret-with-enough-length",
       SESSION_SECRET: "production-session-secret-with-enough-length",
@@ -227,7 +246,9 @@ test("registration survives verification email delivery failure", async () => {
       CORS_ORIGIN: "https://mowen.example.com",
       EMAIL_MODE: "webhook",
       EMAIL_WEBHOOK_URL: receiverUrl,
-      AI_PROXY_MODE: "mock",
+      AI_PROXY_MODE: "live",
+      AI_MODEL: "gpt-test",
+      PLATFORM_OPENAI_API_KEY: "sk-production-key",
     },
   });
   await new Promise((resolve) => emailServer.listen(0, "127.0.0.1", resolve));
@@ -277,6 +298,7 @@ test("production email mode can send through Resend adapter", async () => {
   const emailServer = createApp({
     env: {
       NODE_ENV: "production",
+      ALLOW_PRODUCTION_JSON_STORE: "true",
       DATA_DIR: temp,
       APP_ENCRYPTION_SECRET: "production-encryption-secret-with-enough-length",
       SESSION_SECRET: "production-session-secret-with-enough-length",
@@ -288,7 +310,9 @@ test("production email mode can send through Resend adapter", async () => {
       EMAIL_RESEND_ENDPOINT: receiverUrl,
       EMAIL_RESEND_API_KEY: "re_test_key",
       EMAIL_FROM: "Mowen <noreply@example.com>",
-      AI_PROXY_MODE: "mock",
+      AI_PROXY_MODE: "live",
+      AI_MODEL: "gpt-test",
+      PLATFORM_OPENAI_API_KEY: "sk-production-key",
     },
   });
   await new Promise((resolve) => emailServer.listen(0, "127.0.0.1", resolve));
@@ -541,6 +565,7 @@ test("production cookie authenticated writes require an explicit trusted origin"
   const originServer = createApp({
     env: {
       NODE_ENV: "production",
+      ALLOW_PRODUCTION_JSON_STORE: "true",
       DATA_DIR: temp,
       APP_ENCRYPTION_SECRET: "production-encryption-secret-with-enough-length",
       SESSION_SECRET: "production-session-secret-with-enough-length",
@@ -549,7 +574,9 @@ test("production cookie authenticated writes require an explicit trusted origin"
       CORS_ORIGIN: "https://mowen.example.com",
       EMAIL_MODE: "webhook",
       EMAIL_WEBHOOK_URL: "https://mail.example.test/send",
-      AI_PROXY_MODE: "mock",
+      AI_PROXY_MODE: "live",
+      AI_MODEL: "gpt-test",
+      PLATFORM_OPENAI_API_KEY: "sk-production-key",
     },
   });
   await new Promise((resolve) => originServer.listen(0, "127.0.0.1", resolve));
@@ -658,6 +685,35 @@ test("AI proxy records usage and enforces request limits", async () => {
   assert.ok(usage.json.usage.estimated_cost > 0);
 });
 
+test("AI proxy counts in-flight quota reservations before usage records exist", async () => {
+  const owner = await register("ai-reserved-limit@example.com");
+  const today = new Date().toISOString().slice(0, 10);
+  await server.store.write((data) => {
+    for (let index = 0; index < 3; index += 1) {
+      data.rate_limits.push({
+        id: `lim-reserved-${index}`,
+        organization_id: owner.orgId,
+        user_id: owner.userId,
+        scope: "ai.chat",
+        date: today,
+        count: 1,
+        updated_at: new Date().toISOString(),
+      });
+    }
+  });
+
+  const blocked = await api("/api/ai/chat", {
+    method: "POST",
+    cookie: owner.cookie,
+    body: { task_type: "reserved_limit", messages: [{ role: "user", content: "should be blocked" }] },
+  });
+
+  assert.equal(blocked.status, 429);
+  assert.equal(blocked.json.error.code, "user_rate_limited");
+  const data = await server.store.read();
+  assert.equal(data.ai_usage.some((item) => item.user_id === owner.userId && item.task_type === "reserved_limit"), false);
+});
+
 test("AI cost estimates accept per-token prompt and completion aliases", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-ai-cost-api-"));
   const costServer = createApp({
@@ -677,8 +733,10 @@ test("AI cost estimates accept per-token prompt and completion aliases", async (
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "ai-cost@example.com", password: "password123", name: "Cost" }),
     });
+    const registeredJson = await registered.json();
     assert.equal(registered.status, 201);
     const cookie = registered.headers.get("set-cookie") || "";
+    await verifyEmailForServer(url, cookie, "ai-cost@example.com", registeredJson.email_verification_token);
 
     const response = await fetch(`${url}/api/ai/chat`, {
       method: "POST",
@@ -716,7 +774,9 @@ test("live AI proxy fails clearly when no API key is configured", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "live-ai-owner@example.com", password: "password123", name: "Live AI" }),
     });
+    const registeredJson = await registered.json();
     const cookie = registered.headers.get("set-cookie") || "";
+    await verifyEmailForServer(url, cookie, "live-ai-owner@example.com", registeredJson.email_verification_token);
     const response = await fetch(`${url}/api/ai/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
@@ -733,6 +793,120 @@ test("live AI proxy fails clearly when no API key is configured", async () => {
   } finally {
     await new Promise((resolve) => liveServer.close(resolve));
     await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("live AI proxy reads provider key from the latest snapshot after quota reservation", async () => {
+  const encryptionSecret = "test-encryption-secret-with-enough-length";
+  const sessionSecret = "test-session-secret-with-enough-length";
+  const now = new Date().toISOString();
+  const token = `live-key-refresh-${crypto.randomUUID()}`;
+  let data = normalizeData({
+    users: [{
+      id: "usr_live_key_refresh",
+      email: "live-key-refresh@example.com",
+      name: "Live Key Refresh",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_live_key_refresh",
+      name: "Live Key Refresh Org",
+      slug: "live-key-refresh-org",
+      plan: "free",
+      created_by: "usr_live_key_refresh",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_live_key_refresh",
+      organization_id: "org_live_key_refresh",
+      user_id: "usr_live_key_refresh",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_live_key_refresh",
+      user_id: "usr_live_key_refresh",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+  });
+  let providerAuthorization = "";
+  const providerServer = http.createServer((request, response) => {
+    providerAuthorization = String(request.headers.authorization || "");
+    request.resume();
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({
+      choices: [{ message: { content: "live refreshed key ok" } }],
+      usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
+    }));
+  });
+  await new Promise((resolve) => providerServer.listen(0, "127.0.0.1", resolve));
+  const providerBaseUrl = `http://127.0.0.1:${providerServer.address().port}`;
+  const store = {
+    async init() {},
+    async read() {
+      return data;
+    },
+    async write(mutator) {
+      const draft = structuredClone(data);
+      const result = await mutator(draft);
+      if (!draft.api_keys.some((item) => item.organization_id === "org_live_key_refresh" && !item.disabled_at)) {
+        draft.api_keys.push({
+          id: "key_live_key_refresh",
+          organization_id: "org_live_key_refresh",
+          user_id: "usr_live_key_refresh",
+          provider: "openai-compatible",
+          scope: "organization",
+          encrypted_key: encryptSecret("sk-refreshed", encryptionSecret),
+          key_hint: "sk-r…shed",
+          created_at: now,
+          updated_at: now,
+          disabled_at: null,
+        });
+      }
+      data = normalizeData(draft);
+      return result;
+    },
+  };
+  const liveServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: encryptionSecret,
+      SESSION_SECRET: sessionSecret,
+      AI_PROXY_MODE: "live",
+      AI_BASE_URL: providerBaseUrl,
+      AI_MODEL: "gpt-test",
+    },
+    store,
+  });
+  await new Promise((resolve) => liveServer.listen(0, "127.0.0.1", resolve));
+  const liveBaseUrl = `http://127.0.0.1:${liveServer.address().port}`;
+  try {
+    const response = await fetch(`${liveBaseUrl}/api/ai/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `mowen_session=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({
+        task_type: "live_key_refresh",
+        messages: [{ role: "user", content: "use the freshly saved key" }],
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(providerAuthorization, "Bearer sk-refreshed");
+    assert.equal(data.rate_limits.length, 1);
+    assert.equal(data.ai_usage.length, 1);
+    assert.equal(data.ai_usage[0].status, "success");
+  } finally {
+    await new Promise((resolve) => liveServer.close(resolve));
+    await new Promise((resolve) => providerServer.close(resolve));
   }
 });
 
@@ -754,7 +928,9 @@ test("live AI proxy rejects requests without a concrete model", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "live-ai-model@example.com", password: "password123", name: "Live AI Model" }),
     });
+    const registeredJson = await registered.json();
     const cookie = registered.headers.get("set-cookie") || "";
+    await verifyEmailForServer(url, cookie, "live-ai-model@example.com", registeredJson.email_verification_token);
     const response = await fetch(`${url}/api/ai/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
@@ -804,7 +980,9 @@ test("live AI proxy treats empty provider responses as failures", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "live-ai-empty@example.com", password: "password123", name: "Live AI Empty" }),
     });
+    const registeredJson = await registered.json();
     const cookie = registered.headers.get("set-cookie") || "";
+    await verifyEmailForServer(url, cookie, "live-ai-empty@example.com", registeredJson.email_verification_token);
     const response = await fetch(`${url}/api/ai/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
@@ -1847,6 +2025,27 @@ test("payment webhook requires a signed request and is idempotent", async () => 
     assert.equal(forged.status, 200);
     const afterForged = await webhookServer.store.read();
     assert.equal(afterForged.organizations.find((item) => item.id === registeredJson.active_organization.id).plan, "pro");
+    const nestedBody = JSON.stringify({
+      provider: "mockpay",
+      event_id: "evt_nested",
+      event_type: "subscription.updated",
+      data: {
+        object: {
+          metadata: { organization_id: registeredJson.active_organization.id },
+          items: { data: [{ price: { id: "price_team" } }] },
+        },
+      },
+    });
+    const nestedTimestamp = Math.floor(Date.now() / 1000).toString();
+    const nested = await fetch(`${url}/api/webhooks/payments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-webhook-timestamp": nestedTimestamp, "x-webhook-signature": signWebhook("shared-secret", nestedTimestamp, nestedBody) },
+      body: nestedBody,
+    });
+    assert.equal(nested.status, 200);
+    const afterNested = await webhookServer.store.read();
+    assert.equal(afterNested.organizations.find((item) => item.id === registeredJson.active_organization.id).plan, "team");
+    assert.equal(afterNested.payment_webhooks.find((item) => item.event_id === "evt_nested").organization_id, registeredJson.active_organization.id);
     const failedBody = JSON.stringify({ provider: "mockpay", event_id: "evt_failed", event_type: "invoice.payment_failed", organization_id: registeredJson.active_organization.id, payload: { price_id: "price_team" } });
     const failedTimestamp = Math.floor(Date.now() / 1000).toString();
     const failed = await fetch(`${url}/api/webhooks/payments`, {
@@ -1863,7 +2062,18 @@ test("payment webhook requires a signed request and is idempotent", async () => 
       body: refundBody,
     });
     assert.equal(refund.status, 200);
-    const cancelBody = JSON.stringify({ provider: "mockpay", event_id: "evt_cancel", event_type: "subscription.cancelled", organization_id: registeredJson.active_organization.id });
+    const unmappedCancelBody = JSON.stringify({ provider: "mockpay", event_id: "evt_cancel_unmapped", event_type: "subscription.cancelled", organization_id: registeredJson.active_organization.id });
+    const unmappedCancelTimestamp = Math.floor(Date.now() / 1000).toString();
+    const unmappedCancel = await fetch(`${url}/api/webhooks/payments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-webhook-timestamp": unmappedCancelTimestamp, "x-webhook-signature": signWebhook("shared-secret", unmappedCancelTimestamp, unmappedCancelBody) },
+      body: unmappedCancelBody,
+    });
+    assert.equal(unmappedCancel.status, 200);
+    const afterUnmappedCancel = await webhookServer.store.read();
+    assert.equal(afterUnmappedCancel.organizations.find((item) => item.id === registeredJson.active_organization.id).plan, "team");
+    assert.ok(afterUnmappedCancel.system_events.some((item) => item.type === "billing.subscription.unmapped"));
+    const cancelBody = JSON.stringify({ provider: "mockpay", event_id: "evt_cancel", event_type: "subscription.cancelled", organization_id: registeredJson.active_organization.id, payload: { price_id: "price_pro" } });
     const cancelTimestamp = Math.floor(Date.now() / 1000).toString();
     const cancel = await fetch(`${url}/api/webhooks/payments`, {
       method: "POST",
@@ -1872,7 +2082,7 @@ test("payment webhook requires a signed request and is idempotent", async () => 
     });
     assert.equal(cancel.status, 200);
     const afterEvents = await webhookServer.store.read();
-    assert.equal(afterEvents.payment_webhooks.length, 5);
+    assert.equal(afterEvents.payment_webhooks.length, 7);
     assert.equal(afterEvents.organizations.find((item) => item.id === registeredJson.active_organization.id).plan, "free");
     assert.ok(afterEvents.system_events.some((item) => item.type === "billing.payment.failed"));
     assert.ok(afterEvents.system_events.some((item) => item.type === "billing.refund.recorded"));
@@ -1884,6 +2094,21 @@ test("payment webhook requires a signed request and is idempotent", async () => 
 
 function signWebhook(secret, timestamp, body) {
   return crypto.createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
+}
+
+async function verifyEmailForServer(url, cookie, email, token) {
+  assert.ok(token, `missing development verification token for ${email}`);
+  const response = await fetch(`${url}/api/auth/verify-email`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookie,
+    },
+    body: JSON.stringify({ email, token }),
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  return body;
 }
 
 function installFetchMock(handler) {
@@ -2821,6 +3046,7 @@ test("AI chat usage uses repository hook when available", async () => {
     }],
   });
   let writeCount = 0;
+  let reserveOptions = null;
   let recordedUsageOptions = null;
   const store = {
     async init() {},
@@ -2830,6 +3056,26 @@ test("AI chat usage uses repository hook when available", async () => {
     async write(mutator) {
       writeCount += 1;
       return mutator(data);
+    },
+    async reserveAiQuota(options) {
+      reserveOptions = options;
+      data.rate_limits.push({
+        id: "lim_usage_repo",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        scope: options.scope,
+        date: options.date,
+        count: 1,
+        updated_at: now,
+      });
+      return {
+        reserved: true,
+        source: "plan",
+        plan: options.plan,
+        user_limited: false,
+        org_limited: false,
+        credit_allowed: false,
+      };
     },
     async recordAiUsage(options) {
       recordedUsageOptions = options;
@@ -2880,7 +3126,10 @@ test("AI chat usage uses repository hook when available", async () => {
     const body = await response.json();
 
     assert.equal(response.status, 200, JSON.stringify(body));
-    assert.equal(writeCount, 1);
+    assert.equal(writeCount, 0);
+    assert.equal(reserveOptions.organizationId, "org_usage_repo");
+    assert.equal(reserveOptions.userId, "usr_usage_repo");
+    assert.equal(reserveOptions.scope, "ai.chat");
     assert.equal(data.rate_limits.length, 1);
     assert.equal(data.ai_usage.length, 1);
     assert.equal(data.audit_logs.length, 1);
@@ -2895,7 +3144,7 @@ test("AI chat usage uses repository hook when available", async () => {
   }
 });
 
-test("AI overage credit spend uses repository hook when available", async () => {
+test("AI overage credit is reserved before the provider call and settled through repository hooks", async () => {
   const now = new Date().toISOString();
   const token = `credit-spend-repo-${crypto.randomUUID()}`;
   const data = normalizeData({
@@ -2956,7 +3205,8 @@ test("AI overage credit spend uses repository hook when available", async () => 
   });
   let writeCount = 0;
   let recordedUsageOptions = null;
-  let spendOptions = null;
+  let reserveOptions = null;
+  let settleOptions = null;
   const store = {
     async init() {},
     async read() {
@@ -2965,6 +3215,41 @@ test("AI overage credit spend uses repository hook when available", async () => 
     async write(mutator) {
       writeCount += 1;
       return mutator(data);
+    },
+    async reserveAiQuota(options) {
+      reserveOptions = options;
+      const account = data.credit_accounts[0];
+      account.balance -= 1;
+      const reservation = {
+        id: "acr_credit_repo",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        usage_id: null,
+        amount: 1,
+        balance_after: account.balance,
+        status: "reserved",
+        created_at: now,
+        updated_at: now,
+      };
+      data.ai_credit_reservations.push(reservation);
+      data.rate_limits.push({
+        id: "lim_credit_repo",
+        organization_id: options.organizationId,
+        user_id: options.userId,
+        scope: options.scope,
+        date: options.date,
+        count: 1,
+        updated_at: now,
+      });
+      return {
+        reserved: true,
+        source: "credit",
+        plan: options.plan,
+        user_limited: true,
+        org_limited: false,
+        credit_allowed: true,
+        credit_reservation: reservation,
+      };
     },
     async recordAiUsage(options) {
       recordedUsageOptions = options;
@@ -2981,11 +3266,12 @@ test("AI overage credit spend uses repository hook when available", async () => 
       });
       return options.usage;
     },
-    async spendCreditsForUsage(options) {
-      spendOptions = options;
-      const account = data.credit_accounts.find((item) => item.organization_id === options.organizationId && item.user_id === options.userId);
-      account.balance -= Number(options.amount || 1);
-      account.updated_at = now;
+    async settleAiCreditReservation(options) {
+      settleOptions = options;
+      const reservation = data.ai_credit_reservations.find((item) => item.id === options.reservationId);
+      reservation.status = "settled";
+      reservation.usage_id = options.usageId;
+      reservation.updated_at = now;
       data.credit_ledger.push({
         id: "led_credit_spend",
         organization_id: options.organizationId,
@@ -2993,8 +3279,8 @@ test("AI overage credit spend uses repository hook when available", async () => 
         order_id: null,
         usage_id: options.usageId,
         direction: "out",
-        amount: Number(options.amount || 1),
-        balance_after: account.balance,
+        amount: reservation.amount,
+        balance_after: reservation.balance_after,
         reason: "ai_quota_overage",
         created_at: now,
       });
@@ -3002,13 +3288,13 @@ test("AI overage credit spend uses repository hook when available", async () => 
         id: "aud_credit_spend",
         organization_id: options.organizationId,
         user_id: options.userId,
-        action: "billing.credit.spend",
+        action: "billing.credit.settle",
         target_type: "ai_usage",
         target_id: options.usageId,
-        metadata: { amount: Number(options.amount || 1), balance_after: account.balance },
+        metadata: { amount: reservation.amount, balance_after: reservation.balance_after },
         created_at: now,
       });
-      return account;
+      return { reservation, ledger: data.credit_ledger[0], alreadySettled: false };
     },
   };
   const creditServer = createApp({
@@ -3039,22 +3325,24 @@ test("AI overage credit spend uses repository hook when available", async () => 
     const body = await response.json();
 
     assert.equal(response.status, 200, JSON.stringify(body));
-    assert.equal(writeCount, 1);
+    assert.equal(writeCount, 0);
     assert.equal(data.rate_limits.length, 1);
     assert.equal(recordedUsageOptions.usage.id, body.usage.id);
-    assert.equal(spendOptions.organizationId, "org_credit_repo");
-    assert.equal(spendOptions.userId, "usr_credit_repo");
-    assert.equal(spendOptions.usageId, body.usage.id);
-    assert.equal(spendOptions.amount, 1);
+    assert.equal(reserveOptions.organizationId, "org_credit_repo");
+    assert.equal(settleOptions.organizationId, "org_credit_repo");
+    assert.equal(settleOptions.userId, "usr_credit_repo");
+    assert.equal(settleOptions.reservationId, "acr_credit_repo");
+    assert.equal(settleOptions.usageId, body.usage.id);
     assert.equal(data.credit_accounts[0].balance, 1);
+    assert.equal(data.ai_credit_reservations[0].status, "settled");
     assert.equal(data.credit_ledger[0].usage_id, body.usage.id);
-    assert.ok(data.audit_logs.some((item) => item.action === "billing.credit.spend"));
+    assert.ok(data.audit_logs.some((item) => item.action === "billing.credit.settle"));
   } finally {
     await new Promise((resolve) => creditServer.close(resolve));
   }
 });
 
-test("AI overage credit spend failure rejects the response without recording a fake AI failure", async () => {
+test("AI overage reservation failure rejects before calling the provider or recording fake usage", async () => {
   const now = new Date().toISOString();
   const token = `credit-spend-skip-${crypto.randomUUID()}`;
   const data = normalizeData({
@@ -3114,7 +3402,7 @@ test("AI overage credit spend failure rejects the response without recording a f
     }],
   });
   let recordedUsageOptions = null;
-  let spendOptions = null;
+  let reserveCreditOptions = null;
   const store = {
     async init() {},
     async read() {
@@ -3123,29 +3411,30 @@ test("AI overage credit spend failure rejects the response without recording a f
     async write(mutator) {
       return mutator(data);
     },
+    async reserveAiQuota(options) {
+      return {
+        reserved: true,
+        source: "credit",
+        plan: options.plan,
+        user_limited: true,
+        org_limited: false,
+        credit_allowed: true,
+        credit_reservation: null,
+      };
+    },
+    async reserveAiCredit(options) {
+      reserveCreditOptions = options;
+      return {
+        account: data.credit_accounts[0],
+        reservation: null,
+        skipped: true,
+        amount: Number(options.amount || 1),
+      };
+    },
     async recordAiUsage(options) {
       recordedUsageOptions = options;
       data.ai_usage.push(options.usage);
       return options.usage;
-    },
-    async spendCreditsForUsage(options) {
-      spendOptions = options;
-      data.system_events.push({
-        id: "evt_credit_spend_skipped",
-        organization_id: options.organizationId,
-        user_id: options.userId,
-        level: "warn",
-        type: "billing.credit.spend_skipped",
-        message: "额度扣减失败，余额不足",
-        metadata: { usage_id: options.usageId, amount: Number(options.amount || 1) },
-        created_at: now,
-      });
-      return {
-        account: data.credit_accounts[0],
-        ledger: null,
-        skipped: true,
-        amount: Number(options.amount || 1),
-      };
     },
   };
   const creditServer = createApp({
@@ -3177,14 +3466,198 @@ test("AI overage credit spend failure rejects the response without recording a f
 
     assert.equal(response.status, 402, JSON.stringify(body));
     assert.equal(body.error.code, "credit_spend_failed");
-    assert.equal(data.rate_limits.length, 1);
+    assert.equal(data.rate_limits.length, 0);
     assert.equal(data.credit_accounts[0].balance, 1);
+    assert.equal(data.ai_credit_reservations.length, 0);
     assert.equal(data.credit_ledger.length, 0);
-    assert.equal(recordedUsageOptions.usage.status, "success");
-    assert.equal(spendOptions.usageId, recordedUsageOptions.usage.id);
+    assert.equal(recordedUsageOptions, null);
+    assert.equal(reserveCreditOptions.organizationId, "org_credit_skip");
+    assert.equal(reserveCreditOptions.userId, "usr_credit_skip");
     assert.equal(data.ai_usage.filter((item) => item.status === "failed").length, 0);
-    assert.ok(data.system_events.some((item) => item.type === "billing.credit.spend_skipped"));
     assert.equal(data.system_events.some((item) => item.type === "ai.proxy.failed"), false);
+  } finally {
+    await new Promise((resolve) => creditServer.close(resolve));
+  }
+});
+
+test("AI overage reservation is refunded when the provider call fails", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "mowen-credit-refund-"));
+  const creditServer = createApp({
+    env: {
+      DATA_DIR: temp,
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "live",
+      AI_MODEL: "gpt-test",
+      DAILY_USER_REQUEST_LIMIT: "1",
+      DAILY_ORG_REQUEST_LIMIT: "10",
+    },
+  });
+  await new Promise((resolve) => creditServer.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${creditServer.address().port}`;
+  try {
+    const registered = await fetch(`${url}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "credit-refund@example.com", password: "password123", name: "Credit Refund" }),
+    });
+    const registeredJson = await registered.json();
+    const cookie = registered.headers.get("set-cookie") || "";
+    await verifyEmailForServer(url, cookie, "credit-refund@example.com", registeredJson.email_verification_token);
+    await creditServer.store.write((data) => {
+      const user = data.users.find((item) => item.email === "credit-refund@example.com");
+      const membership = data.memberships.find((item) => item.user_id === user.id);
+      data.ai_usage.push({
+        id: "use_credit_refund_limit",
+        organization_id: membership.organization_id,
+        user_id: user.id,
+        provider: "mock",
+        model: "mock",
+        task_type: "seed",
+        prompt_tokens: 1,
+        completion_tokens: 0,
+        total_tokens: 1,
+        estimated_cost: 0,
+        status: "success",
+        error: "",
+        created_at: new Date().toISOString(),
+      });
+      data.credit_accounts.push({
+        id: "crd_credit_refund",
+        organization_id: membership.organization_id,
+        user_id: user.id,
+        balance: 1,
+        updated_at: new Date().toISOString(),
+      });
+    });
+
+    const response = await fetch(`${url}/api/ai/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ task_type: "refund_failure", messages: [{ role: "user", content: "refund this failed call" }] }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(body.error.code, "missing_provider_key");
+    const data = await creditServer.store.read();
+    assert.equal(data.credit_accounts[0].balance, 1);
+    assert.equal(data.ai_credit_reservations.length, 1);
+    assert.equal(data.ai_credit_reservations[0].status, "refunded");
+    assert.equal(data.credit_ledger.length, 0);
+    assert.equal(data.ai_usage.filter((item) => item.status === "failed").length, 1);
+    assert.ok(data.system_events.some((item) => item.type === "billing.credit.refunded"));
+    assert.ok(data.system_events.some((item) => item.type === "ai.proxy.failed"));
+  } finally {
+    await new Promise((resolve) => creditServer.close(resolve));
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("AI overage refund retries once after a transient store failure", async () => {
+  const now = new Date().toISOString();
+  const token = `credit-refund-retry-${crypto.randomUUID()}`;
+  const reservation = {
+    id: "acr_refund_retry",
+    organization_id: "org_refund_retry",
+    user_id: "usr_refund_retry",
+    usage_id: null,
+    amount: 1,
+    balance_after: 0,
+    status: "reserved",
+    created_at: now,
+    updated_at: now,
+  };
+  const data = normalizeData({
+    users: [{
+      id: "usr_refund_retry",
+      email: "refund-retry@example.com",
+      name: "Refund Retry",
+      password_hash: "unused",
+      email_verified_at: now,
+      created_at: now,
+      updated_at: now,
+    }],
+    organizations: [{
+      id: "org_refund_retry",
+      name: "Refund Retry Org",
+      slug: "refund-retry-org",
+      plan: "free",
+      created_by: "usr_refund_retry",
+      created_at: now,
+      updated_at: now,
+    }],
+    memberships: [{
+      id: "mem_refund_retry",
+      organization_id: "org_refund_retry",
+      user_id: "usr_refund_retry",
+      role: "admin",
+      created_at: now,
+    }],
+    sessions: [{
+      id: "ses_refund_retry",
+      user_id: "usr_refund_retry",
+      token_hash: sha256(token),
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      created_at: now,
+    }],
+    ai_credit_reservations: [reservation],
+  });
+  let refundCalls = 0;
+  const store = {
+    async init() {},
+    async read() { return data; },
+    async write(mutator) { return mutator(data); },
+    async reserveAiQuota(options) {
+      return {
+        reserved: true,
+        source: "credit",
+        plan: options.plan,
+        user_limited: true,
+        org_limited: false,
+        credit_allowed: true,
+        credit_reservation: reservation,
+      };
+    },
+    async refundAiCreditReservation() {
+      refundCalls += 1;
+      if (refundCalls === 1) throw new Error("temporary refund failure");
+      reservation.status = "refunded";
+      return { reservation, account: null, alreadyRefunded: false, skipped: false };
+    },
+    async recordAiUsage(options) {
+      data.ai_usage.push(options.usage);
+      return options.usage;
+    },
+  };
+  const creditServer = createApp({
+    env: {
+      APP_ENCRYPTION_SECRET: "test-encryption-secret-with-enough-length",
+      SESSION_SECRET: "test-session-secret-with-enough-length",
+      AI_PROXY_MODE: "live",
+      AI_MODEL: "gpt-test",
+    },
+    store,
+  });
+  await new Promise((resolve) => creditServer.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${creditServer.address().port}`;
+  try {
+    const response = await fetch(`${url}/api/ai/chat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `mowen_session=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({ messages: [{ role: "user", content: "retry refund" }] }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 400, JSON.stringify(body));
+    assert.equal(body.error.code, "missing_provider_key");
+    assert.equal(refundCalls, 2);
+    assert.equal(reservation.status, "refunded");
+    assert.equal(data.ai_usage.filter((item) => item.status === "failed").length, 1);
+    assert.equal(data.system_events.some((item) => item.type === "billing.credit.refund_failed"), false);
   } finally {
     await new Promise((resolve) => creditServer.close(resolve));
   }
