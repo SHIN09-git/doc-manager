@@ -19,7 +19,6 @@ export function createViewController(deps = {}) {
     });
     els.cloudTopBtn?.addEventListener("click", () => {
       switchMainView(ui.mainView === "cloud" ? "editor" : "cloud");
-      renderCloudPanel();
     });
     els.cloudBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
     els.pptBackToEditorBtn?.addEventListener("click", () => switchMainView("editor"));
@@ -48,14 +47,7 @@ export function createViewController(deps = {}) {
     switchMainView("editor");
     const targetPanelId = `${tabName}Panel`;
     if (documentRef?.getElementById && !documentRef.getElementById(targetPanelId)) return;
-    documentRef?.querySelectorAll?.(".tab").forEach((button) => {
-      const active = button.dataset?.tab === tabName;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-selected", String(active));
-    });
-    documentRef?.querySelectorAll?.(".tab-panel").forEach((panel) => {
-      panel.classList.toggle("active", panel.id === targetPanelId);
-    });
+    setActiveTabAndPanel(tabName, targetPanelId);
     if (els.apiTopBtn) {
       const apiActive = tabName === "api";
       els.apiTopBtn.classList.toggle("active", apiActive);
@@ -65,7 +57,6 @@ export function createViewController(deps = {}) {
       els.cloudTopBtn.classList.toggle("active", ui.mainView === "cloud");
       els.cloudTopBtn.setAttribute("aria-pressed", String(ui.mainView === "cloud"));
     }
-    windowRef?.lucide?.createIcons?.();
   }
 
   function switchMainView(view = "editor") {

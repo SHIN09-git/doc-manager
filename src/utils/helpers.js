@@ -11,21 +11,21 @@ export function now() {
   return new Date().toISOString();
 }
 
+const shortDateFormatter = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" });
+const localDateFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+});
+
 export function formatTime(value) {
   if (!value) return "";
   const date = new Date(value);
-  return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+  return Number.isNaN(date.getTime()) ? date.toString() : shortDateFormatter.format(date);
 }
 
 export function formatLocalDate(value) {
   if (!value) return "";
   const date = new Date(value);
-  return date.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return Number.isNaN(date.getTime()) ? date.toString() : localDateFormatter.format(date);
 }
 
 export function describeLengthChange(delta) {

@@ -184,7 +184,7 @@ export function createReferenceController({
     els.referencePanel?.classList?.toggle?.("has-references", docs.length > 0);
     if (els.clearReferencesBtn) els.clearReferencesBtn.hidden = docs.length === 0;
     if (isPickerOpen()) renderPicker();
-    globalThis.window?.lucide?.createIcons?.();
+    if (els.referenceList) globalThis.window?.lucide?.createIcons?.(els.referenceList);
   }
 
   function renderPicker() {

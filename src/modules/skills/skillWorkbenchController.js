@@ -41,11 +41,13 @@ export function createSkillWorkbenchController(deps = {}) {
   function createCardProgress(skillId) {
     return {
       update(message, progress = 0) {
-        updateBuildState(skillId, {
-          status: "building",
-          buildProgress: { message, progress },
-          lastBuildError: "",
-        });
+        const skill = state.styles.find((item) => item.id === skillId);
+        if (!skill) return;
+        // The build's start/result is persisted; intermediate progress is display-only.
+        skill.status = "building";
+        skill.buildProgress = { message, progress };
+        skill.lastBuildError = "";
+        eventBus.emit(EVENTS.RENDER_STYLE_LIST);
       },
     };
   }

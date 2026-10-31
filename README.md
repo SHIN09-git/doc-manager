@@ -4,6 +4,8 @@
 
 它适合需要反复写正式材料的人：学校、机关、企事业单位、社群组织、项目团队都可以把自己的通知、总结、方案、纪要、汇报等样本文档沉淀成可调用的“执笔人”。
 
+项目当前按非商业用途维护，默认本地使用。云端和计费代码保留为可选功能，不是使用工作台的前置条件。
+
 ## 核心能力
 
 新增内置“公文写作”执笔人：点击调用后选择文种、补充事项，即可使用公文写作 DNA 的结构与表达参考；生成后可查看“行文自检”。它仅限非商业使用，具体范围和许可见 [接入说明](assets/third-party/lieflat-gongwen/INTEGRATION.md) 与 [第三方许可](THIRD_PARTY_NOTICES.md)。原有自有代码的 MIT 许可不变，但不覆盖该第三方组件。
@@ -20,8 +22,6 @@
 | AI 接口 | 接入 OpenAI 兼容的 Chat Completions 接口；可本机直连，也可登录后走云端 AI 代理 |
 | 云端模式 | 可选商业化后端，支持账号安全、组织、团队邀请、文档/执笔人同步、版本冲突提示、API Key 加密、用量统计、审计日志和灰度反馈 |
 
-云端页内置“功能地图”，把这些能力按“资料与文档、执笔人、生成与演示、云端与商业化”归类，并提供跳转入口。它不是新的功能孤岛，而是给第一次使用或长期运营时的功能导航。
-
 ## 为什么是“执笔人”
 
 很多文档不是“写一篇”这么简单，而是要长期稳定地符合某种文种、格式、口吻和审稿习惯。
@@ -30,7 +30,7 @@
 
 1. 单篇样本只产生候选规则。
 2. 多篇样本共同验证后，才形成强规则。
-3. 人名、时间、地点、活动名称、临时安排等个案信息会被过滤，不会被当成通用写法。
+3. 构建时会检查人名、时间、地点、活动名称等隐私或个案信息，导出分享前仍需人工检查。
 4. 每次生成、测试、反馈和重训都会进入版本链路，便于持续优化。
 
 在生成窗口输入提示词时，可以直接使用 `@通知执笔人` 这类调用名；也可以在执笔人卡片上点击“调用”，系统会自动切到生成窗口并写入调用名。
@@ -76,7 +76,7 @@ PUBLIC_API_BASE_URL=https://api.example.com/api npm run build:static
 
 ### Windows 安装包
 
-普通用户可在 [2026-10-15 发布页](https://github.com/SHIN09-git/doc-manager/releases/tag/v0.1.0-20261015) 下载 `Mowen-Nibi-Workbench-0.1.0-20261015-windows-x64-Setup.exe`。只需这个安装程序，无需另装 Node.js；AI 功能仍需配置可用接口。安装程序尚未代码签名，Windows 可能提示未知发布者，请核对下载来源和同页 SHA-256 校验文件。
+普通用户可在 [2026-10-31 发布页](https://github.com/SHIN09-git/doc-manager/releases/tag/v0.1.0-20261031) 下载 `Mowen-Nibi-Workbench-0.1.0-20261031-windows-x64-Setup.exe`。只需这个安装程序，无需另装 Node.js；AI 功能仍需配置可用接口。安装程序尚未代码签名，Windows 可能提示未知发布者，请核对下载来源和同页 SHA-256 校验文件。
 
 生成包含 Node.js、本地 API、桌面快捷方式安装脚本的 Windows 自包含安装包：
 
@@ -88,7 +88,7 @@ npm run package:windows
 
 ### 可选云端后端
 
-P0 商业化底座已提供最小后端服务。另开一个终端运行：
+只有需要账号、云端同步或后台管理时，才需要后端服务。另开一个终端运行：
 
 ```bash
 npm run server:dev
@@ -154,14 +154,10 @@ npm run build
 npm run check
 npm test
 npm run test:e2e
+npm run perf:workbench
 ```
 
-当前测试覆盖：
-
-- 前端与核心单元测试：315 项
-- 后端服务与 repository 测试：139 项
-- 端到端测试：32 项
-- GitHub Actions：自动运行 `npm run check` 和 `npm test`
+单元测试覆盖前端、存储与后端，浏览器测试覆盖文档、执笔人、PPT 和云端交互。GitHub Actions 自动构建并运行语法、单元和浏览器测试。最近的验证结果见 [更新记录](CHANGELOG.md)，可重复的性能样本见 [性能记录](PERFORMANCE.md)。
 
 ## 项目结构
 
@@ -171,14 +167,15 @@ school-doc-manager/
 ├─ admin.html              # 独立管理后台页面
 ├─ workbench.css           # 工作台唯一样式来源：设计 token、组件与响应式
 ├─ styles.css              # 独立后台 admin.html 的历史样式（含 ui-refresh.css）
-├─ app.js                  # 兼容层与页面装配
+├─ app.js                  # 页面状态、DOM 与控制器装配
 ├─ src/
 │  ├─ main.js              # 打包入口
 │  ├─ admin/               # 独立后台页面脚本
-│  ├─ modules/             # 文档、自定义类型、编辑器、导入拖拽、执笔人、PPT、AI、云端 API/会话/同步/用户操作/面板、功能地图、存储等模块
+│  ├─ core/                # 事件、初始化、存储与保存队列
+│  ├─ modules/             # 文档、执笔人、PPT、AI 与可选云端功能
 │  ├─ ui/                  # 图标、主题、布局、视图切换和通用 UI 组件
-│  └─ utils/               # 事件、DOM、拖拽路由、通用工具
-├─ server/                 # 商业化后端：账号安全、组织、团队、同步、AI 代理、用量、审计、邮件、支付、备份
+│  └─ utils/               # 编码、文件解析、格式化和导入检查
+├─ server/                 # 可选后端 API 与数据库
 ├─ test/                   # 单元测试
 ├─ e2e/                    # Playwright 端到端测试与静态服务
 └─ build/bundle.js         # 构建产物，index.html 直接加载它
@@ -209,22 +206,12 @@ school-doc-manager/
 - [FUNCTIONAL_QA_REPORT.md](FUNCTIONAL_QA_REPORT.md)：全功能实测评分、修复清单与验证证据
 - [SECURITY.md](SECURITY.md)：安全与隐私说明
 - [CHANGELOG.md](CHANGELOG.md)：更新记录
-- [COMMERCIALIZATION_PLAN.md](COMMERCIALIZATION_PLAN.md)：商业化总体规划
-- [COMMERCIALIZATION_PROGRESS_REPORT.md](COMMERCIALIZATION_PROGRESS_REPORT.md)：商业化阶段总结与未完成清单
-- [P2_ROUND1_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND1_COMMERCIALIZATION_BUILD_PLAN.md)：邮件、签名支付 webhook、管理汇总和备份施工记录
-- [P2_ROUND2_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND2_COMMERCIALIZATION_BUILD_PLAN.md)：管理后台、支付适配、备份校验和组织治理施工记录
-- [P2_ROUND3_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND3_COMMERCIALIZATION_BUILD_PLAN.md)：邮件/支付实接、备份告警、管理后台增强施工记录
-- [P2_ROUND4_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND4_COMMERCIALIZATION_BUILD_PLAN.md)：支付入口、邮件回调、独立后台、PostgreSQL repository 试点和备份加固施工记录
-- [P2_ROUND6_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND6_COMMERCIALIZATION_BUILD_PLAN.md)：后台权限边界、AI 失败跟进、成本预算、后台偏好与 SLA 运营闭环施工记录
-- [P2_ROUND7_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND7_COMMERCIALIZATION_BUILD_PLAN.md)：PostgreSQL 写入拆分、后台角色细分和真实服务商联调计划
-- [P2_ROUND4_EXECUTION_PLAN.md](P2_ROUND4_EXECUTION_PLAN.md)：P2 第四轮阶段 A-F 执行记录
-- [P2_ROUND5_COMMERCIALIZATION_BUILD_PLAN.md](P2_ROUND5_COMMERCIALIZATION_BUILD_PLAN.md)：真实服务商集成、PostgreSQL repository 扩面和恢复演练施工计划与阶段 A 记录
-- [P1_ROUND2_COMMERCIALIZATION_BUILD_PLAN.md](P1_ROUND2_COMMERCIALIZATION_BUILD_PLAN.md)：灰度能力施工记录
-- [P1_ROUND3_COMMERCIALIZATION_BUILD_PLAN.md](P1_ROUND3_COMMERCIALIZATION_BUILD_PLAN.md)：运营与计费预埋施工记录
+- [PERFORMANCE.md](PERFORMANCE.md)：性能样本、精简范围与剩余限制
+- [COMMERCIALIZATION_PROGRESS_REPORT.md](COMMERCIALIZATION_PROGRESS_REPORT.md)：历史商业化施工索引，不代表当前路线
 - [DEPLOYMENT.md](DEPLOYMENT.md)：灰度部署指南
 - [PRIVACY_POLICY.md](PRIVACY_POLICY.md)：隐私政策草案
 - [TERMS_OF_SERVICE.md](TERMS_OF_SERVICE.md)：用户协议草案
 
 ## 许可证
 
-MIT
+自有代码采用 MIT。内置公文写作组件采用非商业许可，详见 [第三方许可](THIRD_PARTY_NOTICES.md)；不能将整个分发包视为仅受 MIT 许可约束。

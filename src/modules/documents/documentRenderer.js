@@ -1,4 +1,5 @@
 import { escapeHtml, formatTime } from "../../utils/helpers.js";
+import { renderKeyedList } from "../../ui/keyedList.js";
 
 export function createDocumentRenderer(deps) {
   const {
@@ -20,20 +21,19 @@ export function createDocumentRenderer(deps) {
     onClearTrash,
   } = deps;
   let draggedDocId = null;
+  let eventsBound = false;
 
   function getVisibleDocuments() {
     const query = els.searchInput.value.trim().toLowerCase();
-    return state.docs
-      .filter((doc) => !doc.deletedAt)
-      .filter((doc) => ui.selectedFolderId === "all" || doc.folderId === ui.selectedFolderId)
-      .filter((doc) => {
-        if (!query) return true;
-        return `${doc.title}\n${doc.content}`.toLowerCase().includes(query);
-      });
+    return state.docs.filter((doc) => !doc.deletedAt
+      && (ui.selectedFolderId === "all" || doc.folderId === ui.selectedFolderId)
+      && (!query || `${doc.title}\n${doc.content}`.toLowerCase().includes(query)));
   }
 
   function renderDocList() {
+    bindListEvents();
     const docs = getVisibleDocuments();
+    const folders = new Map(state.folders.map((folder) => [folder.id, folder]));
     const trashCount = state.docs.filter((doc) => doc.deletedAt).length;
     els.docCount.textContent = String(docs.length);
     if (els.trashCount) els.trashCount.textContent = String(trashCount);
@@ -42,16 +42,10 @@ export function createDocumentRenderer(deps) {
     els.docList.setAttribute("role", "listbox");
     els.docList.setAttribute("aria-label", "文档列表");
 
-    if (docs.length === 0) {
-      els.docList.innerHTML = `<div class="empty-state">没有匹配的文档</div>`;
-      renderTrashModal();
-      return;
-    }
-
-    els.docList.innerHTML = docs
-      .map((doc) => {
+    const changed = renderKeyedList(els.docList, docs.length ? docs : [{ id: null }], (doc, index) => {
+        if (doc.id === null) return '<div class="empty-state">没有匹配的文档</div>';
         const type = getType(doc.type).name;
-        const folder = state.folders.find((item) => item.id === doc.folderId);
+        const folder = folders.get(doc.folderId);
         const active = doc.id === ui.selectedDocId;
         const docId = escapeHtml(doc.id);
         const actions = `<button class="tiny-button" type="button" title="复制" data-copy-doc="${docId}"><i data-lucide="copy"></i></button>
@@ -63,7 +57,7 @@ export function createDocumentRenderer(deps) {
                 </div>
               </details>
               <button class="tiny-button danger-text" type="button" title="移入垃圾箱" data-delete-doc="${docId}"><i data-lucide="trash-2"></i></button>`;
-        return `<article class="doc-item ${active ? "active" : ""}" id="doc-option-${docId}" data-doc-id="${docId}" draggable="true" role="option" aria-selected="${String(active)}" tabindex="${active || (!ui.selectedDocId && docs.indexOf(doc) === 0) ? "0" : "-1"}">
+        return `<article class="doc-item ${active ? "active" : ""}" id="doc-option-${docId}" data-doc-id="${docId}" draggable="true" role="option" aria-selected="${String(active)}" tabindex="${active || (!ui.selectedDocId && index === 0) ? "0" : "-1"}">
           <div class="doc-title-row">
             <div class="doc-title">${escapeHtml(doc.title || "未命名文档")}</div>
             <span class="doc-actions">
@@ -77,69 +71,76 @@ export function createDocumentRenderer(deps) {
           </div>
           <div class="doc-snippet">${escapeHtml(doc.content.replace(/\s+/g, " ").slice(0, 120) || "空白文档")}</div>
         </article>`;
-      })
-      .join("");
+      });
+    if (els.trashModal && !els.trashModal.hidden) renderTrashModal();
+    changed.forEach((row) => window.lucide?.createIcons(row));
+  }
 
-    els.docList.querySelectorAll(".doc-item").forEach((item) => {
-      item.addEventListener("click", (event) => {
-        if (isDocActionTarget(event.target)) return;
-        onSelectDocument(item.dataset.docId);
-      });
-      item.addEventListener("keydown", (event) => handleDocItemKeydown(event, item));
-      item.addEventListener("dragstart", (event) => {
-        const doc = state.docs.find((entry) => entry.id === item.dataset.docId);
-        if (!doc || doc.deletedAt || !event.dataTransfer) return;
-        draggedDocId = doc.id;
-        event.dataTransfer.effectAllowed = "copyMove";
-        event.dataTransfer.setData("application/x-mowen-doc-id", doc.id);
-        event.dataTransfer.setData("text/plain", doc.title || "未命名文档");
-      });
-      item.addEventListener("dragover", (event) => {
-        if (!draggedDocId || draggedDocId === item.dataset.docId) return;
-        event.preventDefault();
-        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-        markDragTarget(item, getDropPlacement(event, item));
-      });
-      item.addEventListener("dragleave", () => {
-        item.classList.remove("drag-before", "drag-after");
-      });
-      item.addEventListener("drop", (event) => {
-        const sourceId = event.dataTransfer?.getData("application/x-mowen-doc-id") || draggedDocId;
-        if (!sourceId || sourceId === item.dataset.docId) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const placement = getDropPlacement(event, item);
-        clearDocDragState();
-        onMoveDocument(sourceId, item.dataset.docId, placement);
-      });
-      item.addEventListener("dragend", clearDocDragState);
+  function bindListEvents() {
+    if (eventsBound) return;
+    eventsBound = true;
+    els.docList.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      button?.closest("[data-doc-menu]")?.removeAttribute("open");
+      if (button?.dataset.copyDoc) return onCopyDocument(button.dataset.copyDoc);
+      if (button?.dataset.deleteDoc) return onDeleteDocument(button.dataset.deleteDoc);
+      if (button?.dataset.moveDocTop) return onMoveDocumentToTop(button.dataset.moveDocTop);
+      if (button?.dataset.moveDocBottom) return onMoveDocumentToBottom(button.dataset.moveDocBottom);
+      const item = event.target.closest(".doc-item");
+      if (item && !isDocActionTarget(event.target)) onSelectDocument(item.dataset.docId);
     });
-    els.docList.querySelectorAll("[data-copy-doc]").forEach((button) => {
-      button.addEventListener("click", () => onCopyDocument(button.dataset.copyDoc));
+    els.docList.addEventListener("keydown", (event) => {
+      const item = event.target.closest(".doc-item");
+      if (item) handleDocItemKeydown(event, item);
     });
-    els.docList.querySelectorAll("[data-doc-menu]").forEach((menu) => {
-      menu.addEventListener("toggle", () => {
-        menu.closest(".doc-item")?.classList.toggle("menu-open", menu.open);
-        if (!menu.open) return;
-        els.docList.querySelectorAll("[data-doc-menu][open]").forEach((otherMenu) => {
-          if (otherMenu !== menu) otherMenu.removeAttribute("open");
-        });
+    els.docList.addEventListener("dragstart", (event) => {
+      const item = event.target.closest(".doc-item");
+      const doc = state.docs.find((entry) => entry.id === item?.dataset.docId);
+      if (!doc || doc.deletedAt || !event.dataTransfer) return;
+      draggedDocId = doc.id;
+      event.dataTransfer.effectAllowed = "copyMove";
+      event.dataTransfer.setData("application/x-mowen-doc-id", doc.id);
+      event.dataTransfer.setData("text/plain", doc.title || "未命名文档");
+    });
+    els.docList.addEventListener("dragover", (event) => {
+      const item = event.target.closest(".doc-item");
+      if (!item || !draggedDocId || draggedDocId === item.dataset.docId) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      markDragTarget(item, getDropPlacement(event, item));
+    });
+    els.docList.addEventListener("dragleave", (event) => {
+      event.target.closest(".doc-item")?.classList.remove("drag-before", "drag-after");
+    });
+    els.docList.addEventListener("drop", (event) => {
+      const item = event.target.closest(".doc-item");
+      const sourceId = event.dataTransfer?.getData("application/x-mowen-doc-id") || draggedDocId;
+      if (!item || !sourceId || sourceId === item.dataset.docId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const placement = getDropPlacement(event, item);
+      clearDocDragState();
+      onMoveDocument(sourceId, item.dataset.docId, placement);
+    });
+    els.docList.addEventListener("dragend", clearDocDragState);
+    els.docList.addEventListener("toggle", (event) => {
+      const menu = event.target;
+      if (!menu.matches("[data-doc-menu]")) return;
+      menu.closest(".doc-item")?.classList.toggle("menu-open", menu.open);
+      if (!menu.open) return;
+      els.docList.querySelectorAll("[data-doc-menu][open]").forEach((other) => {
+        if (other !== menu) other.removeAttribute("open");
       });
+    }, true);
+    els.trashModalList?.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (button?.dataset.restoreDoc) onRestoreDocument(button.dataset.restoreDoc);
+      if (button?.dataset.permanentDeleteDoc) onPermanentlyDeleteDocument(button.dataset.permanentDeleteDoc);
     });
-    els.docList.querySelectorAll("[data-move-doc-top]").forEach((button) => {
-      button.addEventListener("click", () => onMoveDocumentToTop(button.dataset.moveDocTop));
-    });
-    els.docList.querySelectorAll("[data-move-doc-bottom]").forEach((button) => {
-      button.addEventListener("click", () => onMoveDocumentToBottom(button.dataset.moveDocBottom));
-    });
-    els.docList.querySelectorAll("[data-delete-doc]").forEach((button) => {
-      button.addEventListener("click", () => onDeleteDocument(button.dataset.deleteDoc));
-    });
-    renderTrashModal();
-    if (window.lucide) window.lucide.createIcons();
   }
 
   function renderTrashModal() {
+    bindListEvents();
     const trashDocs = state.docs.filter((doc) => doc.deletedAt);
     if (els.trashModalCount) {
       els.trashModalCount.textContent = `${trashDocs.length} 份文档`;
@@ -147,13 +148,10 @@ export function createDocumentRenderer(deps) {
     if (els.restoreAllTrashBtn) els.restoreAllTrashBtn.disabled = trashDocs.length === 0;
     if (els.clearTrashBtn) els.clearTrashBtn.disabled = trashDocs.length === 0;
     if (!els.trashModalList) return;
-    if (trashDocs.length === 0) {
-      els.trashModalList.innerHTML = `<div class="empty-state">垃圾箱为空</div>`;
-      return;
-    }
-    els.trashModalList.innerHTML = trashDocs
-      .map((doc) => {
-        const folder = state.folders.find((item) => item.id === doc.folderId);
+    const folders = new Map(state.folders.map((folder) => [folder.id, folder]));
+    const changed = renderKeyedList(els.trashModalList, trashDocs.length ? trashDocs : [{ id: null }], (doc) => {
+        if (doc.id === null) return '<div class="empty-state">垃圾箱为空</div>';
+        const folder = folders.get(doc.folderId);
         const type = getType(doc.type).name;
         const docId = escapeHtml(doc.id);
         return `<article class="trash-item" data-trash-doc-id="${docId}">
@@ -167,15 +165,8 @@ export function createDocumentRenderer(deps) {
             <button type="button" class="danger-text" data-permanent-delete-doc="${docId}"><i data-lucide="trash-2"></i><span>清除</span></button>
           </div>
         </article>`;
-      })
-      .join("");
-    els.trashModalList.querySelectorAll("[data-restore-doc]").forEach((button) => {
-      button.addEventListener("click", () => onRestoreDocument(button.dataset.restoreDoc));
-    });
-    els.trashModalList.querySelectorAll("[data-permanent-delete-doc]").forEach((button) => {
-      button.addEventListener("click", () => onPermanentlyDeleteDocument(button.dataset.permanentDeleteDoc));
-    });
-    if (window.lucide) window.lucide.createIcons();
+      });
+    changed.forEach((row) => window.lucide?.createIcons(row));
   }
 
   function isDocActionTarget(target) {

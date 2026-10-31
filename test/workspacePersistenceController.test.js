@@ -21,7 +21,7 @@ function createHarness(overrides = {}) {
     ui,
     els,
     toast: (message, tone = "info") => calls.push(["toast", message, tone]),
-    clone: (value) => JSON.parse(JSON.stringify(value)),
+    clone: overrides.clone || ((value) => JSON.parse(JSON.stringify(value))),
     logger: {
       error: (...args) => calls.push(["error", ...args]),
       warn: (...args) => calls.push(["warn", ...args]),
@@ -52,6 +52,60 @@ test("persist writes the current selection to IndexedDB and clears legacy storag
   assert.equal(calls[1][2], "indexedDB");
   assert.deepEqual(calls[2], ["clear-legacy"]);
   assert.equal(ui.storageMode, "indexedDB");
+});
+
+test("a burst of persistence requests clones and writes only the latest state", async () => {
+  let copies = 0;
+  const { controller, calls, state, ui } = createHarness({
+    clone: (data) => { copies++; return structuredClone(data); },
+  });
+  const pending = [];
+  for (let index = 0; index < 10; index++) {
+    state.docs[0].title = `Revision ${index}`;
+    ui.selectedDocId = `doc-${index}`;
+    pending.push(controller.persist());
+  }
+  assert.deepEqual(await Promise.all(pending), Array(10).fill(true));
+  assert.equal(copies, 1);
+  const writes = calls.filter(([type]) => type === "write-indexeddb");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0][1].docs[0].title, "Revision 9");
+  assert.equal(writes[0][1].selectedDocId, "doc-9");
+});
+
+test("changes during a slow write form one following batch with an isolated snapshot", async () => {
+  const writes = [];
+  let finishFirst;
+  const { controller, state, ui } = createHarness({
+    writeWorkspaceState: async (snapshot) => {
+      writes.push(snapshot);
+      if (writes.length === 1) await new Promise((resolve) => { finishFirst = resolve; });
+    },
+  });
+  const first = controller.persist();
+  await new Promise((resolve) => setImmediate(resolve));
+  state.docs[0].title = "second";
+  const second = controller.persist();
+  state.docs[0].title = "latest";
+  const third = controller.persist();
+  assert.equal(second, third);
+  assert.equal(ui.persistPromise, third);
+  assert.equal(writes[0].docs[0].title, "工作汇报");
+  finishFirst();
+  assert.deepEqual(await Promise.all([first, second, third]), [true, true, true]);
+  assert.equal(writes.length, 2);
+  assert.equal(writes[1].docs[0].title, "latest");
+});
+
+test("failed batches report failure to every caller and allow a later retry", async () => {
+  let failing = true;
+  const { controller } = createHarness({
+    writeWorkspaceState: async () => { if (failing) throw new Error("disk full"); },
+    writeLegacyLocalStorageState: () => false,
+  });
+  assert.deepEqual(await Promise.all([controller.persist(), controller.persist()]), [false, false]);
+  failing = false;
+  assert.equal(await controller.persist(), true);
 });
 
 test("persist falls back to localStorage when IndexedDB writes fail", async () => {

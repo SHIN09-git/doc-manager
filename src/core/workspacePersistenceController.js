@@ -26,25 +26,31 @@ export function createWorkspacePersistenceController({
   shouldPreferLocalStorageFallback = defaultShouldPreferLocalStorageFallback,
   logger = console,
 } = {}) {
+  let pendingSave = null;
+
   function persist() {
     state.selectedFolderId = ui.selectedFolderId;
     state.selectedDocId = ui.selectedDocId;
-    const snapshot = clone(state);
-    ui.persistPromise = (ui.persistPromise || Promise.resolve())
+    if (pendingSave) return pendingSave;
+    pendingSave = ui.persistPromise = (ui.persistPromise || Promise.resolve())
       .catch(() => null)
       .then(async () => {
-        if (ui.storageMode === "localStorage") {
+        // Coalesce queued requests; snapshot only when this write can start.
+        pendingSave = null;
+        const snapshot = clone(state);
+        try {
+          if (ui.storageMode === "localStorage") {
+            return tryLocalStorageFallback(snapshot);
+          }
+          await writeWorkspaceState(snapshot);
+          writeStorageBootstrap(snapshot);
+          clearLegacyLocalStorageState();
+          ui.storageMode = "indexedDB";
+          return true;
+        } catch (error) {
+          logger.error?.("保存工作台数据失败", error);
           return tryLocalStorageFallback(snapshot);
         }
-        await writeWorkspaceState(snapshot);
-        writeStorageBootstrap(snapshot);
-        clearLegacyLocalStorageState();
-        ui.storageMode = "indexedDB";
-        return true;
-      })
-      .catch((error) => {
-        logger.error?.("保存工作台数据失败", error);
-        return tryLocalStorageFallback(snapshot);
       });
     return ui.persistPromise;
   }

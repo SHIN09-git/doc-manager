@@ -32,6 +32,8 @@ export function createDocumentEditor(deps) {
   }
 
   function saveEditor(showToast) {
+    globalThis.clearTimeout(ui.saveTimer);
+    ui.saveTimer = null;
     const doc = getCurrentDoc();
     if (!doc) {
       showSaveStatus("");
@@ -41,21 +43,32 @@ export function createDocumentEditor(deps) {
       showSaveStatus("在垃圾箱中", { title: "请先恢复文档再编辑或保存" });
       return Promise.resolve(false);
     }
-    showSaveStatus("保存中");
-    doc.title = els.titleInput.value.trim() || "未命名文档";
-    const nextType = els.typeSelect.value || "custom";
-    if (doc.type !== nextType) doc.writingGenre = "";
-    doc.type = nextType;
-    doc.folderId = els.folderSelect.value || state.folders[0]?.id || createDefaultFolder();
-    doc.styleId = els.styleSelect.value || "";
-    doc.content = els.contentEditor.value;
-    doc.updatedAt = now();
-    ui.selectedDocId = doc.id;
+    const next = {
+      title: els.titleInput.value.trim() || "未命名文档",
+      type: els.typeSelect.value || "custom",
+      folderId: els.folderSelect.value || state.folders[0]?.id || createDefaultFolder(),
+      styleId: els.styleSelect.value || "",
+      content: els.contentEditor.value,
+    };
+    const changed = Object.keys(next).some((key) => doc[key] !== next[key]);
     const sequence = ++saveSequence;
+    if (!changed && !showToast) {
+      return Promise.resolve(ui.persistPromise).then((saved) => {
+        if (sequence === saveSequence && getCurrentDoc()?.id === doc.id) {
+          showSaveStatus(saved === false ? "未保存" : "已保存", { transient: saved !== false });
+        }
+        return saved !== false;
+      });
+    }
+    showSaveStatus("保存中");
+    if (doc.type !== next.type) doc.writingGenre = "";
+    Object.assign(doc, next);
+    if (changed) doc.updatedAt = now();
+    ui.selectedDocId = doc.id;
     const persistence = Promise.resolve(persist());
-    eventBus.emit(EVENTS.RENDER_DOC_LIST);
+    if (changed) eventBus.emit(EVENTS.RENDER_DOC_LIST);
     return persistence.then((saved) => {
-      if (sequence !== saveSequence) return saved !== false;
+      if (sequence !== saveSequence || getCurrentDoc()?.id !== doc.id) return saved !== false;
       if (saved === false) {
         showSaveStatus("未保存", { title: "本机存储写入失败，请导出备份后重试" });
         return false;

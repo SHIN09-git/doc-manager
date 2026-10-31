@@ -63,13 +63,13 @@ function renderIcon(element) {
   svg.setAttribute("stroke-linejoin", "round");
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("data-lucide", name);
-  svg.className = element.className || "";
+  svg.setAttribute("class", element.getAttribute("class") || "");
   svg.innerHTML = paths;
   element.replaceWith(svg);
 }
 
 export function createIcons(root = document) {
-  root.querySelectorAll("[data-lucide]").forEach(renderIcon);
+  root.querySelectorAll("[data-lucide]:not(svg)").forEach(renderIcon);
 }
 
 window.lucide = {

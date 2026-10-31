@@ -12,6 +12,7 @@
     "package:windows": "npm run build:static && node scripts/build-windows-package.mjs",
     "check": "node --check app.js && node --check src/main.js && node --check src/admin/adminPage.js && node --check e2e/serve-static.mjs && node --check e2e/run-e2e.mjs && node --check playwright.config.js && node --check scripts/start-local.mjs && node --check scripts/build-static.mjs && node --check scripts/build-sites.mjs && node --check scripts/build-windows-package.mjs && node --check scripts/health-check.mjs && node --check scripts/verify-production.mjs && node --check sites/worker.js && node --check build/bundle.js && npm run server:check",
     "test": "node --test test/*.test.js && npm run server:test",
+    "perf:workbench": "node scripts/benchmark-workbench.mjs",
     "serve:static": "node e2e/serve-static.mjs",
     "start:api": "node server/src/server.js",
     "server:dev": "node server/src/server.js",

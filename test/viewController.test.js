@@ -153,6 +153,7 @@ test("cloud top button toggles cloud view and renders cloud panel", () => {
   harness.controller.bindEvents();
 
   harness.els.cloudTopBtn.listeners.click[0]();
+  assert.equal(harness.calls.filter(([name]) => name === "render-cloud").length, 1);
 
   assert.equal(harness.ui.mainView, "cloud");
   assert.equal(harness.els.cloudPanel.hidden, false);

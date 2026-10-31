@@ -3,10 +3,20 @@ import test from "node:test";
 import {
   copyTextToClipboard,
   createId,
+  formatTime,
+  formatLocalDate,
   sanitizeCssColor,
   sanitizeFileName,
   sanitizeUrl,
 } from "../src/utils/helpers.js";
+
+test("cached date formatters preserve local dates and invalid-date handling", () => {
+  for (const input of ["2026-10-01T23:30:00Z", "2026-01-01T00:00:00Z", "invalid", ""]) {
+    const date = new Date(input);
+    assert.equal(formatTime(input), input ? date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" }) : "");
+    assert.equal(formatLocalDate(input), input ? date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "");
+  }
+});
 
 test("createId falls back when Web Crypto is unavailable", () => {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");

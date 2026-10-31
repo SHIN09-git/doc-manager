@@ -13,13 +13,20 @@ export function createFolderRenderer(deps) {
 
   function renderFolders() {
     const allActive = ui.selectedFolderId === "all";
+    const counts = new Map();
+    let activeCount = 0;
+    for (const doc of state.docs) {
+      if (doc.deletedAt) continue;
+      activeCount++;
+      counts.set(doc.folderId, (counts.get(doc.folderId) || 0) + 1);
+    }
     const folderRows = [
       `<button class="folder-item ${allActive ? "active" : ""}" type="button" data-folder-id="all">
         <span class="folder-main"><span class="folder-color folder-color-all"></span><span class="folder-name">全部文档</span></span>
-        <span class="folder-count">${state.docs.length}</span>
+        <span class="folder-count">${activeCount}</span>
       </button>`,
       ...state.folders.map((folder) => {
-        const count = state.docs.filter((doc) => doc.folderId === folder.id).length;
+        const count = counts.get(folder.id) || 0;
         const isReal = folder.kind === "real";
         const folderId = escapeHtml(folder.id);
         const color = sanitizeCssColor(folder.color);

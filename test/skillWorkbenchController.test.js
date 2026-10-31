@@ -117,6 +117,22 @@ test("createCardProgress writes building progress back to the skill", () => {
   assert.equal(harness.state.styles[0].status, "building");
   assert.deepEqual(harness.state.styles[0].buildProgress, { message: "步骤 1/4：分析样本", progress: 25 });
   assert.equal(harness.state.styles[0].lastBuildError, "");
+  assert.deepEqual(harness.calls, []);
+  assert.deepEqual(harness.events, [EVENTS.RENDER_STYLE_LIST]);
+});
+
+test("progress does not overwrite an open markdown draft or persist training samples", () => {
+  const ui = { editingStyle: { id: "skill-1", summary: "unsaved edits" }, skillMarkdownDirty: true };
+  const harness = createHarness({ ui });
+  const before = harness.state.styles[0];
+  const progress = harness.controller.createCardProgress("skill-1");
+  progress.update("analysis", 20);
+  progress.update("aggregation", 40);
+  assert.equal(harness.state.styles[0], before);
+  assert.equal(ui.editingStyle.summary, "unsaved edits");
+  assert.deepEqual(harness.calls, []);
+  harness.state.styles = [];
+  assert.doesNotThrow(() => progress.update("deleted", 60));
 });
 
 test("getBuildResult summarizes rule counts and test status", () => {

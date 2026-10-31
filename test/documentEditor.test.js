@@ -28,7 +28,7 @@ function createHarness({ persistResult = true } = {}) {
     createDefaultFolder: () => "folder-1",
     getDocumentLocation: () => "本机文档库 / 新标题",
     getFolderById: () => ({ id: "folder-1", kind: "tag" }),
-    persist: async () => persistResult,
+    persist: async () => { calls.push(["persist"]); return persistResult; },
     eventBus: { emit: (...args) => calls.push(["emit", ...args]) },
     syncDocumentToRealFolder: async () => "真实文件夹 / 新标题",
     showSaveStatus: (...args) => calls.push(["status", ...args]),
@@ -56,4 +56,26 @@ test("document save keeps a visible failure state when all persistence backends 
   assert.equal(saved, false);
   assert.deepEqual(calls.filter(([type]) => type === "status").map(([, message]) => message), ["保存中", "未保存"]);
   assert.equal(calls.some(([type]) => type === "toast"), false);
+});
+
+test("unchanged autosaves do not write, rerender or change modification time", async () => {
+  const { controller, calls, doc } = createHarness();
+  await controller.saveEditor(false);
+  const updatedAt = doc.updatedAt;
+  calls.length = 0;
+  await controller.saveEditor(false);
+  assert.equal(doc.updatedAt, updatedAt);
+  assert.equal(calls.some(([type]) => type === "persist" || type === "emit"), false);
+  assert.equal(calls.at(-1)[1], "已保存");
+});
+
+test("explicit saves retry persistence without reordering or rerendering unchanged documents", async () => {
+  const { controller, calls, doc } = createHarness({ persistResult: false });
+  await controller.saveEditor(true);
+  const updatedAt = doc.updatedAt;
+  calls.length = 0;
+  assert.equal(await controller.saveEditor(true), false);
+  assert.equal(doc.updatedAt, updatedAt);
+  assert.equal(calls.filter(([type]) => type === "persist").length, 1);
+  assert.equal(calls.some(([type]) => type === "emit"), false);
 });

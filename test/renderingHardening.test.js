@@ -114,10 +114,34 @@ test("skill renderer escapes skill ids in selectors and action attributes", () =
   }
 });
 
+test("folder counts exclude deleted documents", () => {
+  const folderList = createFakeElement();
+  const renderer = createFolderRenderer({
+    state: {
+      docs: [{ id: "active", folderId: "folder" }, { id: "deleted", folderId: "folder", deletedAt: "2026-10-01" }],
+      folders: [{ id: "folder", name: "Documents", kind: "tag" }],
+    },
+    ui: { selectedFolderId: "all" },
+    els: { folderList },
+  });
+  renderer.renderFolders();
+  assert.equal((folderList.innerHTML.match(/class="folder-count">1</g) || []).length, 2);
+});
+
 function createFakeElement() {
   return {
     innerHTML: "",
     textContent: "",
+    addEventListener() {},
+    replaceChildren() { this.innerHTML = ""; },
+    insertBefore(node) { this.innerHTML += node.outerHTML; },
+    ownerDocument: {
+      createElement() {
+        return {
+          set innerHTML(html) { this.content = { firstElementChild: { outerHTML: html } }; },
+        };
+      },
+    },
     setAttribute() {},
     querySelectorAll() {
       return [];

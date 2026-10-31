@@ -10,6 +10,7 @@ import {
 } from "../../utils/helpers.js";
 import { buildSkillVersionDiff } from "./skillVersionDiff.js";
 import { isGongwenWriter } from "./gongwenWriter.js";
+import { renderKeyedList } from "../../ui/keyedList.js";
 
 export function createSkillRenderer(deps) {
   const {
@@ -34,6 +35,7 @@ export function createSkillRenderer(deps) {
     onRetrySkill = () => {},
     onCancelSkillBuild = () => {},
   } = deps;
+  let gridEventsBound = false;
 
   function renderStyleSelect() {
     const enabledStyles = state.styles.filter(isSkillEnabled);
@@ -276,21 +278,14 @@ export function createSkillRenderer(deps) {
   function renderStyleList() {
     if (!els.styleList) return;
     const visibleStyles = getFilteredStyles();
-    if (state.styles.length === 0) {
-      els.styleList.innerHTML = renderEmptySkillCard("还没有执笔人", "拖入 1-3 篇同类正式文档训练你的第一个执笔人");
-      bindGridEvents();
-      if (window.lucide) window.lucide.createIcons();
-      return;
-    }
-    if (visibleStyles.length === 0) {
-      els.styleList.innerHTML = renderEmptySkillCard("没有匹配的执笔人", "调整筛选条件后再查看");
-      bindGridEvents();
-      if (window.lucide) window.lucide.createIcons();
-      return;
-    }
-    els.styleList.innerHTML = visibleStyles.map(renderSkillCard).join("");
+    const changed = renderKeyedList(els.styleList, visibleStyles.length ? visibleStyles : [{ id: null }], (style) => {
+      if (style.id !== null) return renderSkillCard(style);
+      return state.styles.length
+        ? renderEmptySkillCard("没有匹配的执笔人", "调整筛选条件后再查看")
+        : renderEmptySkillCard("还没有执笔人", "拖入 1-3 篇同类正式文档训练你的第一个执笔人");
+    });
     bindGridEvents();
-    if (window.lucide) window.lucide.createIcons();
+    changed.forEach((card) => window.lucide?.createIcons(card));
   }
 
   function getFilteredStyles() {
@@ -421,35 +416,44 @@ export function createSkillRenderer(deps) {
   }
 
   function bindGridEvents() {
-    els.styleList.querySelectorAll("[data-new-skill]").forEach((button) => {
-      button.addEventListener("click", () => onNewSkill());
+    if (gridEventsBound) return;
+    gridEventsBound = true;
+    const actions = {
+      newSkill: onNewSkill,
+      copySkillHandle: onCopySkillHandle,
+      invokeSkill: onInvokeSkill,
+      editSkill: onEditSkill,
+      retrainSkill: onRetrainSkill,
+      skillDetail: onOpenSkillDetail || openSkillDetail,
+      skillTest: onTestSkill,
+      skillExport: onExportSkill,
+      skillDelete: onDeleteSkill,
+      retrySkill: onRetrySkill,
+      cancelSkillBuild: onCancelSkillBuild,
+    };
+    els.styleList.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (button) {
+        for (const [key, callback] of Object.entries(actions)) {
+          if (!(key in button.dataset)) continue;
+          event.preventDefault();
+          event.stopPropagation();
+          button.closest(".skill-more")?.removeAttribute("open");
+          callback(button.dataset[key]);
+          return;
+        }
+      }
+      const card = event.target.closest("[data-skill-card]");
+      if (card && !event.target.closest("button, input, label, details, summary")) selectSkillCard(card.dataset.skillCard);
     });
-    els.styleList.querySelectorAll("[data-skill-card]").forEach((card) => {
-      card.addEventListener("click", (event) => {
-        if (event.target.closest("button, input, label, details, summary")) return;
-        selectSkillCard(card.dataset.skillCard);
-      });
-      card.addEventListener("keydown", (event) => {
-        if (event.target !== card || !["Enter", " "].includes(event.key)) return;
-        event.preventDefault();
-        selectSkillCard(card.dataset.skillCard);
-      });
+    els.styleList.addEventListener("keydown", (event) => {
+      if (!event.target.matches("[data-skill-card]") || !["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      selectSkillCard(event.target.dataset.skillCard);
     });
-    bindButton("[data-copy-skill-handle]", (button) => onCopySkillHandle(button.dataset.copySkillHandle));
-    bindButton("[data-invoke-skill]", (button) => onInvokeSkill(button.dataset.invokeSkill));
-    bindButton("[data-edit-skill]", (button) => onEditSkill(button.dataset.editSkill));
-    bindButton("[data-retrain-skill]", (button) => onRetrainSkill(button.dataset.retrainSkill));
-    bindButton("[data-skill-detail]", (button) => {
-      const opener = onOpenSkillDetail || openSkillDetail;
-      opener(button.dataset.skillDetail);
-    });
-    bindButton("[data-skill-test]", (button) => onTestSkill(button.dataset.skillTest));
-    bindButton("[data-skill-export]", (button) => onExportSkill(button.dataset.skillExport));
-    bindButton("[data-skill-delete]", (button) => onDeleteSkill(button.dataset.skillDelete));
-    bindButton("[data-retry-skill]", (button) => onRetrySkill(button.dataset.retrySkill));
-    bindButton("[data-cancel-skill-build]", (button) => onCancelSkillBuild(button.dataset.cancelSkillBuild));
-    els.styleList.querySelectorAll("[data-toggle-skill]").forEach((input) => {
-      input.addEventListener("change", () => onToggleSkillEnabled(input.dataset.toggleSkill, input.checked));
+    els.styleList.addEventListener("change", (event) => {
+      const input = event.target.closest("[data-toggle-skill]");
+      if (input) onToggleSkillEnabled(input.dataset.toggleSkill, input.checked);
     });
   }
 
@@ -462,16 +466,6 @@ export function createSkillRenderer(deps) {
     renderStyleList();
   }
 
-  function bindButton(selector, callback) {
-    els.styleList.querySelectorAll(selector).forEach((button) => {
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        callback(button);
-      });
-    });
-  }
-
   function getSkillStatus(style) {
     if (style.status === "building") return { key: "building", label: "生成中", className: "is-building" };
     if (style.status === "failed") return { key: "failed", label: "生成失败", className: "is-failed" };
@@ -481,16 +475,6 @@ export function createSkillRenderer(deps) {
     return style.enabled === false
       ? { key: "disabled", label: "未启用", className: "is-disabled" }
       : { key: "ready", label: "已启用", className: "is-ready" };
-  }
-
-  function getSkillConfidence(style) {
-    const parsed = parseSkillJson(style.skillJson);
-    const confidence = style.lastBuildResult?.confidence ||
-      style.qualityReport?.confidence ||
-      style.aggregationData?.overall_confidence ||
-      parsed.confidence ||
-      "low";
-    return ["low", "medium", "high"].includes(confidence) ? confidence : "low";
   }
 
   function getSkillDescription(style) {

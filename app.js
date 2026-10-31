@@ -1062,18 +1062,6 @@ function renderSkillQualityReport() {
   skillRenderer.renderSkillQualityReport();
 }
 
-function renderSkillVersions() {
-  skillRenderer.renderSkillVersions();
-}
-
-function showSkillVersion(index) {
-  skillRenderer.showSkillVersion(index);
-}
-
-function restoreSkillVersion(index) {
-  return skillRenderer.restoreSkillVersion(index);
-}
-
 function renderSkillTest() {
   skillRenderer.renderSkillTest();
 }

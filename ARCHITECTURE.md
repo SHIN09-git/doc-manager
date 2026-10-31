@@ -1,419 +1,99 @@
 # 架构说明
 
-摹文拟笔工作台是一个本地优先的静态前端应用。核心目标是让文档管理、AI 起草、执笔人构建和 PPT 生成在浏览器中形成闭环，同时保持代码结构可以继续拆分和扩展。
+更新日期：2026-10-31。本文说明当前实现；历轮施工过程见更新记录及原施工文档，不作为新增抽象层的要求。
 
-## 总览
+## 运行入口
 
-P0 商业化补齐后，项目包含两个运行面：
-
-```text
-Browser App
-  - index.html / build/bundle.js
-  - 本地文档、执笔人、PPT、编辑器和 AI 调用入口
-
-Commercial API
-  - server/src/app.js
-  - 账号安全、组织、团队邀请、云端文档、云端执笔人、AI 代理、用量、审计、邮件、支付、备份和灰度反馈
-  - 开发模式使用 server/.data/db.json，云端部署可切换到 PostgreSQL
-```
+工作台使用原生 JavaScript、HTML 和 CSS，不依赖前端框架。
 
 ```text
-index.html
-  ↓
-build/bundle.js
-  ↓
-src/main.js
-  ↓
-app.js
-  ↓
-src/modules/*
+src/main.js → app.js → src/modules/*
+        esbuild 打包 ↓
+index.html → build/bundle.js + workbench.css
 ```
 
-`index.html` 直接加载 `build/bundle.js`。开发时修改 `src/` 和 `app.js` 后，需要执行 `npm run build` 重新生成打包文件。
+`app.js` 负责状态、DOM 和控制器装配。`src/main.js` 注册图标并加载应用。修改源码后运行 `npm run build`；`index.html` 可以直接打开，也可通过本地静态服务访问。
 
-## 关键目录
+`admin.html` 是可选云端服务的独立后台，使用 `src/admin/adminPage.js`、`styles.css` 和 `ui-refresh.css`。这些样式仍有实际调用，不能当作工作台旧样式直接删除。
 
-| 路径 | 作用 |
+项目目前按非商业用途维护。已有云端、组织和计费功能保留，但不是本地文档编辑的前置条件。
+
+## 模块归属
+
+| 目录 | 职责 |
 | --- | --- |
-| `index.html` | 页面结构、主要面板和弹窗容器 |
-| `admin.html` | 独立管理后台页面，用于 owner/admin/operator 查看运营数据 |
-| `workbench.css` | 工作台唯一样式来源：设计 token、组件、响应式与明暗主题 |
-| `styles.css` / `ui-refresh.css` | 仅供独立后台 `admin.html` 使用的历史样式层 |
-| `app.js` | 旧逻辑兼容层、页面装配和部分控制器入口 |
-| `src/main.js` | 打包入口，注册模块能力 |
-| `src/core/` | 存储、事件总线、工作台状态初始化、持久化兜底、位置文案和旧数据迁移 |
-| `src/admin/` | 独立后台页面脚本，不依赖主工作台 DOM |
-| `src/modules/ai/` | AI 调用、重试、取消、JSON 容错和接口配置 |
-| `src/modules/cloud/` | 云端 API 客户端、云端会话控制、云端文档/执笔人同步控制、云端用户操作控制、云端面板渲染、云端账单、人工充值和费用明细的前端展示格式化工具 |
-| `src/modules/documents/` | 文档导入、阅读、导出、侧栏控制、垃圾箱、真实文件夹关联和自定义文档类型 |
-| `src/modules/editor/` | 正文编辑器周边控制器，例如查找替换、右键菜单、键盘导航和局部编辑动作 |
-| `src/modules/imports/` | 文件拖拽高亮、全局 drop 路由、文档卡片拖入生成提示词和浏览器误打开文件防护 |
-| `src/modules/product/` | 产品级功能目录和功能地图入口动作控制，用于功能地图和后续内容结构统一 |
-| `src/modules/skills/` | 执笔人解析、聚合、训练构建入口、工作台动作、生成弹窗、详情抽屉、`@` 提及面板、渲染、包导入导出、版本和测试 |
-| `src/modules/ppt/` | PPT 素材整理、HTML 预览、原生 `.pptx` 生成和 PPT 风格执笔人保存 |
-| `src/modules/storage/` | IndexedDB 与 localStorage 兼容存储 |
-| `src/ui/` | 设计图标、主题、响应式布局、全局快捷键、主视图/标签切换和通用 UI 组件 |
-| `src/utils/` | EventBus、DOM 工具、拖拽路由、通用函数 |
-| `server/` | 商业化后端，包含账号安全、组织、团队邀请、云端同步、AI 代理、用量、审计、邮件投递、支付 webhook、人工充值服务、备份脚本和管理汇总 |
-| `runtime-config.js` | 静态部署运行时配置入口；`PUBLIC_API_BASE_URL` 在构建时写入公开 API 地址 |
-| `test/` | Node 单元测试 |
-| `e2e/` | Playwright 端到端测试与静态服务 |
-
-## 状态模型
-
-应用状态目前主要集中在全局 `state` 对象中，并通过模块函数读写。
-
-主要数据：
-
-- `state.docs`：导入和生成的文档
-- `state.folders`：真实文件夹与自定义标签信息
-- `state.styles`：执笔人列表，内部仍沿用部分历史 `skill/style` 命名
-- `state.aiConfig`：AI 接口配置
-- `state.cloud`：云端登录态、组织、团队成员/邀请、同步入口和云端 AI 代理状态
-- `state.trash`：删除后的文档缓存
-- `state.pptProjects`：PPT 生成项目与预览信息
-
-持久化优先使用 IndexedDB，localStorage 作为轻量兜底和旧数据迁移入口。保存接口返回真实成功状态：主存储失败后会固定切换到兜底模式，只有实际写入成功才向用户显示“已保存”。工作区备份使用版本化 JSON；v2 默认排除 `settings.apiKey` 和云端会话，恢复时只替换本机工作区状态。
-
-## 事件总线
-
-跨模块刷新使用 `eventBus`。常用事件包括：
-
-- `RENDER_DOC_LIST`
-- `RENDER_EDITOR`
-- `RENDER_STYLE_SELECT`
-- `RENDER_STYLE_LIST`
-- `RENDER_STYLE_GRID`
-- `RENDER_PPT`
-- `PERSIST`
-
-约定：
-
-1. 数据变更后先更新 `state`。
-2. 调用 `persist()` 保存。
-3. 通过事件通知局部视图刷新。
+| `src/core/` | 数据初始化、IndexedDB、旧存档迁移、保存队列、事件总线 |
+| `src/modules/documents/` | 导入、列表、编辑保存、Word 导出、类型和垃圾箱 |
+| `src/modules/editor/` | 查找替换、正文菜单、占位符清单 |
+| `src/modules/folders/` | 标签、真实文件夹授权与同步 |
+| `src/modules/imports/` | 文件和文档卡片的拖拽路由 |
+| `src/modules/generation/` | AI 起草、原位修改、参考资料、执笔人输入表单 |
+| `src/modules/skills/` | 执笔人构建、规则、版本、测试、卡片、弹窗和内置公文写作 |
+| `src/modules/ppt/` | 演示稿结构、预览、逐页编辑和原生 PPTX 导出 |
+| `src/modules/ai/`、`settings/` | 接口请求、取消、重试、JSON 修复及接口设置 |
+| `src/modules/cloud/`、`product/` | 可选云端功能、账单展示和功能地图 |
+| `src/ui/` | 图标、局部列表更新、布局、主题、视图切换、提示与进度 |
+| `src/utils/` | 编码、文件解析、格式化、隐私预检和导入限制 |
+| `server/src/` | 可选后端 API、账号、组织、存储、AI 代理、账单、审计和邮件 |
 
-后续重构建议继续把 `app.js` 中的页面控制逻辑迁移到更小的控制器模块。当前已完成接口设置、云端 API 客户端、云端会话控制、云端文档/执笔人同步控制、云端用户操作控制、云端面板渲染、功能地图入口动作、主视图/标签切换、全局快捷动作、导入拖拽路由、编辑器查找替换、编辑器右键菜单、文档侧栏、自定义文档类型、执笔人工作台、执笔人生成弹窗、执笔人包导入导出、执笔人详情入口、执笔人训练构建入口、PPT 执笔人保存入口、持久化/位置文案、`@` 提及面板和工作台状态初始化/旧数据迁移拆分，下一批优先继续压缩剩余页面装配函数。
+## 状态与保存
 
-## 功能内容结构
+`state` 保存业务数据；`ui` 保存当前选择、编辑副本、撤销记录、任务控制器和预览等页面状态。
 
-工作台的功能目录集中在 `src/modules/product/featureCatalog.js`。该目录不保存业务数据，只描述：
+| 字段 | 内容 |
+| --- | --- |
+| `state.docs` | 文档；`deletedAt` 标记垃圾箱，不另建 `state.trash` |
+| `state.folders` | 标签和真实文件夹的元信息；目录授权句柄单独存入 IndexedDB |
+| `state.styles` | 执笔人规则、样本、测试和版本 |
+| `state.customTypes` | 用户自定义文档类型 |
+| `state.settings` | AI 接口与本地设置 |
+| `state.cloud` | 云端会话、组织及同步状态 |
+| `ui.pptDeckSpec` | 当前演示稿结构，不是持久化的项目列表 |
 
-- 功能所属分组
-- 用户看到的名称和说明
-- 入口位置
-- 主要产出
-- 跳转动作
+`workspaceInitializer.js` 在读取存档后补默认字段。内部保留 `style/skill` 名称以兼容存档和导入包，界面称“执笔人”。
 
-云端页的“功能地图”从这份目录渲染。后续新增功能时，应先补充功能目录，再接入具体 UI 和文档，避免 README、入门指南、工作台入口和后台说明各写一套。
+`workspacePersistenceController.persist()` 返回写入结果。正常使用 IndexedDB；写入失败时尝试 localStorage，失败不能显示“已保存”。旧数据迁移、空间不足提示和备份保护保留。
 
-## 云端账单边界
+保存队列只有一个正在写入的快照和一个待执行批次。待执行批次合并连续请求，开始写入时才复制最新状态；写入途中发生的修改进入下一批。`ui.persistPromise` 指向最近批次。不要把“排队成功”当作“保存成功”。
 
-人工确认充值已经形成一条独立链路：
+未修改的自动保存不改时间、不重存数据；手动保存仍执行写入以支持重试和真实文件夹同步。备份 v2 排除 API Key 和云端会话，恢复不覆盖云端数据。
 
-```text
-用户提交充值申请
-  → manual_payment_orders
-  → 管理员确认 / 拒绝
-  → credit_accounts / credit_ledger
-  → audit_logs / system_events
-  → 用户云端页和独立后台账单页
-```
+## 渲染与事件
 
-结构约定：
+事件定义集中在 `src/core/eventBus.js`，由 `app.js` 绑定控制器。数据修改后调用保存，再发出需要的刷新事件；不要依赖不存在的 `PERSIST`、`RENDER_PPT` 或 `RENDER_STYLE_GRID` 事件。
 
-- 前端展示文案和状态格式化集中在 `src/modules/cloud/billingFormatters.js`，主工作台和独立后台共用，避免状态名、支付方式、额度流水文案分叉。
-- 后端额度流水公开字段集中在 `server/src/billing/creditLedger.js`，接口只返回按组织和权限过滤后的公开字段。
-- 后端人工充值订单列表、提交、审核、套餐解析和凭证公开字段集中在 `server/src/billing/manualPaymentService.js`，`server/src/app.js` 只负责路由装配和复用通用账号/审计依赖。
-- PostgreSQL Store 下人工充值创建、审核、额度入账和会员开通走 `server/src/db/repositories/manualPaymentRepository.js` 与 `creditRepository.js`，并在同事务写入审计和系统事件；JSON Store 兼容路径保持原有快照写入。
-- 支付 webhook 原始 payload 只作为内部排查和审计留存；`/api/billing/summary`、`/api/admin/dashboard`、组织数据导出和 webhook 响应统一通过公开转换器返回摘要字段，不暴露渠道回调原文。
-- `server/src/app.js` 仍负责通用路由和事务依赖装配，但新增账单子能力时应优先放入 `server/src/billing/`，再由路由调用。
+文档、垃圾箱和执笔人列表共用 `src/ui/keyedList.js`：以记录 ID 复用节点，只替换展示内容变化的条目，顺序变化时移动已有节点。新增列表记录应有唯一且稳定的 ID。按钮和拖拽事件委托给列表容器，不随刷新重复绑定。
 
-### AI 购买额度生命周期
+垃圾箱在打开时渲染，打开期间随数据刷新。图标只补绘新节点；日期格式化器复用实例。执笔人构建的起点、结果和失败状态保存，步骤进度只更新内存和卡片，不触发全库保存或下拉菜单刷新。
 
-超过套餐日额度的 AI 请求不会再在模型返回后临时扣费，而是采用三阶段生命周期：
+## 业务链路
 
-```text
-限额判断
-  → 原子扣减 credit_accounts 并写入 reserved 预留
-  → 调用 AI
-  → 成功：绑定 ai_usage、标记 settled、写入 credit_ledger
-  → 失败：恢复余额、标记 refunded
-```
+文档：文件选择或拖拽 → `fileReaders.js` 解析 → 文档管理器写入 `state.docs` → 列表和编辑区。Office 文件先检查压缩包大小与条目数，Word 表格和 PPTX 文本转换为可编辑文本。Word 导出提供通用及公文版式。
 
-- PostgreSQL 使用 `ai_credit_reservations` 保存预留状态，预留与限额占位在同一事务中完成。
-- JSON Store 通过写队列保持同样的状态契约，旧存档缺少该字段时会自动补为空数组。
-- 退款遇到瞬时存储错误会重试一次；仍失败时返回 `credit_refund_failed` 并写入运营事件。
-- 超过 1 小时仍未结算的预留视为进程中断遗留项，由现有运维清理任务原子退回；已结算和已退回记录保留 90 天后再清理。
-- `credit_ledger` 只记录最终成功消费，不把尚未完成或已经退回的预留伪装成费用明细。
+起草：本次输入与参考资料 → 执笔人执行卡 → AI 请求 → 新建、覆盖或插入。覆盖和改写在返回时检查目标文档与编辑内容，防止覆盖等待期间的新修改。缺失事实使用占位符。
 
-## 云端邮件投递边界
+执笔人：单篇分析 → 多篇聚合 → 草案 → 可选反馈优化 → 三类生成测试 → 保存版本。单篇规则不能升级为强规则；混样本结构、隐私、个案事实、用户输入优先级和 JSON 校验由现有构建器与分析器负责，不为精简代码而取消这些检查。
 
-邮箱验证和密码重置邮件由后端生成正文后发送给邮件服务商。内部 `email_deliveries.metadata` 可保存投递排查需要的信息，但对外公开时必须通过白名单转换：
+PPT：材料与样式 → 结构化演示稿 → HTML 预览和逐页编辑 → `pptxgenjs` 导出。当前仍与主工作台一起打包，以保留直接打开文件的能力。
 
-- 管理员后台和组织数据导出只返回 `delivery_id`、`message_id`、服务商消息 ID、回调状态、回调时间和服务商事件 ID 等排查字段。
-- 验证码、重置码、内部验证记录 ID、任意 `token` 或 `secret` 不应进入公开响应。
-- 邮件服务商回调仍通过 `EMAIL_CALLBACK_TOKEN` 鉴权；匹配失败的回调只写系统事件，不创建新的投递记录。
+## 可选后端
 
-## 云端运营事件边界
+`server/src/app.js` 装配 API。开发使用 JSON Store；生产默认要求 PostgreSQL，迁移在 `server/migrations/`。部分请求仍使用整库快照，不能据现有单元测试声称已具备生产级多实例性能。
 
-`system_events` 用于记录后台可见的错误、反馈、支付告警、邮件状态和组织治理草案。该表是运营排查入口，不是密钥存储：
+- 认证、组织权限、跨域来源和公开响应脱敏仍在后端校验。
+- 文档和执笔人同步通过版本号检查冲突。
+- 账单展示由 `billingFormatters.js` 统一；人工充值服务与表级写入分别在 `server/src/billing/` 和 `server/src/db/repositories/`。
+- 购买额度采用调用前预留、成功结算、失败退款；审计和额度更新保留事务边界。
+- 邮件、支付回调和运营记录的公开响应不包含原始密钥或令牌。
+- 备份脚本支持校验、恢复演练、可选加密与对象存储。真实服务验证见部署文档。
 
-- 最近错误接口、管理员后台和组织数据导出会通过公开转换器返回系统事件。
-- 公开 metadata 会递归隐藏 `token`、`secret`、`password`、`api_key`、`authorization`、`cookie`、`signature` 等敏感键。
-- 负责人、备注、优先级、SLA、状态、任务类型、事件 ID 等运营字段保留，保证后台跟进不受影响。
-- 反馈状态更新和批量处理响应也返回公开系统事件对象，避免同一条反馈在后台列表与处理接口中出现不同的公开字段边界。
-- 审计日志、AI 失败跟进记录和后台偏好在 `/api/audit`、个人导出与组织导出中同样走公开转换器；`audit_logs.metadata`、`ops_triage.metadata` 和 `admin_preferences.preferences` 会复用同一套递归敏感键隐藏规则。
+## 构建与验证
 
-## 文档链路
+- `npm run build`：构建内置参考资料及浏览器脚本。
+- `npm run check`、`npm test`：语法及前后端单元测试。
+- `npm run test:e2e`：浏览器交互回归，结束后关闭测试服务。
+- `npm run perf:workbench`：独立 Chromium 性能样本，不读取真实用户数据，结束后关闭服务。
+- `npm run build:static`：生成 `dist/`，收集后台模块依赖和许可文件。
+- `npm run package:windows`：生成自包含 Windows 安装包。
 
-文档导入流程：
-
-```text
-本地文件 / 拖拽
-  → dropRouting 判断目标
-  → importService 读取内容
-  → 文本、Word、PPTX、CSV 解析
-  → 编码与表格转换
-  → state.docs
-  → 文档列表与编辑器刷新
-```
-
-文档删除不会立即彻底清除，而是进入垃圾箱。垃圾箱支持单个恢复、单个清除、全部恢复和全部清除。
-
-导出当前文档时默认生成 `.docx`，并会避免重复导出正文中的大标题。
-
-## 执笔人链路
-
-执笔人是当前项目的核心模块。
-
-### 使用页
-
-右侧默认打开执笔人工作台。主视图是卡片列表：
-
-- 未选中卡片只显示名称和“调用”
-- 点击后展开详情和操作
-- 构建中或失败状态会自动展开
-- 点击“调用”会把 `@调用名` 插入生成提示词，并切换到生成窗口
-
-### 生成页
-
-“生成执笔人”是二级弹窗。它负责收集基础信息和训练样本，提交后立即关闭，进度回到对应卡片。
-
-训练样本来源：
-
-- 左侧文档库
-- 本地上传文件
-
-### AI 构建链路
-
-核心函数：
-
-- `analyzeSingleDocument`
-- `aggregateDocumentAnalyses`
-- `generateSkillDraft`
-- `optimizeSkillWithFeedback`
-- `testSkillOnGeneration`
-- `buildSkillPromptForDocumentGeneration`
-
-构建原则：
-
-1. 单篇样本只产生候选规则。
-2. 多篇样本共同验证后才进入强规则。
-3. 隐私信息、个案事实和一次性安排需要排除。
-4. 构建结果写入版本。
-5. 生成测试会输出规则命中和质量报告。
-
-内部文件和函数中仍可能出现 `skill` 命名，这是历史兼容和导入包格式需要。UI 和文档统一称为“执笔人”。
-
-## AI 调用
-
-AI 客户端面向 OpenAI 兼容 Chat Completions 接口。
-
-能力包括：
-
-- 自定义 Base URL、Endpoint Path、Model、API Key
-- AbortController 取消
-- 超时和限流重试
-- 友好错误提示
-- JSON 解析失败后的修复尝试
-- 长耗时操作进度反馈
-
-P0 已新增可选后端代理层：`POST /api/ai/chat`。本地模式仍可直连 OpenAI 兼容接口；云端模式下，组织 API Key 在后端加密存储，AI 请求经后端代理并记录用量和审计。
-
-P1 第一轮已补充：
-
-- 生产环境强密钥和 CORS 校验。
-- JSON Store / PostgreSQL Store 抽象，PostgreSQL 迁移草案位于 `server/migrations/001_initial.sql`。
-- 组织成员邀请接口和前端团队协作入口。
-- 文档与执笔人云端 `version`，用于冲突检测。
-- AI 请求超时和任务类型统计。
-- `free/pro/team` 套餐配额读取。
-
-P1 第二轮和第三轮已补充：
-
-- 邮箱验证、密码重置、登录失败节流和退出所有设备。
-- PostgreSQL Store、迁移执行和 JSON 导入脚本。
-- 邀请撤销、邀请重发、成员角色调整和成员移除。
-- `/api/ready`、结构化请求日志、最近错误接口和 Dockerfile。
-- 云端数据导出、账号删除、隐私政策草案、用户协议草案和灰度试用清单。
-- 用量/审计过滤、套餐摘要、支付 webhook 占位和内测反馈入口。
-
-P2 第一轮已补充：
-
-- 邮件投递适配层，生产环境必须通过 HTTP webhook 邮件服务发送验证和重置邮件。
-- `email_deliveries` 投递记录，保存邮件状态、重试次数和错误。
-- 支付 webhook HMAC 签名、timestamp 校验、幂等处理和套餐变更。
-- `GET /api/admin/dashboard` 管理汇总接口，以及前端“管理汇总”入口。
-- `npm run server:backup` 逻辑备份脚本。
-
-P2 第二轮已补充：
-
-- 云端管理后台二级页面，用于查看组织、成员、邀请、用量、审计、反馈、错误和账单事件。
-- 邮件模板集中生成和验证码/重置码申请限流。
-- 支付事件适配层，区分套餐变更、取消订阅、支付失败和退款。
-- 反馈状态流转。
-- 组织级数据导出和组织删除/停用草案。
-- `npm run server:backup:verify -- <backup-file>` 备份结构校验脚本。
-
-P2 第三轮已补充：
-
-- 邮件 webhook 请求体、模板字段和投递失败处理建议文档化。
-- 支付事件增加渠道价格 ID 到内部套餐的 `PAYMENT_PLAN_PRICE_MAP` 映射，配置映射后不再信任 webhook 里的原始 `plan` 字段。
-- 备份脚本失败时返回非 0 退出码，并支持 `BACKUP_FAILURE_WEBHOOK_URL` 告警。
-- 管理后台增加反馈状态筛选、用量/审计 CSV 导出、最近错误和账单事件详情复制。
-- 新增 PostgreSQL 表级 repository 拆分方案，为 P3 生产级存储改造做准备。
-
-P2 第四轮阶段 A/B 已补充：
-
-- `POST /api/billing/checkout`，由后端创建套餐升级入口，前端不直接拼接支付链接。
-- 云端面板“账单与套餐”区域，展示当前套餐、额度、今日用量、账单事件和升级入口。
-- `POST /api/webhooks/email`，通过 `EMAIL_CALLBACK_TOKEN` 接收邮件服务商投递状态回调。
-- 管理后台“邮件投递”区域，支持邮箱、模板、状态筛选和复制详情。
-
-P2 第四轮阶段 C 已补充：
-
-- `#admin` 独立管理后台视图，保留旧管理弹窗作为兼容基础。
-- 管理后台拆分为概览、成员、用量、审计、反馈、邮件、账单和错误栏目。
-- 管理后台 hash 路由具备登录态和 owner/admin/operator 权限守卫。
-
-后续增强已补充：
-
-- 新增 `admin.html` 独立后台页，主工作台“管理后台”入口会跳转到该页面。
-- `src/admin/adminPage.js` 直接调用云端 API，支持登录、刷新、分栏查看、组织名称更新、成员邀请/重发/撤销、成员角色调整、组织接口密钥保存/删除、套餐升级入口、用量摘要、审计摘要、反馈批处理、错误级别筛选、统一二次确认、导出组织数据、导出用量/审计 CSV 和创建组织删除草案；`operator` 角色只能查看运营数据和保存个人后台偏好，写操作仍限定 owner/admin。
-- 旧 `#admin` hash 视图保留，作为兼容入口。
-
-P2 第四轮阶段 D 已补充：
-
-- PostgreSQL 迁移执行器，按 `server/migrations/*.sql` 顺序执行并记录 `migration_versions`。
-- `migration_versions` 独立于兼容快照表，不参与 `PostgresStore.saveAllWithClient` 的整库写回。
-- `ai_usage` 只读 repository，作为表级 repository 改造试点。
-- `GET /api/usage/history` 在 PostgreSQL Store 下可走 repository，JSON Store 行为保持不变。
-
-P2 第四轮阶段 E 已补充：
-
-- `server:backup` 支持 `BACKUP_ENCRYPTION_KEY`，配置后输出 AES-256-GCM 加密的 `.json.gcm` 备份。
-- `server:backup:verify` 可识别明文 JSON 和加密备份；加密备份必须提供同一备份密钥才能做只读结构校验。
-- 新增 S3-compatible 对象存储上传适配器，默认关闭，配置后使用 AWS Signature V4 上传本地备份副本。
-- 未配置加密和对象存储时，原本地明文备份路径保持不变。
-
-P2 第五轮阶段 A 已补充：
-
-- `EMAIL_PROVIDER` 支持 `generic-webhook` 和 `resend` 两种邮件发送路径。
-- Resend 适配器会直接调用 Email API，并把服务商返回的 `id` 写入投递记录 `metadata.message_id`。
-- 邮件回调可识别 Resend 风格的事件名、`data.tags`、`data.email_id` 和退信错误字段。
-- 部署文档补充了 `email_verification`、`password_reset` 模板变量、回调映射和运营处理建议。
-
-P2 第五轮阶段 C 已补充：
-
-- `audit_logs` 只读 repository，`GET /api/audit` 在 PostgreSQL Store 下优先走表级查询。
-- `documents` 分页只读 repository，`GET /api/documents` 在 PostgreSQL Store 下优先走表级查询，并返回可选 `page_info`。
-- `admin_preferences` 表级 repository，后台偏好读取、保存和清空在 PostgreSQL Store 下走独立事务，并与旧快照写队列共享 advisory lock。
-- `ops_triage` 表级 repository，AI 失败记录的后台跟进映射在 PostgreSQL Store 下走独立 upsert，并在同一事务写审计日志。
-- `feedback` 表级 repository，`user.feedback` 创建、单条状态流转和批量处理在 PostgreSQL Store 下走 `system_events` 表级事务，并在同一事务写处理审计。
-- `system_events` 系统错误事件跟进 repository，后台最近错误里的 warn/error 事件可在 PostgreSQL Store 下直接更新 metadata，并在同一事务写 `ops.error.triage` 审计。
-- `system_events` 插入 repository，HTTP 500 归档、AI 代理失败和支付 checkout 配置告警等独立运营事件可在 PostgreSQL Store 下直接插入，不再触发整库快照写回。
-- `writer_profiles`/`writer_versions` 表级 repository，执笔人创建、更新、软删除、版本列表和版本恢复在 PostgreSQL Store 下走独立事务，并保持版本快照和审计日志同事务写入。
-- `ai_usage` 表级写入 repository，AI 调用用量记录与 `ai.chat` 审计日志在 PostgreSQL Store 下同事务插入；AI 超额调用的额度扣减走 `credit_accounts`/`credit_ledger` repository，并在同事务写入扣减审计。
-- `manual_payment_orders` 表级 repository，人工充值订单创建、审核、额度入账和会员开通在 PostgreSQL Store 下走独立事务，并与审计、系统事件保持同事务写入。
-- JSON Store 与 PostgreSQL Store 的兼容 `write()` 都在草稿副本上执行 mutator，成功保存/提交后才刷新内存快照；PostgreSQL Store 的表级 `repositoryWrite()` 也在 commit 成功后才刷新快照，避免失败事务污染后续读写。
-- Repository 测试覆盖组织隔离、limit、筛选、游标分页、JSON/日期归一和迁移版本跳过重复执行。
-
-仍需继续完成真实支付服务商 SDK、备份恢复演练、剩余系统事件写入 repository 评估、真实 PostgreSQL 集成测试和企业部署增强。
-
-## PPT 链路
-
-PPT 生成分为两层：
-
-1. HTML 预览：用于快速查看内容结构和视觉方向。
-2. 原生 `.pptx`：使用 `pptxgenjs` 生成可编辑文件。
-
-素材可以来自提示词、左侧文档、Word、PPTX 或拖拽文件。页数可以手动指定，也可以根据内容自动估算。
-
-## 响应式与可访问性
-
-当前布局策略：
-
-- 桌面：左文档栏 + 中编辑区 + 右工具区
-- 中等屏幕：右侧工具区可折叠
-- 小屏幕：文档、编辑、工具切换为单屏视图
-
-已补充的键盘能力：
-
-- 文档列表上下选择和回车打开
-- 编辑器右键菜单方向键导航和 Esc 关闭
-- PPT 放大预览焦点陷阱
-
-## 测试
-
-命令：
-
-```bash
-npm run build
-npm run check
-npm test
-npm run test:e2e
-```
-
-当前覆盖：
-
-- 前端与核心单元测试：315 项
-- 后端服务与 repository 测试：139 项
-- 端到端测试：32 项
-
-重点测试对象：
-
-- 文档拖拽路由
-- 执笔人解析和构建
-- 执笔人导入导出
-- AI 重试与取消
-- PPT 原生导出
-- 垃圾箱恢复
-- 响应式和关键交互
-- 文档编辑快捷键保存与撤销
-- 页面 DOM ID 与脚本绑定契约
-- 工作区备份恢复与敏感配置排除
-- Office 压缩包条目数、声明体积和 XML 单项体积边界
-- 临时认证与限流数据保留策略
-
-## 后台运营闭环
-
-独立后台 `admin.html` 直接调用商业化 API，不依赖主工作台 DOM。当前后台运营链路包括：
-
-- 用量：`ai_usage` 记录任务类型、token、状态和后端统一估算成本；`AI_COST_RATES` 可按 provider/model 配置价格。
-- 错误：`system_events` 保存组织归属的系统事件；后台可直接更新 warn/error 事件 metadata 保存跟进状态；HTTP 500、AI 代理失败和支付 checkout 配置告警等独立事件可直接表级插入；`ai_usage` 失败记录通过 `ops_triage` 保存跟进状态，避免污染原始用量事实；PostgreSQL Store 下系统错误和 AI 失败跟进均已走表级 repository 写入。
-- 反馈：`user.feedback` 仍保存在 `system_events`，单条和批量状态流转都会写审计；PostgreSQL Store 下反馈创建和状态流转已走表级 repository 写入。
-- 偏好：`admin_preferences` 保存后台审计筛选、错误筛选和反馈筛选，按 `organization_id + user_id` 隔离；PostgreSQL Store 下已走表级 repository 写入。
-- 权限：owner/admin 可管理后台数据，operator 为运营只读角色；组织后台只返回当前组织事件，平台级 `organization_id === null` 事件预留给未来平台管理后台。
-
-## 当前技术债
-
-仍建议优先处理：
-
-- **P0：完成 PostgreSQL 增量化。** 当前请求前刷新快照、跨进程 advisory lock 和事务回滚保证了兼容路径的正确性，但通用 `store.write()` 仍会读取并删除重写整库；数据量和实例数增长后延迟与锁竞争不可接受。上线多人高并发前，应把剩余路由迁移到表级 repository，并取消请求级全库 `loadAll()`。
-- **P0：把 AI 超额额度改为原子预留。** 当前日额度会先预留，但购买额度仍在模型成功后扣减；并发余额变化时可能出现模型已调用、响应却因扣款失败被拒绝。应在调用前原子冻结 1 点，失败退款，成功结算。
-- **P0：增加真实 PostgreSQL 与真实部署集成验收。** 当前 repository 测试主要使用可控 client；仍需在 CI 或预发布环境执行迁移、并发写、备份恢复、跨域 Cookie、邮件和 AI 调用冒烟测试。
-- **P1：继续拆分大模块。** `server/src/app.js`、`src/admin/adminPage.js`、`app.js` 仍承担过多装配职责；按认证、账单、运营、同步边界渐进抽取，不做一次性重写。
-- **P1：降低前端首包。** 当前 bundle 约 1.9 MB，Word/PPT 解析与生成依赖可考虑按需加载；需要同时保留 `file://` 和静态发布兼容。
-- **P1：收敛样式层。** 工作台已迁移到单一的 `workbench.css`；独立后台仍使用 `styles.css` 与 `ui-refresh.css` 的历史覆盖层，后续应迁移到同一套 token。
-- 给执笔人版本差异增加更清晰的可视化对比，并继续增强本地隐私预检。
+运行约束见 [SECURITY.md](SECURITY.md)，当前待办见 [TODO.md](TODO.md)，性能数据见 [PERFORMANCE.md](PERFORMANCE.md)。
